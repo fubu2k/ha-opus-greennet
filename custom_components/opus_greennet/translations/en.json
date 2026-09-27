@@ -15,8 +15,7 @@
     "error": {
       "cannot_connect": "Failed to connect to the MQTT broker",
       "invalid_eag_id": "The EAG identifier must contain exactly eight hexadecimal characters",
-      "unknown": "Unexpected error",
-      "gateway_unavailable": "The MQTT broker is connected, but the bridge did not respond. Check its identifier and the MQTT bridge connection."
+      "unknown": "Unexpected error"
     },
     "abort": {
       "already_configured": "This bridge is already configured",
@@ -45,6 +44,18 @@
       },
       "window": {
         "name": "Window"
+      },
+      "motion": {
+        "name": "Motion"
+      },
+      "smoke_alarm": {
+        "name": "Smoke alarm"
+      },
+      "battery_low": {
+        "name": "Battery low"
+      },
+      "mechanics_fault": {
+        "name": "Mechanics fault"
       }
     },
     "cover": {
@@ -55,6 +66,11 @@
     "light": {
       "channel": {
         "name": "Channel {channel}"
+      }
+    },
+    "lock": {
+      "window_handle_lock": {
+        "name": "AutoLock"
       }
     },
     "sensor": {
@@ -69,6 +85,30 @@
       },
       "signal_strength": {
         "name": "Signal strength"
+      },
+      "illuminance": {
+        "name": "Illuminance"
+      },
+      "supply_voltage": {
+        "name": "Supply voltage"
+      },
+      "battery_level": {
+        "name": "Battery level"
+      },
+      "handle_state": {
+        "name": "Handle state",
+        "state": {
+          "closed": "Closed",
+          "open": "Open",
+          "tilt": "Tilted"
+        }
+      },
+      "unlock_request": {
+        "name": "Unlock request",
+        "state": {
+          "notRequested": "Not requested",
+          "requested": "Requested"
+        }
       }
     },
     "switch": {
@@ -113,6 +153,12 @@
     },
     "request_cancelled": {
       "message": "The request was cancelled because the integration is unloading or its connection was lost."
+    }
+  },
+  "issues": {
+    "system_info_unsupported": {
+      "title": "Gateway system info not available",
+      "description": "The OPUS gateway {eag_id} did not answer a request for its system information (model, firmware). This is diagnostic-only and does not affect device control or discovery. If you want this metadata in diagnostics, check that your Mosquitto bridge relays `get/config/system/info` and `getAnswer/config/system/info` for this gateway. This issue can be dismissed."
     }
   },
   "services": {

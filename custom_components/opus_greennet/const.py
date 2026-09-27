@@ -1,4 +1,18 @@
-"""Constants for the Opus GreenNet Bridge integration."""
+"""Constants for the Opus GreenNet Bridge integration.
+
+Base: kegelmeier/ha-opus-greennet v0.3.3b0 + ported devices (HOPPE window
+handles, Jaeger Direkt RWM, OPUS SMS presence sensor).
+
+HOPPE AutoLock write path (D2-06-40)
+--------------------------------------
+Writing to the gateway for permission control has been PERMANENTLY DISABLED.
+Verified 2026-09-23/24: every attempted MQTT write (targetState/0/key|value)
+destabilised the OPUS-IQ-DOT Mosquitto bridge connection.  The lock entity is
+kept for read-only status display only.  All write-side constants previously
+defined here (TOPIC_WINDOW_HANDLE_TARGET_KEY, TOPIC_WINDOW_HANDLE_TARGET_VALUE,
+KEY_HANDLE_TARGET, LOCK_COMMAND_ALLOWED, LOCK_COMMAND_NOT_ALLOWED) have been
+removed so that no future code can accidentally use them.
+"""
 
 from __future__ import annotations
 
@@ -42,33 +56,21 @@ TOPIC_GET_DEVICE_PARAMETERS: Final = (
 TOPIC_GET_ANSWER_DEVICE_PARAMETERS: Final = (
     "{base}/{eag_id}/getAnswer/devices/{device_id}/parameters"
 )
-TOPIC_GET_LINK_TABLES: Final = "{base}/{eag_id}/get/devices/{device_id}/linkTables"
-TOPIC_GET_ANSWER_LINK_TABLES: Final = (
-    "{base}/{eag_id}/getAnswer/devices/{device_id}/linkTables"
-)
-TOPIC_PUT_LINK_TABLES: Final = "{base}/{eag_id}/put/devices/{device_id}/linkTables"
-TOPIC_PUT_ANSWER_LINK_TABLES: Final = (
-    "{base}/{eag_id}/putAnswer/devices/{device_id}/linkTables"
-)
 
-# Gateway system info topics
-TOPIC_GET_SYSTEM_INFO: Final = "{base}/{eag_id}/get/config/system/info"
-TOPIC_GET_ANSWER_SYSTEM_INFO: Final = "{base}/{eag_id}/getAnswer/config/system/info"
+# Gateway system topics – uptime is the ONLY supported health-check endpoint.
+# get/config/system/info is NOT supported by this gateway firmware and must
+# not be used (causes a guaranteed 10 s timeout on every probe cycle).
 TOPIC_GET_SYSTEM_UPTIME: Final = "{base}/{eag_id}/get/config/system/uptime"
 TOPIC_GET_ANSWER_SYSTEM_UPTIME: Final = "{base}/{eag_id}/getAnswer/config/system/uptime"
 
 # Subscription patterns (with wildcards)
-TOPIC_SUB_TELEGRAM_FROM: Final = "{base}/{eag_id}/stream/telegram/+/from"
 TOPIC_SUB_TELEGRAM_FROM_ALL: Final = "{base}/{eag_id}/stream/telegram/#"
-TOPIC_SUB_TELEGRAM_TO: Final = "{base}/{eag_id}/stream/telegram/+/to"
-TOPIC_SUB_DEVICE: Final = "{base}/{eag_id}/stream/device/+"
 TOPIC_SUB_DEVICE_STREAM_ALL: Final = "{base}/{eag_id}/stream/device/#"
-TOPIC_SUB_DEVICES: Final = "{base}/{eag_id}/stream/devices/+"
 TOPIC_SUB_DEVICES_ALL: Final = "{base}/{eag_id}/stream/devices/#"
-TOPIC_SUB_GET_ANSWER: Final = "{base}/{eag_id}/getAnswer/devices/+"
 
-# EEP (EnOcean Equipment Profile) to entity type mappings
-# Format: EEP prefix -> (entity_type, description)
+EEP_HOPPE_AUTOLOCK: Final = "D2-06-40"
+
+# EEP (EnOcean Equipment Profile) to primary entity type mapping.
 EEP_MAPPINGS: Final = {
     # Electronic Switch Actuators (D2-01-xx)
     "D2-01-00": ("switch", "Electronic Switch Actuator, 1 Channel"),
@@ -101,15 +103,21 @@ EEP_MAPPINGS: Final = {
     # Lighting Control (A5-38-xx)
     "A5-38-08": ("light", "Gateway Dimming"),
     "A5-38-09": ("light", "Gateway Switching"),
-    # Rocker Switch (F6-02-xx) - typically used as triggers
+    # Rocker Switch (F6-02-xx / F6-03-xx) - typically used as triggers
     "F6-02-01": ("event", "Rocker Switch, 2 Rocker"),
     "F6-02-02": ("event", "Rocker Switch, 2 Rocker"),
     "F6-02-03": ("event", "Rocker Switch, 2 Rocker"),
-    # 4-Button Switch (F6-03-xx)
     "F6-03-01": ("event", "Rocker Switch, 4 Rocker"),
     "F6-03-02": ("event", "Rocker Switch, 4 Rocker"),
     # Liquid Leakage Sensor (F6-05-01)
     "F6-05-01": ("binary_sensor", "Liquid Leakage Sensor"),
+    # --- Ported devices ------------------------------------------------
+    # HOPPE AutoLock: primary platform is "lock" (read-only status display)
+    "D2-06-40": ("lock", "HOPPE Smart Window Handle (AutoLock)"),
+    "F6-10-00": ("sensor", "HOPPE Window Handle"),
+    "D2-03-10": ("sensor", "HOPPE Window Handle"),
+    "F6-05-02": ("binary_sensor", "Jaeger Direkt Smoke Detector (RWM)"),
+    "A5-07-03": ("binary_sensor", "OPUS SMS Presence Detector"),
 }
 
 # Entity type to platform mapping
@@ -120,6 +128,8 @@ ENTITY_PLATFORMS: Final = {
     "climate": "climate",
     "binary_sensor": "binary_sensor",
     "event": "event",
+    "lock": "lock",
+    "sensor": "sensor",
 }
 
 # Function keys used in EnOcean telegrams
@@ -133,6 +143,8 @@ KEY_LOCAL_CONTROL: Final = "localControl"
 KEY_ENERGY: Final = "energy"
 KEY_POWER: Final = "power"
 KEY_LIQUID_DETECTED: Final = "liquidDetected"
+KEY_QUERY: Final = "query"
+KEY_STOP: Final = "stop"
 
 # Climate function keys
 KEY_TEMPERATURE: Final = "temperature"
@@ -146,7 +158,6 @@ KEY_THERMAL_MODE: Final = "thermalMode"
 KEY_ENERGY_CONSUMPTION: Final = "energyConsumption"
 KEY_POWER_STATE: Final = "powerState"
 KEY_TEMPERATURE_ORIGIN: Final = "temperatureOrigin"
-KEY_QUERY: Final = "query"
 
 # Climate error/warning keys
 KEY_ACTUATOR_DEACTIVATED: Final = "actuatorDeactivated"
@@ -154,6 +165,22 @@ KEY_ACTUATOR_LOW_BATTERY: Final = "actuatorLowBattery"
 KEY_ACTUATOR_NOT_RESPONDING: Final = "actuatorNotResponding"
 KEY_MISSING_TEMPERATURE: Final = "missingTemperature"
 KEY_CIRCUIT_IN_USE: Final = "circuitInUse"
+
+# --- OPUS SMS Anwesenheit (A5-07-03) ---------------------------------------
+KEY_MOTION_DETECTED: Final = "motionDetected"
+KEY_ILLUMINATION: Final = "illumination"
+KEY_SUPPLY_VOLTAGE: Final = "supplyVoltage"
+KEY_BATTERY_LEVEL: Final = "batteryLevel"
+
+# --- HOPPE window handle status keys (CMD 1, all D2-06-40/F6-10-00/D2-03-10) -
+KEY_HANDLE: Final = "handle"
+KEY_MECHANICS: Final = "mechanics"
+KEY_LOCK: Final = "lock"
+KEY_UNLOCK: Final = "unlock"
+
+# --- Jaeger Direkt RWM (F6-05-02) ------------------------------------------
+KEY_ALARM: Final = "alarm"
+KEY_BATTERY_LOW: Final = "batteryLow"
 
 # Rocker switch button keys (F6-02-xx / F6-03-xx profiles)
 BUTTON_KEYS: Final = (
@@ -170,11 +197,6 @@ BUTTON_VALUE_RELEASED: Final = "released"
 STATE_ON: Final = "on"
 STATE_OFF: Final = "off"
 
-# Cover states
-COVER_OPEN: Final = "open"
-COVER_CLOSED: Final = "closed"
-COVER_STOP: Final = "stop"
-
 # Climate heater mode values
 HEATER_MODE_HEATING: Final = "heating"
 HEATER_MODE_ON: Final = "on"
@@ -183,10 +205,21 @@ HEATER_MODE_AUTO_OFF: Final = "autoOff"
 HEATER_MODE_CONFIG_INCOMPLETE: Final = "configIncomplete"
 HEATER_MODE_ERROR: Final = "error"
 
+# HOPPE window handle reported states
+HANDLE_CLOSED: Final = "closed"
+HANDLE_OPEN: Final = "open"
+HANDLE_TILT: Final = "tilt"
+MECHANICS_OK: Final = "ok"
+MECHANICS_ERROR: Final = "error"
+LOCK_LOCKED: Final = "locked"
+LOCK_UNLOCKED: Final = "unlocked"
+UNLOCK_NOT_REQUESTED: Final = "notRequested"
+UNLOCK_REQUESTED: Final = "requested"
+
 # Default values
 DEFAULT_CHANNEL: Final = 0
 
-# All known state keys for initial state application
+# All known state keys for initial state application / fast-path parsing.
 KNOWN_STATE_KEYS: Final = frozenset(
     {
         "switch",
@@ -194,6 +227,7 @@ KNOWN_STATE_KEYS: Final = frozenset(
         "position",
         "angle",
         KEY_ROTATION_TIME,
+        KEY_STOP,
         "localControl",
         "energy",
         "power",
@@ -214,6 +248,21 @@ KNOWN_STATE_KEYS: Final = frozenset(
         "actuatorNotResponding",
         "missingTemperature",
         "circuitInUse",
+        KEY_MOTION_DETECTED,
+        KEY_ILLUMINATION,
+        KEY_SUPPLY_VOLTAGE,
+        KEY_BATTERY_LEVEL,
+        KEY_HANDLE,
+        KEY_MECHANICS,
+        KEY_LOCK,
+        KEY_UNLOCK,
+        KEY_ALARM,
+        KEY_BATTERY_LOW,
         *BUTTON_KEYS,
     }
 )
+
+# Top-level indexed containers the OPUS gateway uses for flat key/value
+# fragment pairs, e.g. ".../states/0/key" + ".../states/0/value" or
+# ".../transmitModes/0/key" + ".../transmitModes/0/value".
+INDEXED_STATE_CONTAINERS: Final = ("states", "transmitModes")
