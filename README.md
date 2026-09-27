@@ -373,12 +373,12 @@ Released under the [MIT License](LICENSE).
 <!-- badges -->
 [hacs]: https://hacs.xyz
 [hacs-shield]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge
-[releases]: https://github.com/kegelmeier/ha-opus-greennet/releases
+[releases]: [[https://github.com/fubu2k/ha-opus-greennet/releases]
 [release-shield]: https://img.shields.io/github/v/release/kegelmeier/ha-opus-greennet?style=for-the-badge
 [license]: https://github.com/kegelmeier/ha-opus-greennet/blob/main/LICENSE
 [license-shield]: https://img.shields.io/github/license/kegelmeier/ha-opus-greennet?style=for-the-badge
 [ha-shield]: https://img.shields.io/badge/Home%20Assistant-2026.8%2B-41BDF5.svg?style=for-the-badge&logo=home-assistant&logoColor=white
-[hacs-repo]: https://my.home-assistant.io/redirect/hacs_repository/?owner=kegelmeier&repository=ha-opus-greennet&category=integration
+[hacs-repo]: https://my.home-assistant.io/redirect/hacs_repository/?owner=fubu2k&repository=ha-opus-greennet&category=integration
 [hacs-repo-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
 [config-flow]: https://my.home-assistant.io/redirect/config_flow_start/?domain=opus_greennet
 [config-flow-badge]: https://my.home-assistant.io/badges/config_flow_start.svg
