@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+[0.3.4] - 2026-09-27
+First independently versioned release of this fork, based on kegelmeier/ha-opus-greennet.
+
+Fixed
+Gateway health probe compatibility: Replaced the unsupported get/config/system/info probe with get/config/system/uptime, which is supported by OPUS-IQ-DOT firmware version 1.21 and newer. This removes the previous 10-second timeout warning during every Home Assistant startup.
+
+HOPPE AutoLock writeback: async_lock() and async_unlock() now immediately raise a HomeAssistantError. The integration no longer pretends to change the lock state locally when the HOPPE AutoLock device cannot receive an MQTT write command.
+
+Added
+D2-06-40 HOPPE window handle with AutoLock: Adds a read-only lock entity, handle_state and unlock_request sensors, plus a mechanics_fault binary sensor.
+
+F6-10-00 and D2-03-10 passive HOPPE window handles: Adds a handle_state sensor.
+
+F6-05-02 Jaeger Direkt / OPUS smoke detector RWM: Adds smoke_alarm and battery_low binary sensors.
+
+A5-07-03 Jaeger Direkt / OPUS SMS presence sensor: Adds a motion binary sensor plus illuminance, supply_voltage, and battery_level sensors.
+
+Changed
+Fork release versioning: This is the first independently versioned release of the fubu2k/ha-opus-greennet fork.
+
+Minimum Home Assistant version: Home Assistant 2026.8 or newer is required.
+
+Pull Requests
+1 — Fix HOPPE read-only writeback and replace the /info health probe with /uptime.
+
+2 — Add new device support and include the HOPPE AutoLock and uptime-probe fixes.
+
 ## [0.3.3b0] - 2026-09-11
 
 Beta release for physical-device testing. Existing entity IDs and rocker event names are preserved.
