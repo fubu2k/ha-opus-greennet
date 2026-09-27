@@ -116,7 +116,7 @@ IS_COSITHERM_AREA: Final[Predicate] = _eeps("D1-4B-06")
 # Ported device families
 # ---------------------------------------------------------------------------
 
-IS_SMS_PRESENCE: Final[Predicate] = _eeps("A5-07-03")
+IS_SMS_PRESENCE: Final[Predicate] = _eeps("A5-07-01", "A5-07-03")
 IS_SMOKE_DETECTOR: Final[Predicate] = _eeps("F6-05-02")
 HOPPE_ALL_VARIANTS: Final[Predicate] = _eeps("D2-06-40", "F6-10-00", "D2-03-10")
 HOPPE_AUTOLOCK_ONLY: Final[Predicate] = _eeps("D2-06-40")

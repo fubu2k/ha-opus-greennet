@@ -117,6 +117,7 @@ EEP_MAPPINGS: Final = {
     "F6-10-00": ("sensor", "HOPPE Window Handle"),
     "D2-03-10": ("sensor", "HOPPE Window Handle"),
     "F6-05-02": ("binary_sensor", "Jaeger Direkt Smoke Detector (RWM)"),
+    "A5-07-01": ("binary_sensor", "OPUS SMS Presence Detector"),
     "A5-07-03": ("binary_sensor", "OPUS SMS Presence Detector"),
 }
 
