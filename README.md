@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/kegelmeier/ha-opus-greennet/main/custom_components/opus_greennet/brand/logo.png" alt="Opus GreenNet Bridge" width="180">
+<img src="https://raw.githubusercontent.com/fubu2k/ha-opus-greennet/tree/main/custom_components/opus_greennet/brand/logo.png" alt="Opus GreenNet Bridge" width="180">
 
 # Opus GreenNet Bridge
 
