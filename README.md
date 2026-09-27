@@ -1,384 +1,62 @@
-<div align="center">
+# OPUS GreenNet for Home Assistant
 
-<img src="https://raw.githubusercontent.com/kegelmeier/ha-opus-greennet/main/custom_components/opus_greennet/brand/logo.png" alt="Opus GreenNet Bridge" width="180">
+> **This repository is an independent fork of [kegelmeier/ha-opus-greennet](https://github.com/kegelmeier/ha-opus-greennet).**
+>
+> The upstream project was created and is maintained by [@kegelmeier](https://github.com/kegelmeier). This fork adds independently maintained device support and fixes. Please see the [LICENSE](LICENSE) file for the applicable license terms; the upstream copyright and license notices are retained.
 
-# Opus GreenNet Bridge
+A Home Assistant custom integration for OPUS GreenNet / OPUS IQ devices.
 
-Home Assistant integration for the **Opus GreenNet Bridge**, controlling
-**EnOcean** devices via MQTT following the EnOcean over IP specification.
+## Requirements
 
-[![HACS Custom][hacs-shield]][hacs]
-[![GitHub Release][release-shield]][releases]
-[![License][license-shield]][license]
-![HA Min Version][ha-shield]
-
-[![Open in HACS][hacs-repo-badge]][hacs-repo]
-
-</div>
-
-A custom Home Assistant integration for the Opus GreenNet Bridge, enabling control of EnOcean devices via MQTT following the EnOcean over IP specification.
-
-## Features
-
-- **Auto-discovery**: Automatically discovers EnOcean devices connected to your Opus GreenNet Bridge
-- **Real-time updates**: Receives state changes via MQTT push notifications, including device deltas, local-control telegrams, and bridge-originated command telegrams
-- **Connection recovery**: Checks that the gateway responds, marks entities unavailable during outages, and refreshes discovery and state after reconnection
-- **Command feedback**: Waits for gateway acknowledgements, reports rejected or timed-out commands, and follows accepted commands with channel-specific status checks
-- **Bidirectional control**: Send commands to actuators (lights, switches, covers, thermostats)
-- **Climate control**: HeatArea thermostat support for Valve, CosiTherm, and Electro Heating areas
-- **Sensors**: Humidity, temperature, power consumption, and signal strength monitoring
-- **Binary sensors**: Water leak detection, window open detection, actuator error states, battery monitoring
-- **Events**: Per-button rocker switch press/release events (`buttonA0`, `buttonAI`, `buttonB0`, `buttonBI`, `multipleButtons`)
-- **Device services**: ReCom API access for advanced device configuration and diagnostics
-- **UI Configuration**: Set up via Home Assistant's Integrations page
-
-## Supported Device Types
-
-| Entity Type | EEP Profiles | Description |
-|-------------|--------------|-------------|
-| **Light** | D2-01-02, D2-01-03, D2-01-06, D2-01-07, D2-01-0A, D2-01-0B, D2-01-0F, D2-01-10, D2-01-12, A5-38-08, A5-38-09 | Dimmable lights and gateway switching |
-| **Switch** | D2-01-00, D2-01-01, D2-01-04, D2-01-05, D2-01-08, D2-01-09, D2-01-0C, D2-01-0D, D2-01-0E, D2-01-11 | On/Off switches and actuators |
-| **Cover** | D2-05-00, D2-05-01, D2-05-02 | Blinds, shades, and shutters |
-| **Climate** | D1-4B-05, D1-4B-06, D1-4B-07 | OPUS HeatArea thermostats (Valve, CosiTherm, Electro Heating) |
-| **Sensor** | _(from climate devices)_ | Humidity, feed temperature, power consumption, signal strength |
-| **Binary Sensor** | F6-05-01, _(from climate devices)_ | Water leak detection, window open, actuator errors, battery low |
-| **Event** | F6-02-01, F6-02-02, F6-02-03, F6-03-01, F6-03-02 | Rocker switch press/release events, per button (`buttonA0_pressed`, `buttonA0_released`, …, `multipleButtons_released`) with `button` and `action` event attributes |
-
-Cover tilt controls are hidden when the bridge reports `rotationTime` as `0` or
-`noRotation`, as used for plain roller shutters. The integration uses the existing
-device discovery and state updates, without extra configuration queries. When no
-valid rotation time is available, tilt support follows the device's EEP profile.
-
-## Prerequisites
-
-1. **Home Assistant** with MQTT integration configured (e.g., Mosquitto add-on)
-2. **Opus GreenNet Bridge** with its built-in MQTT broker
-3. **EnOcean devices** paired with your bridge
-4. **MQTT Bridge** configured between your HA broker and the Opus GreenNet broker (see below)
-
-## MQTT Bridge Setup (Required)
-
-The Opus GreenNet Bridge runs its own MQTT broker. To connect it to Home Assistant, you need to configure an MQTT bridge on your Home Assistant MQTT broker (e.g., Mosquitto).
-
-### For Mosquitto Add-on
-
-1. In Home Assistant, go to **Settings** → **Add-ons** → **Mosquitto broker** → **Configuration**
-
-2. Add the following to the **Customize** section (or edit the Mosquitto config directly):
-
-   Create a file `/share/mosquitto/opus_bridge.conf` with:
-
-   ```
-   connection opus_greennet_<EAG-ID>
-   address <OPUS_BRIDGE_IP>:1883
-   bridge_protocol_version mqttv311
-   remote_username <username>
-   remote_password <password>
-   cleansession true
-   keepalive_interval 15
-   restart_timeout 5 30
-   bridge_outgoing_retain false
-   notifications true
-   notifications_local_only true
-   notification_topic opus_greennet/<EAG-ID>/bridge/status
-
-   topic EnOcean/<EAG-ID>/stream/# in 1
-   topic EnOcean/<EAG-ID>/getAnswer/# in 1
-   topic EnOcean/<EAG-ID>/putAnswer/# in 1
-   topic EnOcean/<EAG-ID>/get/# out 0
-   topic EnOcean/<EAG-ID>/put/# out 0
-   ```
-
-   Replace:
-   - `<OPUS_BRIDGE_IP>` with your Opus GreenNet Bridge's IP address
-   - `<EAG-ID>` with its eight-character uppercase identifier, in every occurrence
-   - `<username>`: `admin`
-   - `<password>`: Your gateway's EURID in uppercase (e.g., `050B4DFA`)
-
-3. Reference this config file in the Mosquitto add-on configuration:
-
-   ```yaml
-   customize:
-     active: true
-     folder: mosquitto
-   ```
-
-4. Restart the Mosquitto add-on
-
-### For Standalone Mosquitto
-
-Use the same connection block above in your `mosquitto.conf`, including the
-credentials, topic directions, and notification topic.
-
-### Updating an existing MQTT bridge
-
-Replace the old `topic EnOcean/# both 1` rule with the scoped rules above; do not
-leave both configurations enabled. Each gateway needs its own connection name
-and topic identifier.
-
-`in` carries OPUS updates to your local broker; `out` carries requests to OPUS.
-Outbound QoS 0 avoids building a persistent command backlog with Mosquitto's
-default `queue_qos0_messages false`. A lost request produces an action timeout;
-commands are not automatically retried. Keep that broker default when using this
-configuration. `retain=False` alone does not prevent queued QoS 1 commands.
-Previously retained commands or an existing queue are not purged by changing
-these rules; inspect and clear any obsolete command messages separately before
-reconnecting the bridge.
-
-The optional notification topic reports `1` for a connected bridge and `0` for a
-disconnected bridge. The integration listens to it for prompt availability
-updates. Existing configurations without this topic continue to use periodic
-gateway health checks. See the [Mosquitto bridge documentation](https://mosquitto.org/man/mosquitto-conf-5.html)
-for connection, notification, and queue settings.
-
-### Verify the Bridge
-
-Use an MQTT client (like MQTT Explorer) connected to your HA broker to verify you can see topics like:
-```
-EnOcean/<EAG-ID>/stream/telegram/#
-```
-
-If you see messages when triggering EnOcean devices, the bridge is working.
+- Home Assistant **2026.8 or newer**
+- An OPUS-IQ-DOT gateway
+- For the gateway health check introduced in v0.3.4: OPUS-IQ-DOT firmware **v1.21 or newer**
 
 ## Installation
 
-### HACS (Recommended)
+1. In Home Assistant, open HACS.
+2. Select **Integrations** and open the three-dot menu.
+3. Choose **Custom repositories**.
+4. Add `https://github.com/fubu2k/ha-opus-greennet` as an **Integration** repository.
+5. Search for **OPUS GreenNet** in HACS and install it.
+6. Restart Home Assistant.
+7. Add the integration via **Settings → Devices & services → Add integration**.
 
-1. Make sure [HACS](https://hacs.xyz) is installed.
-2. Add this repository as a **custom repository** (category **Integration**):
+## Fork and upstream
 
-   [![Open in HACS][hacs-repo-badge]][hacs-repo]
+This project is a fork of [kegelmeier/ha-opus-greennet](https://github.com/kegelmeier/ha-opus-greennet).
 
-   …or in HACS go to **⋮ → Custom repositories**, paste
-   `https://github.com/kegelmeier/ha-opus-greennet`, choose **Integration**, and add it.
-3. Search for **Opus GreenNet Bridge**, install, and **restart Home Assistant**.
+- Upstream: [kegelmeier/ha-opus-greennet](https://github.com/kegelmeier/ha-opus-greennet)
+- This fork: [fubu2k/ha-opus-greennet](https://github.com/fubu2k/ha-opus-greennet)
 
-Home Assistant 2026.8 or newer is required. To test a beta, enable pre-release
-versions for this repository in HACS before selecting the beta version.
+Please report issues specific to the changes in this fork here. For functionality unchanged from upstream, checking the upstream project's issues first may be helpful.
 
-### Manual Installation
+## Release v0.3.4
 
-1. Copy the `custom_components/opus_greennet` folder to your Home Assistant's `custom_components` directory
-2. Restart Home Assistant
+The first independently versioned release of this fork is based on [kegelmeier/ha-opus-greennet](https://github.com/kegelmeier/ha-opus-greennet).
 
-## Configuration
+### Bug fixes
 
-After installing, add the integration:
+- Gateway health-probe timeout eliminated: the integration now uses `get/config/system/uptime` instead of the unsupported `get/config/system/info`. The uptime endpoint is supported by OPUS-IQ-DOT firmware v1.21 and newer, so Home Assistant no longer logs a 10-second timeout warning at every start.
+- HOPPE AutoLock writeback blocked: `async_lock()` and `async_unlock()` now raise `HomeAssistantError` immediately. This prevents a simulated local state change when no MQTT command can actually be sent.
 
-[![Add Integration][config-flow-badge]][config-flow]
+### New device support
 
-…or go to **Settings → Devices & Services → Add Integration → “Opus GreenNet Bridge”**, then:
+- **D2-06-40 — HOPPE window handle with AutoLock:** read-only lock entity; `handle_state` and `unlock_request` sensors; `mechanics_fault` binary sensor.
+- **F6-10-00 and D2-03-10 — Passive HOPPE window handles:** `handle_state` sensor.
+- **F6-05-02 — Jaeger Direkt / OPUS smoke detector RWM:** `smoke_alarm` and `battery_low` binary sensors.
+- **A5-07-03 — Jaeger Direkt / OPUS SMS presence sensor:** motion binary sensor plus `illuminance`, `supply_voltage`, and `battery_level` sensors.
 
-1. Enter your **EAG Identifier** (Bridge ID, e.g., `050B4DFA`)
-2. Click **Submit**
+### Changes in v0.3.4
 
-Setup waits for a response from that specific gateway. A connected Home Assistant
-MQTT broker alone is insufficient. If setup fails, check the identifier, gateway
-power, bridge credentials, and the directional topic rules above. Existing
-entries automatically retry when the gateway is unavailable during startup.
-
-## Availability and command behavior
-
-The integration uses push updates, with a gateway health check approximately
-every 60 seconds. MQTT disconnects and the optional bridge-status topic update
-availability immediately; a failed health check also marks entities unavailable.
-Batteryless EnOcean devices are not marked offline just because they are quiet.
-On reconnection, the integration requests a fresh device list and gateway data.
-
-Commands wait for the gateway's acknowledgement. Status `200` means the gateway
-sent the telegram; `201` means it accepted deferred delivery. Neither confirms
-that the physical actuator has completed the operation. Device reports and
-subsequent channel-specific status queries reconcile the state. Requests fail
-when the gateway is known to be unavailable and are cancelled during reload.
-
-OPUS acknowledgement topics do not include request identifiers. Requests to the
-same endpoint are serialized, but a late reply after a timeout or a simultaneous
-command from another MQTT client can remain ambiguous. Check the physical state
-before retrying a timed-out command.
-
-Measurements explicitly reported as `notAvailable` become unknown. Lights and
-switches remain unknown until their state is reported or a command is accepted.
-Climate activity uses actuator feedback where available; enabling a heating
-zone does not by itself prove that it is currently heating.
-
-## Services
-
-The integration exposes the following administrator-only actions for advanced
-device management, accessible via **Developer Tools** → **Actions**:
-
-| Service | Parameters | Description |
-|---------|-----------|-------------|
-| `opus_greennet.get_device_configuration` | `device_id` | Retrieve the stored configuration for an EnOcean device via ReCom API |
-| `opus_greennet.set_device_configuration` | `device_id`, `configuration` | Write configuration to an EnOcean device via ReCom API |
-| `opus_greennet.get_device_parameters` | `device_id` | Retrieve DDF parameters for an EnOcean device via ReCom API |
-| `opus_greennet.reload_entry` | _(optional)_ `config_entry_id` | Re-run integration setup/teardown without restarting HA |
-
-The `device_id` is the EURID of the target device (e.g., `01A02F6C`). Select a
-gateway when more than one Opus GreenNet config entry is loaded. The two read
-actions return their response data directly in Home Assistant.
-
-## MQTT Topic Structure
-
-The integration follows the EnOcean over IP MQTT specification:
-
-```
-EnOcean/{EAG-Identifier}/stream/telegram/{Device-Identifier}/from  # Device → Gateway
-EnOcean/{EAG-Identifier}/stream/telegram/{Device-Identifier}/to    # Gateway → Device
-EnOcean/{EAG-Identifier}/put/devices/{Device-Identifier}/state     # Commands
-EnOcean/{EAG-Identifier}/get/devices                               # Device discovery
-EnOcean/{EAG-Identifier}/getAnswer/devices/{Device-Identifier}     # Discovery response
-```
-
-## Telegram Payload Format
-
-```json
-{
-  "telegram": {
-    "deviceId": "01843197",
-    "friendlyId": "LivingRoom_Light",
-    "timestamp": "2024-01-15T10:30:00.000+0100",
-    "direction": "from",
-    "functions": [
-      {"key": "switch", "value": "on"},
-      {"key": "dimValue", "value": "75"}
-    ],
-    "telegramInfo": {
-      "data": "0000000A",
-      "dbm": -65,
-      "rorg": "A5"
-    }
-  }
-}
-```
-
-## Troubleshooting
-
-### Devices not appearing
-
-1. Check that MQTT integration is connected
-2. Verify your EAG Identifier is correct
-3. Check Home Assistant logs for MQTT subscription errors
-4. Ensure your Opus GreenNet Bridge is publishing to the expected topics
-
-### Enable debug logging
-
-Add to `configuration.yaml`:
-
-```yaml
-logger:
-  default: info
-  logs:
-    custom_components.opus_greennet: debug
-```
-
-### Debug update lag
-
-When debug logging is enabled, state updates include latency markers for the
-main handoff points:
-
-- `OPUS update latency received`: MQTT message reached the integration
-- `OPUS update latency finalized`: debounced MQTT fragments were converted into state functions
-- `OPUS update latency dispatch`: the coordinator notified Home Assistant entities
-- `OPUS update latency entity_write`: the entity wrote its Home Assistant state
-
-Download a redacted diagnostic report from **Settings → Devices & services →
-Opus GreenNet Bridge → three-dot menu → Download diagnostics**. It includes the
-gateway status, discovered devices, channel state, last update source, and the
-latest bridge command error without adding volatile diagnostic fields to every
-entity state.
-
-For local switch tests, press the physical control and compare the time between
-`received`, `dispatch`, and `entity_write`. If `received` is already delayed, the
-lag is before this integration. If `received` is fast but `entity_write` is slow,
-the lag is inside Home Assistant or this integration.
-
-## Development
-
-### Project Structure
-
-```
-custom_components/opus_greennet/
-├── __init__.py           # Integration setup and service registration
-├── manifest.json         # Integration metadata and version
-├── config_flow.py        # UI configuration
-├── const.py              # Constants, EEP mappings, and MQTT topics
-├── coordinator.py        # MQTT communication, discovery, and commands
-├── mqtt_transport.py     # Confirmed subscriptions, requests, and gateway probing
-├── enocean_device.py     # Device and channel data model
-├── entity.py             # Shared entity and device-registry behavior
-├── diagnostics.py        # Redacted integration diagnostics
-├── light.py              # Light entity platform
-├── switch.py             # Switch entity platform
-├── cover.py              # Cover entity platform
-├── climate.py            # Climate entity platform (HeatArea)
-├── sensor.py             # Sensor entity platform
-├── binary_sensor.py      # Binary sensor entity platform
-├── event.py              # Event entity platform (rocker switches)
-├── services.yaml         # HA service definitions
-├── strings.json          # UI, service, and exception translation source
-└── translations/
-    └── en.json           # English translations
-tests/
-├── conftest.py                  # Shared fixtures
-├── ha_helpers.py                # Simulated MQTT boundary for real HA tests
-├── test_enocean_device.py       # Device model tests
-├── test_coordinator_helpers.py  # Pure helper and command tests
-├── test_coordinator_mqtt.py     # MQTT finalization tests
-├── test_coordinator_parsing.py  # JSON telegrams, fragments, and late discovery
-├── test_coordinator_transport.py # Subscription, request, and recovery tests
-├── test_event_entity.py         # Rocker switch event entity tests
-├── test_entities.py             # Entity state and Home Assistant service tests
-├── test_init.py                 # Entry setup, unloading, and service routing
-├── test_diagnostics.py          # Diagnostic redaction tests
-├── test_ha_lifecycle.py          # Real Home Assistant lifecycle and config flows
-└── test_config_flow.py          # Config flow validation tests
-```
-
-### Testing
-
-```bash
-python -m pip install -r requirements_test.txt
-ruff check .
-ruff format --check .
-pytest -v --cov
-```
-
-Use Python 3.14 for development. Tests cover device properties, telegram parsing,
-ordered multi-channel commands, gateway errors, entity behavior, rocker events,
-diagnostic redaction, and real Home Assistant configuration and lifecycle paths.
-CI resolves dependencies separately for Home Assistant 2026.8.2 and 2026.9.1 and
-also runs Ruff and Hassfest. MQTT transport is simulated in automated tests;
-physical-device verification remains part of beta testing.
-
-### Beta testing
-
-Enable pre-release versions for this repository in HACS, select the beta, and
-restart Home Assistant. Existing entity IDs and rocker event names are preserved.
-Check physical controls, low brightness, both actuator channels, cover position
-and tilt, climate activity, and rapid rocker presses. Also test a gateway outage
-and reconnection, then reload the integration during a pending request. Report
-your gateway firmware, device EEP, and the observed result with redacted
-diagnostics. REST/HTTP streaming is a separate future investigation.
-
-## References
-
-- [EnOcean over IP MQTT Specification](https://www.enocean-alliance.org/ip/)
-- [EnOcean Equipment Profiles (EEP)](https://www.enocean-alliance.org/eep/)
-- [Home Assistant Developer Documentation](https://developers.home-assistant.io/)
+- `fix`: HOPPE read-only writeback and replacement of the `/info` probe with `/uptime` by [@fubu2k](https://github.com/fubu2k).
+- `feat/new_devices` + `fix`: new device support, HOPPE writeback protection, and uptime probe, merged to `main` by [@fubu2k](https://github.com/fubu2k).
 
 ## License
 
-Released under the [MIT License](LICENSE).
+This fork is distributed under the license included in the repository's [LICENSE](LICENSE) file. Forking does not replace the original project's copyright, attribution, or license obligations. The upstream project and its contributors remain credited for their respective work.
 
-<!-- badges -->
-[hacs]: https://hacs.xyz
-[hacs-shield]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge
-[releases]: [[https://github.com/fubu2k/ha-opus-greennet/releases]
-[release-shield]: https://img.shields.io/github/v/release/kegelmeier/ha-opus-greennet?style=for-the-badge
-[license]: https://github.com/kegelmeier/ha-opus-greennet/blob/main/LICENSE
-[license-shield]: https://img.shields.io/github/license/kegelmeier/ha-opus-greennet?style=for-the-badge
-[ha-shield]: https://img.shields.io/badge/Home%20Assistant-2026.8%2B-41BDF5.svg?style=for-the-badge&logo=home-assistant&logoColor=white
-[hacs-repo]: https://my.home-assistant.io/redirect/hacs_repository/?owner=fubu2k&repository=ha-opus-greennet&category=integration
-[hacs-repo-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
-[config-flow]: https://my.home-assistant.io/redirect/config_flow_start/?domain=opus_greennet
-[config-flow-badge]: https://my.home-assistant.io/badges/config_flow_start.svg
+## Credits
+
+- Original project: [@kegelmeier](https://github.com/kegelmeier) and contributors
+- Fork maintenance and v0.3.4 changes: [@fubu2k](https://github.com/fubu2k)
