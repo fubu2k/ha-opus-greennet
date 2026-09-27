@@ -31,9 +31,9 @@ This project is a fork of [kegelmeier/ha-opus-greennet](https://github.com/kegel
 
 Please report issues specific to the changes in this fork here. For functionality unchanged from upstream, checking the upstream project's issues first may be helpful.
 
-## Release v0.3.4
+## Release v0.3.4.1
 
-The first independently versioned release of this fork is based on [kegelmeier/ha-opus-greennet](https://github.com/kegelmeier/ha-opus-greennet).
+This release builds on v0.3.4, the first independently versioned release of this fork, based on [kegelmeier/ha-opus-greennet](https://github.com/kegelmeier/ha-opus-greennet).
 
 ### Bug fixes
 
@@ -46,6 +46,11 @@ The first independently versioned release of this fork is based on [kegelmeier/h
 - **F6-10-00 and D2-03-10 — Passive HOPPE window handles:** `handle_state` sensor.
 - **F6-05-02 — Jaeger Direkt / OPUS smoke detector RWM:** `smoke_alarm` and `battery_low` binary sensors.
 - **A5-07-03 — Jaeger Direkt / OPUS SMS presence sensor:** motion binary sensor plus `illuminance`, `supply_voltage`, and `battery_level` sensors.
+- **A5-07-01 — OPUS SMS Presence Detector:** same motion binary sensor and `illuminance`, `supply_voltage`, and `battery_level` sensors as A5-07-03.
+
+### Changes in v0.3.4.1
+
+- `feat`: A5-07-01 support added via the existing A5-07-03 presence-detector logic; no MQTT parsing changes.
 
 ### Changes in v0.3.4
 
@@ -59,4 +64,4 @@ This fork is distributed under the license included in the repository's [LICENSE
 ## Credits
 
 - Original project: [@kegelmeier](https://github.com/kegelmeier) and contributors
-- Fork maintenance and v0.3.4 changes: [@fubu2k](https://github.com/fubu2k)
+- Fork maintenance and v0.3.4.1 changes: [@fubu2k](https://github.com/fubu2k)
