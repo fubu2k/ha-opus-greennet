@@ -31,6 +31,16 @@ This project is a fork of [kegelmeier/ha-opus-greennet](https://github.com/kegel
 
 Please report issues specific to the changes in this fork here. For functionality unchanged from upstream, checking the upstream project's issues first may be helpful.
 
+## Release v0.3.4.2
+
+- `sensor.*_handle_state` (EEP D2-06-40, F6-10-00, D2-03-10) removed.
+  Replace with three `binary_sensor` entities per device:
+  - `binary_sensor.*_handle_closed` — on when handle is in closed position
+  - `binary_sensor.*_handle_open` — on when handle is in open position
+  - `binary_sensor.*_handle_tilt` — on when handle is in tilted position
+ 
+Windows Handle are now compatible with Cover Control Automation (CCA).
+
 ## Release v0.3.4.1
 
 This release builds on v0.3.4, the first independently versioned release of this fork, based on [kegelmeier/ha-opus-greennet](https://github.com/kegelmeier/ha-opus-greennet).
