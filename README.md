@@ -33,13 +33,12 @@ Please report issues specific to the changes in this fork here. For functionalit
 
 ## Release v0.3.4.2
 
-- `sensor.*_handle_state` (EEP D2-06-40, F6-10-00, D2-03-10) removed.
-  Replace with three `binary_sensor` entities per device:
+Added three `binary_sensor` entities per device:
   - `binary_sensor.*_handle_closed` — on when handle is in closed position
   - `binary_sensor.*_handle_open` — on when handle is in open position
   - `binary_sensor.*_handle_tilt` — on when handle is in tilted position
  
-Windows Handle are now compatible with Cover Control Automation (CCA).
+Windows Handle are also now compatible with Cover Control Automation (CCA) with Binary Sensor.
 
 ## Release v0.3.4.1
 
