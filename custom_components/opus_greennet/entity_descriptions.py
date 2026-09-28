@@ -103,6 +103,7 @@ class OpusLockDescription(OpusEntityDescription):
 # Climate family
 # ---------------------------------------------------------------------------
 
+
 def _is_climate(device: EnOceanDevice) -> bool:
     """Return the device's climate flag."""
     return device.is_climate
@@ -216,13 +217,47 @@ BINARY_SENSOR_DESCRIPTIONS: Final[tuple[OpusBinarySensorDescription, ...]] = (
         key="mechanics_fault",
         translation_key="mechanics_fault",
         applies_to=HOPPE_AUTOLOCK_ONLY,
-        value_fn=lambda d: (
-            (lambda c: c.mechanics_status == "error" if c else None)(
-                d.channels.get(0)
-            )
+        value_fn=lambda d: (lambda c: c.mechanics_status == "error" if c else None)(
+            d.channels.get(0)
         ),
         device_class=BinarySensorDeviceClass.PROBLEM,
         entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    # --- HOPPE window-handle position binary sensors ---
+    # Added alongside the existing handle_state ENUM sensor.
+    # Exactly one of these three is on at any time; the others are off.
+    OpusBinarySensorDescription(
+        key="handle_closed",
+        translation_key="handle_closed",
+        applies_to=HOPPE_ALL_VARIANTS,
+        value_fn=lambda device: (
+            True
+            if (s := _channel_attr("handle_state")(device)) == HANDLE_CLOSED
+            else (False if s is not None else None)
+        ),
+        device_class=None,
+    ),
+    OpusBinarySensorDescription(
+        key="handle_open",
+        translation_key="handle_open",
+        applies_to=HOPPE_ALL_VARIANTS,
+        value_fn=lambda device: (
+            True
+            if (s := _channel_attr("handle_state")(device)) == HANDLE_OPEN
+            else (False if s is not None else None)
+        ),
+        device_class=None,
+    ),
+    OpusBinarySensorDescription(
+        key="handle_tilt",
+        translation_key="handle_tilt",
+        applies_to=HOPPE_ALL_VARIANTS,
+        value_fn=lambda device: (
+            True
+            if (s := _channel_attr("handle_state")(device)) == HANDLE_TILT
+            else (False if s is not None else None)
+        ),
+        device_class=None,
     ),
 )
 

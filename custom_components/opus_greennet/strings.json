@@ -56,6 +56,15 @@
       },
       "mechanics_fault": {
         "name": "Mechanics fault"
+      },
+      "handle_closed": {
+        "name": "Handle closed"
+      },
+      "handle_open": {
+        "name": "Handle open"
+      },
+      "handle_tilt": {
+        "name": "Handle tilted"
       }
     },
     "cover": {

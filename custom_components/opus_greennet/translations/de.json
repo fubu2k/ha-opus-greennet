@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Opus GreenNet Bridge",
-        "description": "Konfiguriere die Bridge, die mit deinem MQTT-Broker verbunden ist. Beim Einrichten wird gepr\u00fcft, ob die angegebene Bridge antwortet.",
+        "description": "Konfiguriere die Bridge, die mit deinem MQTT-Broker verbunden ist. Beim Einrichten wird geprüft, ob die angegebene Bridge antwortet.",
         "data": {
           "eag_id": "EAG-Kennung"
         },
@@ -19,7 +19,7 @@
     },
     "abort": {
       "already_configured": "Diese Bridge ist bereits konfiguriert",
-      "mqtt_not_configured": "Richte die MQTT-Integration ein und verbinde sie, bevor du diese Bridge hinzuf\u00fcgst"
+      "mqtt_not_configured": "Richte die MQTT-Integration ein und verbinde sie, bevor du diese Bridge hinzufügst"
     }
   },
   "entity": {
@@ -56,6 +56,15 @@
       },
       "mechanics_fault": {
         "name": "Mechanik-Fehler"
+      },
+      "handle_closed": {
+        "name": "Griff geschlossen"
+      },
+      "handle_open": {
+        "name": "Griff offen"
+      },
+      "handle_tilt": {
+        "name": "Griff gekippt"
       }
     },
     "cover": {
@@ -84,10 +93,10 @@
         "name": "Leistungsaufnahme"
       },
       "signal_strength": {
-        "name": "Signalst\u00e4rke"
+        "name": "Signalstärke"
       },
       "illuminance": {
-        "name": "Beleuchtungsst\u00e4rke"
+        "name": "Beleuchtungsstärke"
       },
       "supply_voltage": {
         "name": "Versorgungsspannung"
@@ -125,31 +134,31 @@
       "message": "Der Opus-GreenNet-Konfigurationseintrag {config_entry_id} ist nicht geladen."
     },
     "config_entry_required": {
-      "message": "Bitte w\u00e4hle ein Gateway aus, da mehr als ein Opus-GreenNet-Konfigurationseintrag geladen ist."
+      "message": "Bitte wähle ein Gateway aus, da mehr als ein Opus-GreenNet-Konfigurationseintrag geladen ist."
     },
     "device_not_found": {
-      "message": "Ger\u00e4t {device_id} wurde auf dem ausgew\u00e4hlten Gateway nicht gefunden."
+      "message": "Gerät {device_id} wurde auf dem ausgewählten Gateway nicht gefunden."
     },
     "device_request_timeout": {
-      "message": "Das Gateway hat auf die Anfrage f\u00fcr Ger\u00e4t {device_id} nicht geantwortet."
+      "message": "Das Gateway hat auf die Anfrage für Gerät {device_id} nicht geantwortet."
     },
     "mqtt_setup_failed": {
-      "message": "MQTT-Abonnement oder -Ver\u00f6ffentlichung war nicht m\u00f6glich."
+      "message": "MQTT-Abonnement oder -Veröffentlichung war nicht möglich."
     },
     "no_loaded_config_entry": {
       "message": "Es ist kein Opus-GreenNet-Gateway geladen."
     },
     "gateway_unavailable": {
-      "message": "Das OPUS-Gateway ist nicht erreichbar. Pr\u00fcfe die Bridge-Verbindung und versuche es erneut."
+      "message": "Das OPUS-Gateway ist nicht erreichbar. Prüfe die Bridge-Verbindung und versuche es erneut."
     },
     "mqtt_unavailable": {
-      "message": "Die MQTT-Verbindung von Home Assistant ist nicht verf\u00fcgbar."
+      "message": "Die MQTT-Verbindung von Home Assistant ist nicht verfügbar."
     },
     "request_rejected": {
-      "message": "Das Gateway hat die Anfrage f\u00fcr {device_id} abgelehnt: {reason}"
+      "message": "Das Gateway hat die Anfrage für {device_id} abgelehnt: {reason}"
     },
     "request_timeout": {
-      "message": "Das Gateway hat die Anfrage f\u00fcr {device_id} nicht best\u00e4tigt. Der Ausgang ist unbekannt; pr\u00fcfe das Ger\u00e4t, bevor du es erneut versuchst."
+      "message": "Das Gateway hat die Anfrage für {device_id} nicht bestätigt. Der Ausgang ist unbekannt; prüfe das Gerät, bevor du es erneut versuchst."
     },
     "request_cancelled": {
       "message": "Die Anfrage wurde abgebrochen, weil die Integration entladen wird oder die Verbindung verloren ging."
@@ -157,41 +166,41 @@
   },
   "issues": {
     "system_info_unsupported": {
-      "title": "Gateway-Systeminformationen nicht verf\u00fcgbar",
-      "description": "Das OPUS-Gateway {eag_id} hat auf eine Anfrage nach Systeminformationen (Modell, Firmware) nicht geantwortet. Dies ist rein diagnostisch und beeintr\u00e4chtigt weder die Ger\u00e4testeuerung noch die Erkennung. Falls du diese Metadaten in den Diagnosedaten sehen m\u00f6chtest, pr\u00fcfe, ob deine Mosquitto-Bridge `get/config/system/info` und `getAnswer/config/system/info` f\u00fcr dieses Gateway durchleitet. Dieser Hinweis kann verworfen werden."
+      "title": "Gateway-Systeminformationen nicht verfügbar",
+      "description": "Das OPUS-Gateway {eag_id} hat auf eine Anfrage nach Systeminformationen (Modell, Firmware) nicht geantwortet. Dies ist rein diagnostisch und beeinträchtigt weder die Gerätesteuerung noch die Erkennung. Falls du diese Metadaten in den Diagnosedaten sehen möchtest, prüfe, ob deine Mosquitto-Bridge `get/config/system/info` und `getAnswer/config/system/info` für dieses Gateway durchleitet. Dieser Hinweis kann verworfen werden."
     }
   },
   "services": {
     "get_device_configuration": {
-      "description": "Ruft die gespeicherte Konfiguration eines EnOcean-Ger\u00e4ts \u00fcber die ReCom-API ab.",
+      "description": "Ruft die gespeicherte Konfiguration eines EnOcean-Geräts über die ReCom-API ab.",
       "fields": {
         "config_entry_id": {
           "description": "Zu verwendendes Gateway. Auswahl erforderlich, wenn mehrere Gateways geladen sind.",
           "name": "Gateway"
         },
         "device_id": {
-          "description": "EURID des EnOcean-Ger\u00e4ts.",
-          "name": "Ger\u00e4te-ID"
+          "description": "EURID des EnOcean-Geräts.",
+          "name": "Geräte-ID"
         }
       },
-      "name": "Ger\u00e4tekonfiguration abrufen"
+      "name": "Gerätekonfiguration abrufen"
     },
     "get_device_parameters": {
-      "description": "Ruft DDF-Parameter eines EnOcean-Ger\u00e4ts \u00fcber die ReCom-API ab.",
+      "description": "Ruft DDF-Parameter eines EnOcean-Geräts über die ReCom-API ab.",
       "fields": {
         "config_entry_id": {
           "description": "Zu verwendendes Gateway. Auswahl erforderlich, wenn mehrere Gateways geladen sind.",
           "name": "Gateway"
         },
         "device_id": {
-          "description": "EURID des EnOcean-Ger\u00e4ts.",
-          "name": "Ger\u00e4te-ID"
+          "description": "EURID des EnOcean-Geräts.",
+          "name": "Geräte-ID"
         }
       },
-      "name": "Ger\u00e4teparameter abrufen"
+      "name": "Geräteparameter abrufen"
     },
     "reload_entry": {
-      "description": "L\u00e4dt ein Gateway oder, falls keines ausgew\u00e4hlt ist, alle geladenen Opus-GreenNet-Gateways neu.",
+      "description": "Lädt ein Gateway oder, falls keines ausgewählt ist, alle geladenen Opus-GreenNet-Gateways neu.",
       "fields": {
         "config_entry_id": {
           "description": "Neu zu ladendes Gateway. Leer lassen, um alle Gateways neu zu laden.",
@@ -201,22 +210,22 @@
       "name": "Integration neu laden"
     },
     "set_device_configuration": {
-      "description": "Schreibt eine Konfiguration auf ein EnOcean-Ger\u00e4t \u00fcber die ReCom-API.",
+      "description": "Schreibt eine Konfiguration auf ein EnOcean-Gerät über die ReCom-API.",
       "fields": {
         "config_entry_id": {
           "description": "Zu verwendendes Gateway. Auswahl erforderlich, wenn mehrere Gateways geladen sind.",
           "name": "Gateway"
         },
         "configuration": {
-          "description": "Auf das Ger\u00e4t zu schreibendes Konfigurationsobjekt.",
+          "description": "Auf das Gerät zu schreibendes Konfigurationsobjekt.",
           "name": "Konfiguration"
         },
         "device_id": {
-          "description": "EURID des EnOcean-Ger\u00e4ts.",
-          "name": "Ger\u00e4te-ID"
+          "description": "EURID des EnOcean-Geräts.",
+          "name": "Geräte-ID"
         }
       },
-      "name": "Ger\u00e4tekonfiguration setzen"
+      "name": "Gerätekonfiguration setzen"
     }
   }
 }
