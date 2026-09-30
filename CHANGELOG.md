@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3] - 2026-09-30
+
+Stable release of the fixes validated in the 0.3.3 beta series. Existing entity
+IDs, rocker event names, and configured MQTT routes are preserved.
+
+### Fixed
+
+- **Cover Stop (#37):** Send the dedicated stop command with the correct actuator channel and check the final position/tilt where supported.
+- **State confirmation (#35):** Keep delayed status checks active through unknown, invalid, or unrelated feedback. Confirm commands only with valid feedback for the requested field and channel, including queued and overlapping commands.
+- **Gateway startup and recovery:** Use fresh uptime replies for health checks, tolerate missing system-information responses, and handle retained snapshots and MQTT reconnects reliably. Broker and gateway outages mark entities unavailable and cancel pending requests.
+- **Command errors:** Validate gateway acknowledgements and report rejection or timeout instead of silently assuming success.
+- **Device state parsing:** Handle complete JSON telegrams, list-form snapshots, indexed updates, and channel context without replaying cached rocker events.
+- **Entity state and controls:** Preserve unknown/unavailable readings correctly, keep very low nonzero brightness on, report climate activity accurately, support standard climate actions, and hide tilt controls when rotation is disabled.
+- **Diagnostics:** Redact identifiers and credentials from diagnostic data, including error details.
+
+### Changed
+
+- README and the MQTT protocol reference describe command confirmation, Stop encoding, scoped broker routes, and optional bridge-status reporting. Public examples use fictional identifiers.
+- Automated validation covers Home Assistant 2026.8.2 and 2026.9.4: **612 tests**, plus Ruff and Hassfest checks.
+
 ## [0.3.3b1] - 2026-09-30
 
 Existing entity IDs and configured MQTT routes are preserved.
