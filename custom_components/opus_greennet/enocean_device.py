@@ -61,6 +61,10 @@ class EnOceanChannel:
     motion: bool | None = None
     illuminance: float | None = None
     supply_voltage: float | None = None
+    handle_state: str | None = None
+    is_locked: bool | None = None
+    unlock_request: bool | None = None
+    mechanics_fault: bool | None = None
     # Climate fields
     temperature: float | None = None
     temperature_setpoint: float | None = None
@@ -175,6 +179,16 @@ class EnOceanDevice:
     def is_presence_detector(self) -> bool:
         """Return whether this is a supported SMS presence detector."""
         return self.primary_eep in ("A5-07-01", "A5-07-03")
+
+    @property
+    def is_window_handle(self) -> bool:
+        """Return whether this profile reports HOPPE handle positions."""
+        return self.primary_eep in ("D2-06-40", "F6-10-00", "D2-03-10")
+
+    @property
+    def has_autolock(self) -> bool:
+        """Return whether this handle reports SecureConnect lock status."""
+        return self.primary_eep == "D2-06-40"
 
     @property
     def is_climate(self) -> bool:
@@ -425,6 +439,24 @@ class EnOceanDevice:
                     minimum=0,
                     allow_unavailable=True,
                 )
+
+            elif key == "handleState":
+                if value == "tilt":
+                    value = "tilted"
+                channel.handle_state = (
+                    value if value in ("open", "closed", "tilted") else None
+                )
+
+            elif key == "lock":
+                channel.is_locked = self._parse_enum_boolean(
+                    value, "locked", "unlocked"
+                )
+
+            elif key == "unlockRequest":
+                channel.unlock_request = self._parse_boolean(value)
+
+            elif key == "mechanicsFault":
+                channel.mechanics_fault = self._parse_boolean(value)
 
             # Climate keys
             elif key == KEY_TEMPERATURE:

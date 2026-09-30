@@ -52,6 +52,26 @@ async def async_setup_entry(
                 )
             )
 
+        if device.is_window_handle:
+            for position in ("open", "tilted", "closed"):
+                entities.append(
+                    OpusGreenNetHandlePositionSensor(
+                        coordinator, eag_id, gateway_device_id, device, position
+                    )
+                )
+            if device.has_autolock:
+                entities.append(
+                    OpusGreenNetStateBinarySensor(
+                        coordinator,
+                        eag_id,
+                        gateway_device_id,
+                        device,
+                        "mechanics_fault",
+                        "mechanics_fault",
+                        BinarySensorDeviceClass.PROBLEM,
+                    )
+                )
+
         if device.is_smoke_detector:
             for suffix, attr, device_class in (
                 ("smoke_alarm", "smoke_alarm", BinarySensorDeviceClass.SMOKE),
@@ -346,3 +366,31 @@ class OpusGreenNetStateBinarySensor(OpusGreenNetBaseBinarySensor):
         """Return unknown until a valid state has been received."""
         channel = self._device.channels.get(DEFAULT_CHANNEL)
         return getattr(channel, self._state_attribute, None)
+
+
+class OpusGreenNetHandlePositionSensor(OpusGreenNetBaseBinarySensor):
+    """Expose one handle position without implying a window-sash measurement."""
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        position: str,
+    ) -> None:
+        suffix = "handle_tilt" if position == "tilted" else f"handle_{position}"
+        super().__init__(coordinator, eag_id, gateway_device_id, device, suffix, suffix)
+        self._position = position
+        # WINDOW displays ON as open, so it must not be used for ON-means-closed.
+        self._attr_device_class = (
+            BinarySensorDeviceClass.WINDOW if position != "closed" else None
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Derive every indication from the same normalized position."""
+        channel = self._device.channels.get(DEFAULT_CHANNEL)
+        if channel is None or channel.handle_state is None:
+            return None
+        return channel.handle_state == self._position

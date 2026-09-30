@@ -105,6 +105,19 @@ async def async_setup_entry(
                     )
                 )
 
+        if device.is_window_handle:
+            entities.append(
+                OpusGreenNetHandleSensor(
+                    coordinator, eag_id, gateway_device_id, device, "handle_state"
+                )
+            )
+            if device.has_autolock:
+                entities.append(
+                    OpusGreenNetHandleSensor(
+                        coordinator, eag_id, gateway_device_id, device, "unlock_request"
+                    )
+                )
+
         # Signal strength sensor (all devices with dbm data)
         entities.append(
             OpusGreenNetSignalStrengthSensor(
@@ -306,5 +319,29 @@ class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
     @property
     def native_value(self) -> float | None:
         """Return the parsed value, or unknown before the first valid reading."""
+        channel = self._device.channels.get(DEFAULT_CHANNEL)
+        return getattr(channel, self._state_attribute, None)
+
+
+class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
+    """Handle position or the independent reported unlock request."""
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        suffix: str,
+    ) -> None:
+        super().__init__(coordinator, eag_id, gateway_device_id, device, suffix, suffix)
+        self._state_attribute = suffix
+        if suffix == "handle_state":
+            self._attr_device_class = SensorDeviceClass.ENUM
+            self._attr_options = ["open", "closed", "tilted"]
+
+    @property
+    def native_value(self) -> str | bool | None:
+        """Return the reported value independently of other handle attributes."""
         channel = self._device.channels.get(DEFAULT_CHANNEL)
         return getattr(channel, self._state_attribute, None)
