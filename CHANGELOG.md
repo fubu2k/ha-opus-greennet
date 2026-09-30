@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0b0] - 2026-09-30
+
+Beta release for community validation of issues #42–#46. Enable pre-release
+versions in HACS, select v0.4.0b0, and restart Home Assistant.
+
+### Added
+
+- **OPUS RWM smoke detectors (#42):** F6-05-02 smoke-alarm and low-battery binary sensors, including indexed `transmitModes` snapshots and value-only live updates.
+- **OPUS SMS presence sensors (#43):** A5-07-01 and A5-07-03 motion, illuminance, supply-voltage, and battery-level entities.
+- **HOPPE window handles (#44):** D2-06-40, F6-10-00, and D2-03-10 handle-position sensors and separate Open, Tilted, and Closed binary sensors for automations such as CCA. D2-06-40 also exposes read-only AutoLock status, unlock requests, and mechanics faults. AutoLock MQTT control remains disabled pending manufacturer clarification; lock/unlock actions send no commands.
+- **Manual device removal (#46):** Remove stale child devices from Home Assistant without unpairing them from OPUS or disrupting other devices. The gateway is protected. Devices still reported by the gateway can be rediscovered without duplicate entities; automation references must be updated separately.
+
+### Fixed
+
+- **Immediate telemetry (#45):** Flat battery-level and signal-strength updates bypass the multipart state debounce, validate readings, and preserve buffered structural updates.
+- Missing or invalid detector/handle readings remain unknown, and gateway outages mark entities unavailable. Handle position and lock state remain independent.
+
+### Changed
+
+- Added device documentation, English entity names, and removal/reload/rediscovery coverage for the new profiles.
+- Automated validation passes **668 tests** on Home Assistant **2026.8.2** and **2026.9.4**, plus Ruff and Hassfest. Physical-device behavior still needs beta validation.
+
 ## [0.3.3] - 2026-09-30
 
 Stable release of the fixes validated in the 0.3.3 beta series. Existing entity
