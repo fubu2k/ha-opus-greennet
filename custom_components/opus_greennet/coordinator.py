@@ -62,6 +62,7 @@ SIGNAL_DEVICE_DISCOVERED = f"{DOMAIN}_device_discovered"
 SIGNAL_DEVICE_STATE_UPDATE = f"{DOMAIN}_device_state_update"
 SIGNAL_AVAILABILITY_UPDATE = f"{DOMAIN}_availability_update"
 
+FAST_PATH_PROPERTIES = frozenset({"batteryLevel", "dbm"})
 DEVICE_STREAM_FINALIZE_DELAY = 0.02
 TELEGRAM_FINALIZE_DELAY = 0.15
 RAW_MQTT_DEBUG_PAYLOAD_LIMIT = 500
@@ -444,12 +445,57 @@ class OpusGreenNetCoordinator:
                 if isinstance(msg.payload, bytes)
                 else str(msg.payload)
             )
+            if self._apply_scalar_telemetry(
+                device_id, property_path, payload, received_at
+            ):
+                return
             self._buffer_device_stream_property(
                 device_id, property_path, payload, received_at
             )
 
         except Exception as err:
             _LOGGER.exception("Error handling device stream message: %s", err)
+
+    def _apply_scalar_telemetry(
+        self, device_id: str, property_path: str, payload: str, received_at: float
+    ) -> bool:
+        """Apply standalone battery/RSSI readings without a debounce timer."""
+        device = self.devices.get(device_id)
+        if device is None or property_path not in FAST_PATH_PROPERTIES:
+            return False
+        value = self._parse_value(payload)
+        if value != "notAvailable":
+            parsed = EnOceanDevice._parse_number(
+                value,
+                minimum=0 if property_path == "batteryLevel" else None,
+                maximum=100 if property_path == "batteryLevel" else None,
+                integer=property_path == "dbm",
+            )
+            if parsed is None:
+                return True
+            value = parsed
+        cached = self._device_data.setdefault(device_id, {"deviceId": device_id})
+        cached[property_path] = value
+        # A buffered older scalar must not overwrite this newer reading later.
+        self._device_stream_data.get(device_id, {}).pop(property_path, None)
+        if property_path == "dbm":
+            previous = device.dbm
+            device.dbm = None if value == "notAvailable" else int(value)
+            changed = previous != device.dbm
+        else:
+            channel = device.get_or_create_channel()
+            previous = channel.battery_level
+            device.update_from_telegram(
+                {"functions": [{"key": "batteryLevel", "value": value}]}
+            )
+            changed = previous != channel.battery_level
+        if changed:
+            signal = f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}"
+            self._mark_and_log_dispatch(
+                device, "stream/device", signal, received_at, received_at
+            )
+            async_dispatcher_send(self.hass, signal, device)
+        return True
 
     def _buffer_device_stream_property(
         self, device_id: str, property_path: str, payload: str, received_at: float
@@ -969,6 +1015,14 @@ class OpusGreenNetCoordinator:
 
     def _parse_value(self, value: str) -> Any:
         """Parse a string value to appropriate type."""
+        if value.startswith('"'):
+            try:
+                decoded = json.loads(value)
+            except ValueError:
+                pass
+            else:
+                if isinstance(decoded, str):
+                    value = decoded
         if value.lower() == "true":
             return True
         if value.lower() == "false":
@@ -1203,6 +1257,10 @@ class OpusGreenNetCoordinator:
                 if (key in KNOWN_STATE_KEYS or key == KEY_CHANNEL)
                 and key not in BUTTON_KEYS
             ]
+        if "batteryLevel" in data:
+            state_functions.append(
+                {"key": "batteryLevel", "value": data["batteryLevel"]}
+            )
         return state_functions + OpusGreenNetCoordinator._configuration_state_functions(
             data
         )

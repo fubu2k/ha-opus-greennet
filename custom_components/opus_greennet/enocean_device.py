@@ -55,6 +55,7 @@ class EnOceanChannel:
     energy: float | None = None
     power: float | None = None
     liquid_detected: bool | None = None
+    battery_level: float | None = None
     # Climate fields
     temperature: float | None = None
     temperature_setpoint: float | None = None
@@ -378,6 +379,11 @@ class EnOceanDevice:
                 liquid_detected = self._parse_boolean(value)
                 if liquid_detected is not None:
                     channel.liquid_detected = liquid_detected
+
+            elif key == "batteryLevel":
+                self._update_numeric_field(
+                    channel, "battery_level", value, 0, 100, allow_unavailable=True
+                )
 
             # Climate keys
             elif key == KEY_TEMPERATURE:

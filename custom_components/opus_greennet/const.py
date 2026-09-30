@@ -199,6 +199,7 @@ KNOWN_STATE_KEYS: Final = frozenset(
         "energy",
         "power",
         "liquidDetected",
+        "batteryLevel",
         "temperature",
         "temperatureSetpoint",
         "heaterMode",
