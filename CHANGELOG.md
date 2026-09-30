@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3b1] - 2026-09-30
+
+Beta verified on H11 with Home Assistant 2026.9.4 and OPUS-GW firmware 1.21.31.
+Existing entity IDs and configured MQTT routes are preserved.
+
+### Fixed
+
+- **Cover Stop (#37):** Send the dedicated `stop: "true"` command instead of an invalid position value, retain the actuator channel, and request final position/tilt where supported.
+- **State confirmation (#35):** Unknown, invalid, unavailable, malformed, or unrelated feedback no longer cancels delayed status checks. Confirmation is isolated to the requested field and channel, including feedback before acknowledgement and queued or overlapping commands.
+- **Gateway startup:** Use fresh uptime responses for health when firmware does not answer system-information requests. System information is optional.
+- **Device state parsing:** Read list-form snapshots and indexed updates with the correct channel, without replaying cached rocker events.
+- **Startup and reconnect:** Probe health before large retained subscriptions, separate subscription waiting from command deadlines, and reduce repetitive retained-data debug logging.
+- **Shutter capabilities:** Read actual device configuration so shutters with zero rotation time do not expose tilt controls.
+
+### Changed
+
+- README, MQTT protocol reference, and the H11 test report document command confirmation, Stop encoding, live findings, and test limits. MQTT remains the integration transport; HTTP reads and streaming were evaluated separately.
+- All **612 tests pass** on both Home Assistant 2026.8.2 and 2026.9.4, with **90.88% coverage** on 2026.9.4. Ruff and Hassfest validation pass.
+- Live checks cover five Keller lights, one one-percentage-point shutter movement and restoration, stationary Stop acceptance with fresh position feedback, Home Assistant restart, and MQTT broker recovery. All 138 entity IDs were preserved and original device states/settings restored. Braking during shutter movement, tilt, other rooms, and climate control were not tested.
+
 ## [0.3.3b0] - 2026-09-11
 
 Beta release for physical-device testing. Existing entity IDs and rocker event names are preserved.
