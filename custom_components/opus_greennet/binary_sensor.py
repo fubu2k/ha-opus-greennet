@@ -39,6 +39,19 @@ async def async_setup_entry(
         """Add binary sensor entities for a discovered device."""
         entities: list[BinarySensorEntity] = []
 
+        if device.is_presence_detector:
+            entities.append(
+                OpusGreenNetStateBinarySensor(
+                    coordinator,
+                    eag_id,
+                    gateway_device_id,
+                    device,
+                    "motion",
+                    "motion",
+                    BinarySensorDeviceClass.MOTION,
+                )
+            )
+
         if device.is_smoke_detector:
             for suffix, attr, device_class in (
                 ("smoke_alarm", "smoke_alarm", BinarySensorDeviceClass.SMOKE),

@@ -8,7 +8,9 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
+    LIGHT_LUX,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    UnitOfElectricPotential,
     UnitOfPower,
     UnitOfRatio,
     UnitOfTemperature,
@@ -78,6 +80,28 @@ async def async_setup_entry(
                         eag_id=eag_id,
                         gateway_device_id=gateway_device_id,
                         device=device,
+                    )
+                )
+
+        if device.is_presence_detector:
+            for suffix, device_class, unit in (
+                ("illuminance", SensorDeviceClass.ILLUMINANCE, LIGHT_LUX),
+                (
+                    "supply_voltage",
+                    SensorDeviceClass.VOLTAGE,
+                    UnitOfElectricPotential.VOLT,
+                ),
+                ("battery_level", SensorDeviceClass.BATTERY, UnitOfRatio.PERCENTAGE),
+            ):
+                entities.append(
+                    OpusGreenNetMeasurementSensor(
+                        coordinator,
+                        eag_id,
+                        gateway_device_id,
+                        device,
+                        suffix,
+                        device_class,
+                        unit,
                     )
                 )
 
@@ -257,3 +281,30 @@ class OpusGreenNetSignalStrengthSensor(OpusGreenNetBaseSensor):
         if self._device.dbm is not None:
             return self._device.dbm
         return None
+
+
+class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
+    """A finite, validated numeric reading from a sensor's default channel."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        suffix: str,
+        device_class: SensorDeviceClass,
+        unit: str,
+    ) -> None:
+        super().__init__(coordinator, eag_id, gateway_device_id, device, suffix, suffix)
+        self._state_attribute = suffix
+        self._attr_device_class = device_class
+        self._attr_native_unit_of_measurement = unit
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the parsed value, or unknown before the first valid reading."""
+        channel = self._device.channels.get(DEFAULT_CHANNEL)
+        return getattr(channel, self._state_attribute, None)

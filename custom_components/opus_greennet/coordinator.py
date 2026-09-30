@@ -1281,13 +1281,14 @@ class OpusGreenNetCoordinator:
         )
 
     @staticmethod
-    def _rwm_transmit_modes(modes: list) -> list[dict]:
+    def _rwm_transmit_modes(modes: list) -> list:
         """Resolve the RWM's documented value-only slots, scoped to F6-05-02."""
         keys = ("smokeAlarm", "batteryLow")
         return [
-            {"key": keys[index], **mode} if index < len(keys) else mode
+            {"key": keys[index], **mode}
+            if index < len(keys) and isinstance(mode, dict)
+            else mode
             for index, mode in enumerate(modes)
-            if isinstance(mode, dict)
         ]
 
     @staticmethod

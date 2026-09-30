@@ -72,3 +72,61 @@ def test_smoke_states_are_explicit(make_device, value, expected):
     device = make_device("F6-05-02")
     device.update_from_telegram({"functions": [{"key": "smokeAlarm", "value": value}]})
     assert device.channels[0].smoke_alarm is expected
+
+
+@pytest.mark.parametrize("eep", ["A5-07-01", "A5-07-03"])
+async def test_presence_indexed_states_and_telemetry(hass, mqtt_transport, eep):
+    mqtt_transport.devices = [{"deviceId": "SMS", "eeps": [{"eep": eep}]}]
+    await configure_bridge(hass)
+    motion = await wait_for_entity(hass, "binary_sensor", "AABB0011_SMS_motion")
+    values = {}
+    for suffix in ("illuminance", "supply_voltage", "battery_level"):
+        values[suffix] = await wait_for_entity(hass, "sensor", f"AABB0011_SMS_{suffix}")
+        assert hass.states.get(values[suffix]).state == "unknown"
+    assert hass.states.get(motion).state == "unknown"
+    for index, (key, value) in enumerate(
+        [
+            ("motionDetector", "detected"),
+            ("illuminance", "200"),
+            ("supplyVoltage", "3.2"),
+            ("batteryLevel", "85"),
+        ]
+    ):
+        for field, payload in (("value", value), ("key", key)):
+            mqtt_transport.receive(
+                f"EnOcean/AABB0011/stream/device/SMS/states/{index}/{field}", payload
+            )
+    await asyncio.sleep(0.05)
+    await hass.async_block_till_done()
+    assert hass.states.get(motion).state == "on"
+    for suffix, value, unit in [
+        ("illuminance", 200, "lx"),
+        ("supply_voltage", 3.2, "V"),
+        ("battery_level", 85, "%"),
+    ]:
+        state = hass.states.get(values[suffix])
+        assert float(state.state) == value
+        assert state.attributes["unit_of_measurement"] == unit
+    mqtt_transport.receive(
+        "EnOcean/AABB0011/stream/device/SMS/states/0/value", "noMotion"
+    )
+    mqtt_transport.receive("EnOcean/AABB0011/stream/device/SMS/batteryLevel", "82")
+    await asyncio.sleep(0.05)
+    await hass.async_block_till_done()
+    assert hass.states.get(motion).state == "off"
+    assert float(hass.states.get(values["battery_level"]).state) == 82
+
+
+@pytest.mark.parametrize(
+    "key,attr",
+    [
+        ("illuminance", "illuminance"),
+        ("supplyVoltage", "supply_voltage"),
+        ("batteryLevel", "battery_level"),
+    ],
+)
+@pytest.mark.parametrize("value", ["nan", "inf", "-1", True, [], "bad"])
+def test_presence_invalid_measurements_are_unknown(make_device, key, attr, value):
+    device = make_device("A5-07-03")
+    device.update_from_telegram({"functions": [{"key": key, "value": value}]})
+    assert getattr(device.channels[0], attr) is None

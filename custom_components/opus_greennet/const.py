@@ -109,6 +109,8 @@ EEP_MAPPINGS: Final = {
     "F6-03-01": ("event", "Rocker Switch, 4 Rocker"),
     "F6-03-02": ("event", "Rocker Switch, 4 Rocker"),
     "F6-05-02": ("binary_sensor", "OPUS RWM Smoke Detector"),
+    "A5-07-01": ("binary_sensor", "OPUS SMS Presence Detector"),
+    "A5-07-03": ("binary_sensor", "OPUS SMS Presence Detector"),
     # Liquid Leakage Sensor (F6-05-01)
     "F6-05-01": ("binary_sensor", "Liquid Leakage Sensor"),
 }
@@ -207,6 +209,9 @@ KNOWN_STATE_KEYS: Final = frozenset(
         KEY_SMOKE_ALARM,
         KEY_BATTERY_LOW_RWM,
         "batteryLevel",
+        "motionDetector",
+        "illuminance",
+        "supplyVoltage",
         "temperature",
         "temperatureSetpoint",
         "heaterMode",

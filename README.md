@@ -41,8 +41,8 @@ A custom Home Assistant integration for the Opus GreenNet Bridge, enabling contr
 | **Switch** | D2-01-00, D2-01-01, D2-01-04, D2-01-05, D2-01-08, D2-01-09, D2-01-0C, D2-01-0D, D2-01-0E, D2-01-11 | On/Off switches and actuators |
 | **Cover** | D2-05-00, D2-05-01, D2-05-02 | Blinds, shades, and shutters |
 | **Climate** | D1-4B-05, D1-4B-06, D1-4B-07 | OPUS HeatArea thermostats (Valve, CosiTherm, Electro Heating) |
-| **Sensor** | _(from climate devices)_ | Humidity, feed temperature, power consumption, signal strength |
-| **Binary Sensor** | F6-05-01, F6-05-02, _(from climate devices)_ | Water leak detection, RWM smoke alarm and low battery, window open, actuator errors, battery low |
+| **Sensor** | A5-07-01, A5-07-03, _(from climate devices)_ | Illuminance, supply voltage, battery level, humidity, feed temperature, power consumption, signal strength |
+| **Binary Sensor** | F6-05-01, F6-05-02, A5-07-01, A5-07-03, _(from climate devices)_ | SMS motion detection, water leak detection, RWM smoke alarm and low battery, window open, actuator errors, battery low |
 | **Event** | F6-02-01, F6-02-02, F6-02-03, F6-03-01, F6-03-02 | Rocker switch press/release events, per button (`buttonA0_pressed`, `buttonA0_released`, …, `multipleButtons_released`) with `button` and `action` event attributes |
 
 Cover tilt controls are hidden when the bridge reports `rotationTime` as `0` or

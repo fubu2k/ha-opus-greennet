@@ -51,6 +51,9 @@
       },
       "battery_low": {
         "name": "Battery low"
+      },
+      "motion": {
+        "name": "Motion"
       }
     },
     "cover": {
@@ -75,6 +78,15 @@
       },
       "signal_strength": {
         "name": "Signal strength"
+      },
+      "illuminance": {
+        "name": "Illuminance"
+      },
+      "supply_voltage": {
+        "name": "Supply voltage"
+      },
+      "battery_level": {
+        "name": "Battery level"
       }
     },
     "switch": {

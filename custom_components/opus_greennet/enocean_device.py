@@ -58,6 +58,9 @@ class EnOceanChannel:
     smoke_alarm: bool | None = None
     battery_low: bool | None = None
     battery_level: float | None = None
+    motion: bool | None = None
+    illuminance: float | None = None
+    supply_voltage: float | None = None
     # Climate fields
     temperature: float | None = None
     temperature_setpoint: float | None = None
@@ -167,6 +170,11 @@ class EnOceanDevice:
     def is_smoke_detector(self) -> bool:
         """Return whether this is an OPUS RWM smoke detector."""
         return self.primary_eep == "F6-05-02"
+
+    @property
+    def is_presence_detector(self) -> bool:
+        """Return whether this is a supported SMS presence detector."""
+        return self.primary_eep in ("A5-07-01", "A5-07-03")
 
     @property
     def is_climate(self) -> bool:
@@ -404,6 +412,18 @@ class EnOceanDevice:
             elif key == "batteryLevel":
                 self._update_numeric_field(
                     channel, "battery_level", value, 0, 100, allow_unavailable=True
+                )
+
+            elif key == "motionDetector":
+                channel.motion = self._parse_enum_boolean(value, "detected", "noMotion")
+
+            elif key in ("illuminance", "supplyVoltage"):
+                self._update_numeric_field(
+                    channel,
+                    "illuminance" if key == "illuminance" else "supply_voltage",
+                    value,
+                    minimum=0,
+                    allow_unavailable=True,
                 )
 
             # Climate keys
