@@ -39,6 +39,23 @@ async def async_setup_entry(
         """Add binary sensor entities for a discovered device."""
         entities: list[BinarySensorEntity] = []
 
+        if device.is_smoke_detector:
+            for suffix, attr, device_class in (
+                ("smoke_alarm", "smoke_alarm", BinarySensorDeviceClass.SMOKE),
+                ("battery_low", "battery_low", BinarySensorDeviceClass.BATTERY),
+            ):
+                entities.append(
+                    OpusGreenNetStateBinarySensor(
+                        coordinator,
+                        eag_id,
+                        gateway_device_id,
+                        device,
+                        suffix,
+                        attr,
+                        device_class,
+                    )
+                )
+
         if device.primary_eep == "F6-05-01":
             entities.append(
                 OpusGreenNetMoistureSensor(
@@ -292,3 +309,27 @@ class OpusGreenNetBatterySensor(OpusGreenNetBaseBinarySensor):
         if value is None:
             return None
         return value != "reset"
+
+
+class OpusGreenNetStateBinarySensor(OpusGreenNetBaseBinarySensor):
+    """A parsed optional boolean reported by an EnOcean sensor."""
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        suffix: str,
+        attr_name: str,
+        device_class: BinarySensorDeviceClass | None,
+    ) -> None:
+        super().__init__(coordinator, eag_id, gateway_device_id, device, suffix, suffix)
+        self._state_attribute = attr_name
+        self._attr_device_class = device_class
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return unknown until a valid state has been received."""
+        channel = self._device.channels.get(DEFAULT_CHANNEL)
+        return getattr(channel, self._state_attribute, None)

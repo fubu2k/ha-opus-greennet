@@ -41,7 +41,7 @@ A custom Home Assistant integration for the Opus GreenNet Bridge, enabling contr
 | **Cover** | D2-05-00, D2-05-01, D2-05-02 | Blinds, shades, and shutters |
 | **Climate** | D1-4B-05, D1-4B-06, D1-4B-07 | OPUS HeatArea thermostats (Valve, CosiTherm, Electro Heating) |
 | **Sensor** | _(from climate devices)_ | Humidity, feed temperature, power consumption, signal strength |
-| **Binary Sensor** | F6-05-01, _(from climate devices)_ | Water leak detection, window open, actuator errors, battery low |
+| **Binary Sensor** | F6-05-01, F6-05-02, _(from climate devices)_ | Water leak detection, RWM smoke alarm and low battery, window open, actuator errors, battery low |
 | **Event** | F6-02-01, F6-02-02, F6-02-03, F6-03-01, F6-03-02 | Rocker switch press/release events, per button (`buttonA0_pressed`, `buttonA0_released`, …, `multipleButtons_released`) with `button` and `action` event attributes |
 
 Cover tilt controls are hidden when the bridge reports `rotationTime` as `0` or
@@ -344,6 +344,7 @@ tests/
 ├── test_coordinator_mqtt.py     # MQTT finalization tests
 ├── test_coordinator_parsing.py  # JSON telegrams, fragments, and late discovery
 ├── test_coordinator_transport.py # Subscription, request, and recovery tests
+├── test_detector_support.py     # Sensor discovery and live MQTT updates
 ├── test_cover_stop.py           # Stop command encoding and follow-up queries
 ├── test_reconciliation_feedback.py # Valid feedback, channels, and command timing
 ├── test_event_entity.py         # Rocker switch event entity tests

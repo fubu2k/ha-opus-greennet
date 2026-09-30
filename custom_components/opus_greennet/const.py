@@ -108,9 +108,14 @@ EEP_MAPPINGS: Final = {
     # 4-Button Switch (F6-03-xx)
     "F6-03-01": ("event", "Rocker Switch, 4 Rocker"),
     "F6-03-02": ("event", "Rocker Switch, 4 Rocker"),
+    "F6-05-02": ("binary_sensor", "OPUS RWM Smoke Detector"),
     # Liquid Leakage Sensor (F6-05-01)
     "F6-05-01": ("binary_sensor", "Liquid Leakage Sensor"),
 }
+
+INDEXED_STATE_CONTAINERS: Final = ("states", "transmitModes")
+KEY_SMOKE_ALARM: Final = "smokeAlarm"
+KEY_BATTERY_LOW_RWM: Final = "batteryLow"
 
 # Entity type to platform mapping
 ENTITY_PLATFORMS: Final = {
@@ -199,6 +204,8 @@ KNOWN_STATE_KEYS: Final = frozenset(
         "energy",
         "power",
         "liquidDetected",
+        KEY_SMOKE_ALARM,
+        KEY_BATTERY_LOW_RWM,
         "temperature",
         "temperatureSetpoint",
         "heaterMode",

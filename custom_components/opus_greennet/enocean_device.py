@@ -55,6 +55,8 @@ class EnOceanChannel:
     energy: float | None = None
     power: float | None = None
     liquid_detected: bool | None = None
+    smoke_alarm: bool | None = None
+    battery_low: bool | None = None
     # Climate fields
     temperature: float | None = None
     temperature_setpoint: float | None = None
@@ -159,6 +161,11 @@ class EnOceanDevice:
             return False
         channel = self.channels.get(channel_id)
         return channel is None or channel.rotation_time != 0
+
+    @property
+    def is_smoke_detector(self) -> bool:
+        """Return whether this is an OPUS RWM smoke detector."""
+        return self.primary_eep == "F6-05-02"
 
     @property
     def is_climate(self) -> bool:
@@ -286,6 +293,15 @@ class EnOceanDevice:
                 return False
         return None
 
+    @staticmethod
+    def _parse_enum_boolean(value: Any, on: str, off: str) -> bool | None:
+        """Keep missing or unrecognized detector states unknown."""
+        if value == on:
+            return True
+        if value == off:
+            return False
+        return None
+
     def update_from_telegram(self, telegram: dict[str, Any]) -> None:
         """Update device state from a telegram message."""
         functions = telegram.get("functions", [])
@@ -378,6 +394,12 @@ class EnOceanDevice:
                 liquid_detected = self._parse_boolean(value)
                 if liquid_detected is not None:
                     channel.liquid_detected = liquid_detected
+
+            elif key == "smokeAlarm":
+                channel.smoke_alarm = self._parse_enum_boolean(value, "alarm", "idle")
+
+            elif key == "batteryLow":
+                channel.battery_low = self._parse_enum_boolean(value, "low", "ok")
 
             # Climate keys
             elif key == KEY_TEMPERATURE:
