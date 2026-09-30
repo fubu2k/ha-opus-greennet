@@ -206,6 +206,7 @@ KNOWN_STATE_KEYS: Final = frozenset(
         "liquidDetected",
         KEY_SMOKE_ALARM,
         KEY_BATTERY_LOW_RWM,
+        "batteryLevel",
         "temperature",
         "temperatureSetpoint",
         "heaterMode",

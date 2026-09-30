@@ -21,6 +21,7 @@ A custom Home Assistant integration for the Opus GreenNet Bridge, enabling contr
 ## Features
 
 - **Auto-discovery**: Automatically discovers EnOcean devices connected to your Opus GreenNet Bridge
+- **Immediate telemetry**: Flat battery-level and signal-strength updates bypass the multipart state debounce
 - **Real-time updates**: Receives state changes via MQTT push notifications, including device deltas, local-control telegrams, and bridge-originated command telegrams
 - **Connection recovery**: Checks that the gateway responds, marks entities unavailable during outages, and refreshes discovery and state after reconnection
 - **Command feedback**: Waits for gateway acknowledgements, reports rejected or timed-out commands, and follows accepted commands with channel-specific status checks
@@ -345,6 +346,7 @@ tests/
 ├── test_coordinator_parsing.py  # JSON telegrams, fragments, and late discovery
 ├── test_coordinator_transport.py # Subscription, request, and recovery tests
 ├── test_detector_support.py     # Sensor discovery and live MQTT updates
+├── test_scalar_telemetry.py      # Immediate battery and signal-strength updates
 ├── test_cover_stop.py           # Stop command encoding and follow-up queries
 ├── test_reconciliation_feedback.py # Valid feedback, channels, and command timing
 ├── test_event_entity.py         # Rocker switch event entity tests

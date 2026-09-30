@@ -57,6 +57,7 @@ class EnOceanChannel:
     liquid_detected: bool | None = None
     smoke_alarm: bool | None = None
     battery_low: bool | None = None
+    battery_level: float | None = None
     # Climate fields
     temperature: float | None = None
     temperature_setpoint: float | None = None
@@ -400,6 +401,10 @@ class EnOceanDevice:
 
             elif key == "batteryLow":
                 channel.battery_low = self._parse_enum_boolean(value, "low", "ok")
+            elif key == "batteryLevel":
+                self._update_numeric_field(
+                    channel, "battery_level", value, 0, 100, allow_unavailable=True
+                )
 
             # Climate keys
             elif key == KEY_TEMPERATURE:
