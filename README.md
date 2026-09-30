@@ -49,6 +49,23 @@ Cover tilt controls are hidden when the bridge reports `rotationTime` as `0` or
 device discovery and state updates, without extra configuration queries. When no
 valid rotation time is available, tilt support follows the device's EEP profile.
 
+## Removing or replacing a device
+
+Use **Settings → Devices & services → Opus GreenNet Bridge → Devices**, open the
+child device, and choose **Delete**. The gateway itself cannot be removed this
+way; remove its integration entry to remove the gateway.
+
+This only removes the Home Assistant device and its entities. It sends no unpair
+or deletion command to OPUS. If the gateway reports the device again, it may be
+rediscovered, including after a reload or reconnection. There is no persistent
+ignore list, and quiet devices are never automatically deleted.
+
+When replacing a smoke detector or other device, first remove the old device
+from the gateway's configuration where supported, then delete its stale Home
+Assistant device. The replacement and other devices stay operational. Review
+and update automations referencing the old entities; references are not migrated
+automatically.
+
 ## Prerequisites
 
 1. **Home Assistant** with MQTT integration configured (e.g., Mosquitto add-on)
@@ -344,6 +361,7 @@ tests/
 ├── test_coordinator_mqtt.py     # MQTT finalization tests
 ├── test_coordinator_parsing.py  # JSON telegrams, fragments, and late discovery
 ├── test_coordinator_transport.py # Subscription, request, and recovery tests
+├── test_device_removal.py        # Child removal, rediscovery and request isolation
 ├── test_cover_stop.py           # Stop command encoding and follow-up queries
 ├── test_reconciliation_feedback.py # Valid feedback, channels, and command timing
 ├── test_event_entity.py         # Rocker switch event entity tests

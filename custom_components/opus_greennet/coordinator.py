@@ -58,6 +58,7 @@ from .mqtt_transport import (
 _LOGGER = logging.getLogger(__name__)
 
 # Dispatcher signals
+SIGNAL_DEVICE_REMOVED = f"{DOMAIN}_device_removed"
 SIGNAL_DEVICE_DISCOVERED = f"{DOMAIN}_device_discovered"
 SIGNAL_DEVICE_STATE_UPDATE = f"{DOMAIN}_device_state_update"
 SIGNAL_AVAILABILITY_UPDATE = f"{DOMAIN}_availability_update"
@@ -126,6 +127,32 @@ class OpusGreenNetCoordinator:
         # Gateway info
         self.gateway_info: dict[str, Any] = {}
         self.gateway_uptime: str | None = None
+
+    @callback
+    def async_forget_device(self, device_id: str) -> None:
+        """Discard only this child's state and queued work, without MQTT writes."""
+        self.devices.pop(device_id, None)
+        self._pending_devices.discard(device_id)
+        for cache in (
+            self._device_data,
+            self._telegram_data,
+            self._device_stream_data,
+            self._telegram_received_at,
+            self._device_stream_received_at,
+            self._telegram_paths,
+        ):
+            cache.pop(device_id, None)
+        for timers in (self._pending_telegrams, self._pending_device_streams):
+            if cancel := timers.pop(device_id, None):
+                cancel()
+        self._cancel_reconciliation_queries(device_id)
+        for key in list(self._feedback_revisions):
+            if key[0] == device_id:
+                self._feedback_revisions.pop(key)
+        self._requests.async_cancel_device(device_id)
+        async_dispatcher_send(
+            self.hass, f"{SIGNAL_DEVICE_REMOVED}_{self.eag_id}", device_id
+        )
 
     @property
     def available(self) -> bool:
@@ -914,6 +941,8 @@ class OpusGreenNetCoordinator:
             )
 
     async def _async_reconcile_status(self, device_id: str, channel_id: int) -> None:
+        if self.get_device(device_id) is None:
+            return
         try:
             await self.async_query_device_status(device_id, channel_id)
         except HomeAssistantError:

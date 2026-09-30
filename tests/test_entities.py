@@ -468,7 +468,9 @@ async def test_platform_setup_adds_expected_entities(
 
     entities = async_add_entities.call_args.args[0]
     assert len(entities) == expected_count
-    entry.async_on_unload.assert_called_once()
+    assert entry.async_on_unload.call_count == (
+        2 if setup is async_setup_sensors else 1
+    )
 
 
 @pytest.mark.asyncio
