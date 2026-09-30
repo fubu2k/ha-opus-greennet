@@ -16,15 +16,33 @@ from tests.ha_helpers import configure_bridge, wait_for_entity
 
 
 @pytest.mark.parametrize("rediscover", [False, True])
-async def test_remove_child_reload_and_rediscovery(hass, mqtt_transport, rediscover):
-    old = {"deviceId": "OLD", "eeps": [{"eep": "D1-4B-05"}], "states": {"humidity": 50}}
-    replacement = {"deviceId": "NEW", "eeps": [{"eep": "D2-01-00"}]}
+@pytest.mark.parametrize(
+    "eep,domain,suffix,states,expected",
+    [
+        ("D1-4B-05", "sensor", "humidity", {"humidity": 50}, "50.0"),
+        ("F6-05-02", "binary_sensor", "smoke_alarm", {"smokeAlarm": "idle"}, "off"),
+        ("A5-07-03", "sensor", "battery_level", {"batteryLevel": 85}, "85.0"),
+        ("D2-06-40", "lock", "autolock", {"lock": "locked"}, "locked"),
+    ],
+)
+async def test_remove_child_reload_and_rediscovery(
+    hass, mqtt_transport, rediscover, eep, domain, suffix, states, expected
+):
+    old = {"deviceId": "OLD", "eeps": [{"eep": eep}], "states": states}
+    replacement = {**old, "deviceId": "NEW"}
     mqtt_transport.devices = [old, replacement]
     entry = (await configure_bridge(hass))["result"]
-    humidity = await wait_for_entity(hass, "sensor", "AABB0011_OLD_humidity")
-    switch = await wait_for_entity(hass, "switch", "AABB0011_NEW")
+    removed_entity = await wait_for_entity(hass, domain, f"AABB0011_OLD_{suffix}")
+    replacement_entity = await wait_for_entity(hass, domain, f"AABB0011_NEW_{suffix}")
     registry = dr.async_get(hass)
-    child = registry.async_get_device(identifiers={(DOMAIN, "AABB0011_OLD")})
+    child = next(
+        (
+            device
+            for device in registry.devices.values()
+            if (DOMAIN, "AABB0011_OLD") in device.identifiers
+        ),
+        None,
+    )
     gateway = registry.async_get(entry.runtime_data.gateway_device_id)
     assert not await async_remove_config_entry_device(hass, entry, gateway)
     before = list(mqtt_transport.published)
@@ -32,29 +50,37 @@ async def test_remove_child_reload_and_rediscovery(hass, mqtt_transport, redisco
     registry.async_update_device(child.id, remove_config_entry_id=entry.entry_id)
     await hass.async_block_till_done()
     assert mqtt_transport.published == before
-    assert hass.states.get(humidity) is None
-    assert hass.states.get(switch) is not None
+    assert hass.states.get(removed_entity) is None
+    assert hass.states.get(replacement_entity) is not None
     assert "OLD" not in entry.runtime_data.coordinator.devices
     assert "NEW" in entry.runtime_data.coordinator.devices
 
     if rediscover:
         mqtt_transport.receive("EnOcean/AABB0011/getAnswer/devices", {"devices": [old]})
-        await wait_for_entity(hass, "sensor", "AABB0011_OLD_humidity")
+        await wait_for_entity(hass, domain, f"AABB0011_OLD_{suffix}")
         entities = [
             e
             for e in er.async_get(hass).entities.values()
-            if e.unique_id == "AABB0011_OLD_humidity"
+            if e.unique_id == f"AABB0011_OLD_{suffix}"
         ]
         assert len(entities) == 1
-        assert float(hass.states.get(entities[0].entity_id).state) == 50
+        assert hass.states.get(entities[0].entity_id).state == expected
     else:
         mqtt_transport.devices = [replacement]
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert (
-        registry.async_get_device(identifiers={(DOMAIN, "AABB0011_OLD")}) is not None
+        next(
+            (
+                device
+                for device in registry.devices.values()
+                if (DOMAIN, "AABB0011_OLD") in device.identifiers
+            ),
+            None,
+        )
+        is not None
     ) == rediscover
-    assert hass.states.get(switch) is not None
+    assert hass.states.get(replacement_entity) is not None
 
 
 async def test_removal_rejects_foreign_identifiers(hass, mqtt_transport):
