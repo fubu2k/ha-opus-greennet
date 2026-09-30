@@ -109,6 +109,9 @@ EEP_MAPPINGS: Final = {
     "F6-03-01": ("event", "Rocker Switch, 4 Rocker"),
     "F6-03-02": ("event", "Rocker Switch, 4 Rocker"),
     "F6-05-02": ("binary_sensor", "OPUS RWM Smoke Detector"),
+    "D2-06-40": ("lock", "HOPPE SecureConnect Window Handle"),
+    "F6-10-00": ("sensor", "HOPPE Window Handle"),
+    "D2-03-10": ("sensor", "HOPPE Window Handle"),
     # Liquid Leakage Sensor (F6-05-01)
     "F6-05-01": ("binary_sensor", "Liquid Leakage Sensor"),
 }
@@ -204,6 +207,10 @@ KNOWN_STATE_KEYS: Final = frozenset(
         "energy",
         "power",
         "liquidDetected",
+        "handleState",
+        "lock",
+        "unlockRequest",
+        "mechanicsFault",
         KEY_SMOKE_ALARM,
         KEY_BATTERY_LOW_RWM,
         "temperature",

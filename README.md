@@ -42,12 +42,29 @@ A custom Home Assistant integration for the Opus GreenNet Bridge, enabling contr
 | **Climate** | D1-4B-05, D1-4B-06, D1-4B-07 | OPUS HeatArea thermostats (Valve, CosiTherm, Electro Heating) |
 | **Sensor** | _(from climate devices)_ | Humidity, feed temperature, power consumption, signal strength |
 | **Binary Sensor** | F6-05-01, F6-05-02, _(from climate devices)_ | Water leak detection, RWM smoke alarm and low battery, window open, actuator errors, battery low |
+| **Handle sensors** | D2-06-40, F6-10-00, D2-03-10 | Handle position plus separate open, tilted and closed binary sensors |
+| **Lock** | D2-06-40 | Read-only AutoLock status, unlock-request sensor and mechanics-fault binary sensor |
 | **Event** | F6-02-01, F6-02-02, F6-02-03, F6-03-01, F6-03-02 | Rocker switch press/release events, per button (`buttonA0_pressed`, `buttonA0_released`, …, `multipleButtons_released`) with `button` and `action` event attributes |
 
 Cover tilt controls are hidden when the bridge reports `rotationTime` as `0` or
 `noRotation`, as used for plain roller shutters. The integration uses the existing
 device discovery and state updates, without extra configuration queries. When no
 valid rotation time is available, tilt support follows the device's EEP profile.
+
+### HOPPE window handles
+
+All three handle profiles provide a position sensor and separate Open, Tilted,
+and Closed binary sensors. `tilt` is normalized to `tilted`; missing or invalid
+positions stay unknown. These report handle position, not an independent
+measurement of the window sash. For Cover Control Automation, assign the Open
+and Tilted binary sensors to its respective window-contact inputs.
+
+D2-06-40 also exposes the reported lock state independently of handle position,
+an unlock-request sensor, and a mechanics-fault sensor. AutoLock is read-only:
+lock/unlock actions raise an error without publishing MQTT commands. The
+reporter's tested MQTT write path disrupted the gateway bridge, and control
+remains disabled pending manufacturer clarification. AutoLock configuration and
+reported lock state are separate; a closed handle does not imply a locked handle.
 
 ## Prerequisites
 
@@ -325,6 +342,7 @@ custom_components/opus_greennet/
 ├── enocean_device.py     # Device and channel data model
 ├── entity.py             # Shared entity and device-registry behavior
 ├── diagnostics.py        # Redacted integration diagnostics
+├── lock.py               # Read-only HOPPE AutoLock status
 ├── light.py              # Light entity platform
 ├── switch.py             # Switch entity platform
 ├── cover.py              # Cover entity platform
@@ -345,6 +363,7 @@ tests/
 ├── test_coordinator_parsing.py  # JSON telegrams, fragments, and late discovery
 ├── test_coordinator_transport.py # Subscription, request, and recovery tests
 ├── test_detector_support.py     # Sensor discovery and live MQTT updates
+├── test_window_handles.py        # Handle positions and protected AutoLock actions
 ├── test_cover_stop.py           # Stop command encoding and follow-up queries
 ├── test_reconciliation_feedback.py # Valid feedback, channels, and command timing
 ├── test_event_entity.py         # Rocker switch event entity tests

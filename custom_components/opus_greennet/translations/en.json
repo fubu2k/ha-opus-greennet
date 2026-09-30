@@ -51,6 +51,18 @@
       },
       "battery_low": {
         "name": "Battery low"
+      },
+      "handle_open": {
+        "name": "Handle open"
+      },
+      "handle_tilt": {
+        "name": "Handle tilted"
+      },
+      "handle_closed": {
+        "name": "Handle closed"
+      },
+      "mechanics_fault": {
+        "name": "Mechanics fault"
       }
     },
     "cover": {
@@ -75,11 +87,27 @@
       },
       "signal_strength": {
         "name": "Signal strength"
+      },
+      "handle_state": {
+        "name": "Handle position",
+        "state": {
+          "open": "Open",
+          "closed": "Closed",
+          "tilted": "Tilted"
+        }
+      },
+      "unlock_request": {
+        "name": "Unlock request"
       }
     },
     "switch": {
       "channel": {
         "name": "Channel {channel}"
+      }
+    },
+    "lock": {
+      "autolock": {
+        "name": "AutoLock"
       }
     }
   },
@@ -119,6 +147,9 @@
     },
     "request_cancelled": {
       "message": "The request was cancelled because the integration is unloading or its connection was lost."
+    },
+    "autolock_read_only": {
+      "message": "AutoLock control via MQTT is disabled pending manufacturer clarification. Only the reported lock state is available."
     }
   },
   "services": {

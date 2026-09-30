@@ -40,6 +40,7 @@ PLATFORMS: list[Platform] = [
     Platform.SENSOR,
     Platform.BINARY_SENSOR,
     Platform.EVENT,
+    Platform.LOCK,
 ]
 
 SERVICE_GET_DEVICE_CONFIG = "get_device_configuration"

@@ -57,6 +57,10 @@ class EnOceanChannel:
     liquid_detected: bool | None = None
     smoke_alarm: bool | None = None
     battery_low: bool | None = None
+    handle_state: str | None = None
+    is_locked: bool | None = None
+    unlock_request: bool | None = None
+    mechanics_fault: bool | None = None
     # Climate fields
     temperature: float | None = None
     temperature_setpoint: float | None = None
@@ -166,6 +170,16 @@ class EnOceanDevice:
     def is_smoke_detector(self) -> bool:
         """Return whether this is an OPUS RWM smoke detector."""
         return self.primary_eep == "F6-05-02"
+
+    @property
+    def is_window_handle(self) -> bool:
+        """Return whether this profile reports HOPPE handle positions."""
+        return self.primary_eep in ("D2-06-40", "F6-10-00", "D2-03-10")
+
+    @property
+    def has_autolock(self) -> bool:
+        """Return whether this handle reports SecureConnect lock status."""
+        return self.primary_eep == "D2-06-40"
 
     @property
     def is_climate(self) -> bool:
@@ -400,6 +414,24 @@ class EnOceanDevice:
 
             elif key == "batteryLow":
                 channel.battery_low = self._parse_enum_boolean(value, "low", "ok")
+
+            elif key == "handleState":
+                if value == "tilt":
+                    value = "tilted"
+                channel.handle_state = (
+                    value if value in ("open", "closed", "tilted") else None
+                )
+
+            elif key == "lock":
+                channel.is_locked = self._parse_enum_boolean(
+                    value, "locked", "unlocked"
+                )
+
+            elif key == "unlockRequest":
+                channel.unlock_request = self._parse_boolean(value)
+
+            elif key == "mechanicsFault":
+                channel.mechanics_fault = self._parse_boolean(value)
 
             # Climate keys
             elif key == KEY_TEMPERATURE:
