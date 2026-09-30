@@ -21,6 +21,7 @@ from homeassistant.helpers.event import async_call_later, async_track_time_inter
 from .const import (
     BUTTON_KEYS,
     DOMAIN,
+    INDEXED_STATE_CONTAINERS,
     KEY_CHANNEL,
     KEY_ROTATION_TIME,
     KEY_STOP,
@@ -390,7 +391,7 @@ class OpusGreenNetCoordinator:
             )
 
             if self.get_device(device_id) is not None and re.match(
-                r"(?:states|configuration/parameters)/\d+/", property_path
+                r"(?:states|transmitModes|configuration/parameters)/\d+/", property_path
             ):
                 self._buffer_device_stream_property(
                     device_id, property_path, payload, received_at
@@ -499,21 +500,17 @@ class OpusGreenNetCoordinator:
 
         # Indexed device-model deltas may contain only states/N/value. Resolve
         # their unchanged key/channel metadata from the accumulated snapshot.
-        states_delta = stream_data.get("states")
-        cached_states = cached_data.get("states")
-        if isinstance(states_delta, list) and isinstance(cached_states, list):
-            changed_states = self._indexed_changed_functions(
-                states_delta, cached_states
-            )
-            functions = self._device_state_functions({"states": changed_states})
-        else:
-            functions = self._device_state_functions(
-                {
-                    key: value
-                    for key, value in stream_data.items()
-                    if key != "configuration"
-                }
-            )
+        state_delta = {
+            key: value for key, value in stream_data.items() if key != "configuration"
+        }
+        for container in INDEXED_STATE_CONTAINERS:
+            delta = stream_data.get(container)
+            cached = cached_data.get(container)
+            if isinstance(delta, list) and isinstance(cached, list):
+                if container == "transmitModes" and device.is_smoke_detector:
+                    cached = self._rwm_transmit_modes(cached)
+                state_delta[container] = self._indexed_changed_functions(delta, cached)
+        functions = self._device_state_functions(state_delta)
 
         configuration = stream_data.get("configuration")
         cached_configuration = cached_data.get("configuration")
@@ -1132,7 +1129,7 @@ class OpusGreenNetCoordinator:
         changed_indices = {
             index
             for index, function in enumerate(delta)
-            if isinstance(function, dict) and "value" in function
+            if isinstance(function, dict) and ("value" in function or "key" in function)
         }
         changed = []
         channel = default_channel
@@ -1203,9 +1200,37 @@ class OpusGreenNetCoordinator:
                 if (key in KNOWN_STATE_KEYS or key == KEY_CHANNEL)
                 and key not in BUTTON_KEYS
             ]
+        modes = data.get("transmitModes", [])
+        eeps = data.get("eeps", [])
+        if (
+            isinstance(eeps, list)
+            and any(
+                isinstance(eep, dict) and eep.get("eep") == "F6-05-02" for eep in eeps
+            )
+            and isinstance(modes, list)
+        ):
+            modes = OpusGreenNetCoordinator._rwm_transmit_modes(modes)
+        if isinstance(modes, list):
+            state_functions.extend(
+                function
+                for function in modes
+                if isinstance(function, dict)
+                and function.get("key") in ("smokeAlarm", "batteryLow")
+                and "value" in function
+            )
         return state_functions + OpusGreenNetCoordinator._configuration_state_functions(
             data
         )
+
+    @staticmethod
+    def _rwm_transmit_modes(modes: list) -> list[dict]:
+        """Resolve the RWM's documented value-only slots, scoped to F6-05-02."""
+        keys = ("smokeAlarm", "batteryLow")
+        return [
+            {"key": keys[index], **mode} if index < len(keys) else mode
+            for index, mode in enumerate(modes)
+            if isinstance(mode, dict)
+        ]
 
     @staticmethod
     def _has_operational_state(functions: list[dict[str, Any]]) -> bool:
