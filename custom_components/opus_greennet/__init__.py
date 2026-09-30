@@ -198,7 +198,7 @@ async def async_remove_config_entry_device(
 ) -> bool:
     """Forget one child locally; never unpair it or remove the gateway."""
     eag_id = entry.data[CONF_EAG_ID]
-    if entry.entry_id not in device_entry.config_entries:
+    if device_entry.config_entry_id != entry.entry_id:
         return False
     if (DOMAIN, eag_id) in device_entry.identifiers:
         return False

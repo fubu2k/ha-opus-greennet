@@ -24,19 +24,14 @@ async def test_remove_child_reload_and_rediscovery(hass, mqtt_transport, redisco
     humidity = await wait_for_entity(hass, "sensor", "AABB0011_OLD_humidity")
     switch = await wait_for_entity(hass, "switch", "AABB0011_NEW")
     registry = dr.async_get(hass)
-    child = next(
-        (
-            device
-            for device in registry.devices.values()
-            if (DOMAIN, "AABB0011_OLD") in device.identifiers
-        ),
-        None,
+    child = registry.async_get_device_by_identifier(
+        (DOMAIN, "AABB0011_OLD"), entry.entry_id
     )
     gateway = registry.async_get(entry.runtime_data.gateway_device_id)
     assert not await async_remove_config_entry_device(hass, entry, gateway)
     before = list(mqtt_transport.published)
     assert await async_remove_config_entry_device(hass, entry, child)
-    registry.async_update_device(child.id, remove_config_entry_id=entry.entry_id)
+    registry.async_remove_device(child.id)
     await hass.async_block_till_done()
     assert mqtt_transport.published == before
     assert hass.states.get(humidity) is None
@@ -59,13 +54,8 @@ async def test_remove_child_reload_and_rediscovery(hass, mqtt_transport, redisco
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert (
-        next(
-            (
-                device
-                for device in registry.devices.values()
-                if (DOMAIN, "AABB0011_OLD") in device.identifiers
-            ),
-            None,
+        registry.async_get_device_by_identifier(
+            (DOMAIN, "AABB0011_OLD"), entry.entry_id
         )
         is not None
     ) == rediscover
@@ -83,7 +73,9 @@ async def test_removal_rejects_foreign_identifiers(hass, mqtt_transport):
         assert not await async_remove_config_entry_device(
             hass,
             entry,
-            SimpleNamespace(identifiers=identifiers, config_entries=entries),
+            SimpleNamespace(
+                identifiers=identifiers, config_entry_id=next(iter(entries))
+            ),
         )
 
 
