@@ -192,6 +192,33 @@ async def async_unload_entry(
     return True
 
 
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    entry: OpusGreenNetConfigEntry,
+    device_entry: dr.DeviceEntry,
+) -> bool:
+    """Forget one child locally; never unpair it or remove the gateway."""
+    eag_id = entry.data[CONF_EAG_ID]
+    if entry.entry_id not in device_entry.config_entries:
+        return False
+    if (DOMAIN, eag_id) in device_entry.identifiers:
+        return False
+    prefix = f"{eag_id}_"
+    child_ids = [
+        identifier[len(prefix) :]
+        for domain, identifier in device_entry.identifiers
+        if domain == DOMAIN
+        and identifier.startswith(prefix)
+        and identifier[len(prefix) :]
+    ]
+    if len(child_ids) != 1:
+        return False
+    # Registry-only stale devices can also be removed when this entry is unloaded.
+    if entry.state is ConfigEntryState.LOADED:
+        entry.runtime_data.coordinator.async_forget_device(child_ids[0])
+    return True
+
+
 def _register_services(hass: HomeAssistant) -> None:
     """Register integration service actions once."""
     if hass.services.has_service(DOMAIN, SERVICE_GET_DEVICE_CONFIG):

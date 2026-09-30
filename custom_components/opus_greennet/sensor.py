@@ -24,6 +24,7 @@ from . import OpusGreenNetConfigEntry
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL
 from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
+    SIGNAL_DEVICE_REMOVED,
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanDevice
@@ -139,6 +140,23 @@ async def async_setup_entry(
 
         if new_entities:
             async_add_entities(new_entities)
+
+    @callback
+    def async_forget_sensors(device_id: str) -> None:
+        prefix = f"{eag_id}_{device_id}_"
+        added_unique_ids.difference_update(
+            [
+                unique_id
+                for unique_id in added_unique_ids
+                if unique_id.startswith(prefix)
+            ]
+        )
+
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass, f"{SIGNAL_DEVICE_REMOVED}_{eag_id}", async_forget_sensors
+        )
+    )
 
     # Listen for new device discoveries
     entry.async_on_unload(

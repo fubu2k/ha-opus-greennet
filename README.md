@@ -67,6 +67,23 @@ reporter's tested MQTT write path disrupted the gateway bridge, and control
 remains disabled pending manufacturer clarification. AutoLock configuration and
 reported lock state are separate; a closed handle does not imply a locked handle.
 
+## Removing or replacing a device
+
+Use **Settings → Devices & services → Opus GreenNet Bridge → Devices**, open the
+child device, and choose **Delete**. The gateway itself cannot be removed this
+way; remove its integration entry to remove the gateway.
+
+This only removes the Home Assistant device and its entities. It sends no unpair
+or deletion command to OPUS. If the gateway reports the device again, it may be
+rediscovered, including after a reload or reconnection. There is no persistent
+ignore list, and quiet devices are never automatically deleted.
+
+When replacing a smoke detector or other device, first remove the old device
+from the gateway's configuration where supported, then delete its stale Home
+Assistant device. The replacement and other devices stay operational. Review
+and update automations referencing the old entities; references are not migrated
+automatically.
+
 ## Prerequisites
 
 1. **Home Assistant** with MQTT integration configured (e.g., Mosquitto add-on)
@@ -366,6 +383,8 @@ tests/
 ├── test_detector_support.py     # Sensor discovery and live MQTT updates
 ├── test_scalar_telemetry.py      # Immediate battery and signal-strength updates
 ├── test_window_handles.py        # Handle positions and protected AutoLock actions
+
+├── test_device_removal.py        # Child removal, rediscovery and request isolation
 ├── test_cover_stop.py           # Stop command encoding and follow-up queries
 ├── test_reconciliation_feedback.py # Valid feedback, channels, and command timing
 ├── test_event_entity.py         # Rocker switch event entity tests
