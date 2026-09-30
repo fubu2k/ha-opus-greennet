@@ -105,6 +105,7 @@ class MQTTRequestManager:
         self.hass = hass
         self._closed = False
         self._generation = 0
+        self._device_generations: dict[str, int] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._waiters: dict[asyncio.Future, str] = {}
         self._cleanups: set[Callable[[], None]] = set()
@@ -132,6 +133,16 @@ class MQTTRequestManager:
             cancel()
 
     @callback
+    def async_cancel_device(self, device_id: str) -> None:
+        """Invalidate active and queued requests for a removed child only."""
+        self._device_generations[device_id] = (
+            self._device_generations.get(device_id, 0) + 1
+        )
+        for future, owner in self._waiters.copy().items():
+            if owner == device_id and not future.done():
+                future.set_exception(request_error("request_cancelled", device_id))
+
+    @callback
     def async_close(self) -> None:
         """Prevent new operations and cancel current response waits."""
         self._closed = True
@@ -154,8 +165,13 @@ class MQTTRequestManager:
         # inherent protocol limitation and is never treated as device state.
         lock = self._locks.setdefault(answer_topic, asyncio.Lock())
         generation = self._generation
+        device_generation = self._device_generations.get(device_id, 0)
         async with lock:
-            if self._closed or generation != self._generation:
+            if (
+                self._closed
+                or generation != self._generation
+                or device_generation != self._device_generations.get(device_id, 0)
+            ):
                 raise request_error("request_cancelled", device_id)
             if not mqtt.is_connected(self.hass):
                 raise request_error("mqtt_unavailable", device_id)
@@ -205,7 +221,12 @@ class MQTTRequestManager:
                         )
                     )
                     await subscribed
-                    if self._closed or generation != self._generation:
+                    if (
+                        self._closed
+                        or generation != self._generation
+                        or device_generation
+                        != self._device_generations.get(device_id, 0)
+                    ):
                         raise request_error("request_cancelled", device_id)
                     if not mqtt.is_connected(self.hass):
                         raise request_error("mqtt_unavailable", device_id)
@@ -217,7 +238,10 @@ class MQTTRequestManager:
                     await mqtt.async_publish(
                         self.hass, topic, payload, qos=1, retain=False
                     )
-                    return await response
+                    result = await response
+                    if device_generation != self._device_generations.get(device_id, 0):
+                        raise request_error("request_cancelled", device_id)
+                    return result
             except TimeoutError as err:
                 raise request_error("request_timeout", device_id) from err
             finally:

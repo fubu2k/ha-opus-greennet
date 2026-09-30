@@ -8,7 +8,9 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
+    LIGHT_LUX,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    UnitOfElectricPotential,
     UnitOfPower,
     UnitOfRatio,
     UnitOfTemperature,
@@ -22,6 +24,7 @@ from . import OpusGreenNetConfigEntry
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL
 from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
+    SIGNAL_DEVICE_REMOVED,
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanDevice
@@ -81,6 +84,41 @@ async def async_setup_entry(
                     )
                 )
 
+        if device.is_presence_detector:
+            for suffix, device_class, unit in (
+                ("illuminance", SensorDeviceClass.ILLUMINANCE, LIGHT_LUX),
+                (
+                    "supply_voltage",
+                    SensorDeviceClass.VOLTAGE,
+                    UnitOfElectricPotential.VOLT,
+                ),
+                ("battery_level", SensorDeviceClass.BATTERY, UnitOfRatio.PERCENTAGE),
+            ):
+                entities.append(
+                    OpusGreenNetMeasurementSensor(
+                        coordinator,
+                        eag_id,
+                        gateway_device_id,
+                        device,
+                        suffix,
+                        device_class,
+                        unit,
+                    )
+                )
+
+        if device.is_window_handle:
+            entities.append(
+                OpusGreenNetHandleSensor(
+                    coordinator, eag_id, gateway_device_id, device, "handle_state"
+                )
+            )
+            if device.has_autolock:
+                entities.append(
+                    OpusGreenNetHandleSensor(
+                        coordinator, eag_id, gateway_device_id, device, "unlock_request"
+                    )
+                )
+
         # Signal strength sensor (all devices with dbm data)
         entities.append(
             OpusGreenNetSignalStrengthSensor(
@@ -102,6 +140,23 @@ async def async_setup_entry(
 
         if new_entities:
             async_add_entities(new_entities)
+
+    @callback
+    def async_forget_sensors(device_id: str) -> None:
+        prefix = f"{eag_id}_{device_id}_"
+        added_unique_ids.difference_update(
+            [
+                unique_id
+                for unique_id in added_unique_ids
+                if unique_id.startswith(prefix)
+            ]
+        )
+
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass, f"{SIGNAL_DEVICE_REMOVED}_{eag_id}", async_forget_sensors
+        )
+    )
 
     # Listen for new device discoveries
     entry.async_on_unload(
@@ -257,3 +312,54 @@ class OpusGreenNetSignalStrengthSensor(OpusGreenNetBaseSensor):
         if self._device.dbm is not None:
             return self._device.dbm
         return None
+
+
+class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
+    """A finite, validated numeric reading from a sensor's default channel."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        suffix: str,
+        device_class: SensorDeviceClass,
+        unit: str,
+    ) -> None:
+        super().__init__(coordinator, eag_id, gateway_device_id, device, suffix, suffix)
+        self._state_attribute = suffix
+        self._attr_device_class = device_class
+        self._attr_native_unit_of_measurement = unit
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the parsed value, or unknown before the first valid reading."""
+        channel = self._device.channels.get(DEFAULT_CHANNEL)
+        return getattr(channel, self._state_attribute, None)
+
+
+class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
+    """Handle position or the independent reported unlock request."""
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        suffix: str,
+    ) -> None:
+        super().__init__(coordinator, eag_id, gateway_device_id, device, suffix, suffix)
+        self._state_attribute = suffix
+        if suffix == "handle_state":
+            self._attr_device_class = SensorDeviceClass.ENUM
+            self._attr_options = ["open", "closed", "tilted"]
+
+    @property
+    def native_value(self) -> str | bool | None:
+        """Return the reported value independently of other handle attributes."""
+        channel = self._device.channels.get(DEFAULT_CHANNEL)
+        return getattr(channel, self._state_attribute, None)

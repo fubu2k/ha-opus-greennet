@@ -21,6 +21,7 @@ from homeassistant.helpers.event import async_call_later, async_track_time_inter
 from .const import (
     BUTTON_KEYS,
     DOMAIN,
+    INDEXED_STATE_CONTAINERS,
     KEY_CHANNEL,
     KEY_ROTATION_TIME,
     KEY_STOP,
@@ -58,10 +59,12 @@ from .mqtt_transport import (
 _LOGGER = logging.getLogger(__name__)
 
 # Dispatcher signals
+SIGNAL_DEVICE_REMOVED = f"{DOMAIN}_device_removed"
 SIGNAL_DEVICE_DISCOVERED = f"{DOMAIN}_device_discovered"
 SIGNAL_DEVICE_STATE_UPDATE = f"{DOMAIN}_device_state_update"
 SIGNAL_AVAILABILITY_UPDATE = f"{DOMAIN}_availability_update"
 
+FAST_PATH_PROPERTIES = frozenset({"batteryLevel", "dbm"})
 DEVICE_STREAM_FINALIZE_DELAY = 0.02
 TELEGRAM_FINALIZE_DELAY = 0.15
 RAW_MQTT_DEBUG_PAYLOAD_LIMIT = 500
@@ -126,6 +129,32 @@ class OpusGreenNetCoordinator:
         # Gateway info
         self.gateway_info: dict[str, Any] = {}
         self.gateway_uptime: str | None = None
+
+    @callback
+    def async_forget_device(self, device_id: str) -> None:
+        """Discard only this child's state and queued work, without MQTT writes."""
+        self.devices.pop(device_id, None)
+        self._pending_devices.discard(device_id)
+        for cache in (
+            self._device_data,
+            self._telegram_data,
+            self._device_stream_data,
+            self._telegram_received_at,
+            self._device_stream_received_at,
+            self._telegram_paths,
+        ):
+            cache.pop(device_id, None)
+        for timers in (self._pending_telegrams, self._pending_device_streams):
+            if cancel := timers.pop(device_id, None):
+                cancel()
+        self._cancel_reconciliation_queries(device_id)
+        for key in list(self._feedback_revisions):
+            if key[0] == device_id:
+                self._feedback_revisions.pop(key)
+        self._requests.async_cancel_device(device_id)
+        async_dispatcher_send(
+            self.hass, f"{SIGNAL_DEVICE_REMOVED}_{self.eag_id}", device_id
+        )
 
     @property
     def available(self) -> bool:
@@ -390,7 +419,7 @@ class OpusGreenNetCoordinator:
             )
 
             if self.get_device(device_id) is not None and re.match(
-                r"(?:states|configuration/parameters)/\d+/", property_path
+                r"(?:states|transmitModes|configuration/parameters)/\d+/", property_path
             ):
                 self._buffer_device_stream_property(
                     device_id, property_path, payload, received_at
@@ -444,12 +473,57 @@ class OpusGreenNetCoordinator:
                 if isinstance(msg.payload, bytes)
                 else str(msg.payload)
             )
+            if self._apply_scalar_telemetry(
+                device_id, property_path, payload, received_at
+            ):
+                return
             self._buffer_device_stream_property(
                 device_id, property_path, payload, received_at
             )
 
         except Exception as err:
             _LOGGER.exception("Error handling device stream message: %s", err)
+
+    def _apply_scalar_telemetry(
+        self, device_id: str, property_path: str, payload: str, received_at: float
+    ) -> bool:
+        """Apply standalone battery/RSSI readings without a debounce timer."""
+        device = self.devices.get(device_id)
+        if device is None or property_path not in FAST_PATH_PROPERTIES:
+            return False
+        value = self._parse_value(payload)
+        if value != "notAvailable":
+            parsed = EnOceanDevice._parse_number(
+                value,
+                minimum=0 if property_path == "batteryLevel" else None,
+                maximum=100 if property_path == "batteryLevel" else None,
+                integer=property_path == "dbm",
+            )
+            if parsed is None:
+                return True
+            value = parsed
+        cached = self._device_data.setdefault(device_id, {"deviceId": device_id})
+        cached[property_path] = value
+        # A buffered older scalar must not overwrite this newer reading later.
+        self._device_stream_data.get(device_id, {}).pop(property_path, None)
+        if property_path == "dbm":
+            previous = device.dbm
+            device.dbm = None if value == "notAvailable" else int(value)
+            changed = previous != device.dbm
+        else:
+            channel = device.get_or_create_channel()
+            previous = channel.battery_level
+            device.update_from_telegram(
+                {"functions": [{"key": "batteryLevel", "value": value}]}
+            )
+            changed = previous != channel.battery_level
+        if changed:
+            signal = f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}"
+            self._mark_and_log_dispatch(
+                device, "stream/device", signal, received_at, received_at
+            )
+            async_dispatcher_send(self.hass, signal, device)
+        return True
 
     def _buffer_device_stream_property(
         self, device_id: str, property_path: str, payload: str, received_at: float
@@ -499,21 +573,17 @@ class OpusGreenNetCoordinator:
 
         # Indexed device-model deltas may contain only states/N/value. Resolve
         # their unchanged key/channel metadata from the accumulated snapshot.
-        states_delta = stream_data.get("states")
-        cached_states = cached_data.get("states")
-        if isinstance(states_delta, list) and isinstance(cached_states, list):
-            changed_states = self._indexed_changed_functions(
-                states_delta, cached_states
-            )
-            functions = self._device_state_functions({"states": changed_states})
-        else:
-            functions = self._device_state_functions(
-                {
-                    key: value
-                    for key, value in stream_data.items()
-                    if key != "configuration"
-                }
-            )
+        state_delta = {
+            key: value for key, value in stream_data.items() if key != "configuration"
+        }
+        for container in INDEXED_STATE_CONTAINERS:
+            delta = stream_data.get(container)
+            cached = cached_data.get(container)
+            if isinstance(delta, list) and isinstance(cached, list):
+                if container == "transmitModes" and device.is_smoke_detector:
+                    cached = self._rwm_transmit_modes(cached)
+                state_delta[container] = self._indexed_changed_functions(delta, cached)
+        functions = self._device_state_functions(state_delta)
 
         configuration = stream_data.get("configuration")
         cached_configuration = cached_data.get("configuration")
@@ -914,6 +984,8 @@ class OpusGreenNetCoordinator:
             )
 
     async def _async_reconcile_status(self, device_id: str, channel_id: int) -> None:
+        if self.get_device(device_id) is None:
+            return
         try:
             await self.async_query_device_status(device_id, channel_id)
         except HomeAssistantError:
@@ -969,6 +1041,14 @@ class OpusGreenNetCoordinator:
 
     def _parse_value(self, value: str) -> Any:
         """Parse a string value to appropriate type."""
+        if value.startswith('"'):
+            try:
+                decoded = json.loads(value)
+            except ValueError:
+                pass
+            else:
+                if isinstance(decoded, str):
+                    value = decoded
         if value.lower() == "true":
             return True
         if value.lower() == "false":
@@ -1132,7 +1212,7 @@ class OpusGreenNetCoordinator:
         changed_indices = {
             index
             for index, function in enumerate(delta)
-            if isinstance(function, dict) and "value" in function
+            if isinstance(function, dict) and ("value" in function or "key" in function)
         }
         changed = []
         channel = default_channel
@@ -1203,9 +1283,42 @@ class OpusGreenNetCoordinator:
                 if (key in KNOWN_STATE_KEYS or key == KEY_CHANNEL)
                 and key not in BUTTON_KEYS
             ]
+        modes = data.get("transmitModes", [])
+        eeps = data.get("eeps", [])
+        if (
+            isinstance(eeps, list)
+            and any(
+                isinstance(eep, dict) and eep.get("eep") == "F6-05-02" for eep in eeps
+            )
+            and isinstance(modes, list)
+        ):
+            modes = OpusGreenNetCoordinator._rwm_transmit_modes(modes)
+        if isinstance(modes, list):
+            state_functions.extend(
+                function
+                for function in modes
+                if isinstance(function, dict)
+                and function.get("key") in ("smokeAlarm", "batteryLow")
+                and "value" in function
+            )
+        if "batteryLevel" in data:
+            state_functions.append(
+                {"key": "batteryLevel", "value": data["batteryLevel"]}
+            )
         return state_functions + OpusGreenNetCoordinator._configuration_state_functions(
             data
         )
+
+    @staticmethod
+    def _rwm_transmit_modes(modes: list) -> list:
+        """Resolve the RWM's documented value-only slots, scoped to F6-05-02."""
+        keys = ("smokeAlarm", "batteryLow")
+        return [
+            {"key": keys[index], **mode}
+            if index < len(keys) and isinstance(mode, dict)
+            else mode
+            for index, mode in enumerate(modes)
+        ]
 
     @staticmethod
     def _has_operational_state(functions: list[dict[str, Any]]) -> bool:

@@ -45,6 +45,27 @@
       },
       "window": {
         "name": "Window"
+      },
+      "smoke_alarm": {
+        "name": "Smoke alarm"
+      },
+      "battery_low": {
+        "name": "Battery low"
+      },
+      "motion": {
+        "name": "Motion"
+      },
+      "handle_open": {
+        "name": "Handle open"
+      },
+      "handle_tilt": {
+        "name": "Handle tilted"
+      },
+      "handle_closed": {
+        "name": "Handle closed"
+      },
+      "mechanics_fault": {
+        "name": "Mechanics fault"
       }
     },
     "cover": {
@@ -69,11 +90,36 @@
       },
       "signal_strength": {
         "name": "Signal strength"
+      },
+      "illuminance": {
+        "name": "Illuminance"
+      },
+      "supply_voltage": {
+        "name": "Supply voltage"
+      },
+      "battery_level": {
+        "name": "Battery level"
+      },
+      "handle_state": {
+        "name": "Handle position",
+        "state": {
+          "open": "Open",
+          "closed": "Closed",
+          "tilted": "Tilted"
+        }
+      },
+      "unlock_request": {
+        "name": "Unlock request"
       }
     },
     "switch": {
       "channel": {
         "name": "Channel {channel}"
+      }
+    },
+    "lock": {
+      "autolock": {
+        "name": "AutoLock"
       }
     }
   },
@@ -113,6 +159,9 @@
     },
     "request_cancelled": {
       "message": "The request was cancelled because the integration is unloading or its connection was lost."
+    },
+    "autolock_read_only": {
+      "message": "AutoLock control via MQTT is disabled pending manufacturer clarification. Only the reported lock state is available."
     }
   },
   "services": {

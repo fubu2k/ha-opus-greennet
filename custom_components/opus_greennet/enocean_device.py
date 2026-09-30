@@ -55,6 +55,16 @@ class EnOceanChannel:
     energy: float | None = None
     power: float | None = None
     liquid_detected: bool | None = None
+    smoke_alarm: bool | None = None
+    battery_low: bool | None = None
+    battery_level: float | None = None
+    motion: bool | None = None
+    illuminance: float | None = None
+    supply_voltage: float | None = None
+    handle_state: str | None = None
+    is_locked: bool | None = None
+    unlock_request: bool | None = None
+    mechanics_fault: bool | None = None
     # Climate fields
     temperature: float | None = None
     temperature_setpoint: float | None = None
@@ -159,6 +169,26 @@ class EnOceanDevice:
             return False
         channel = self.channels.get(channel_id)
         return channel is None or channel.rotation_time != 0
+
+    @property
+    def is_smoke_detector(self) -> bool:
+        """Return whether this is an OPUS RWM smoke detector."""
+        return self.primary_eep == "F6-05-02"
+
+    @property
+    def is_presence_detector(self) -> bool:
+        """Return whether this is a supported SMS presence detector."""
+        return self.primary_eep in ("A5-07-01", "A5-07-03")
+
+    @property
+    def is_window_handle(self) -> bool:
+        """Return whether this profile reports HOPPE handle positions."""
+        return self.primary_eep in ("D2-06-40", "F6-10-00", "D2-03-10")
+
+    @property
+    def has_autolock(self) -> bool:
+        """Return whether this handle reports SecureConnect lock status."""
+        return self.primary_eep == "D2-06-40"
 
     @property
     def is_climate(self) -> bool:
@@ -286,6 +316,15 @@ class EnOceanDevice:
                 return False
         return None
 
+    @staticmethod
+    def _parse_enum_boolean(value: Any, on: str, off: str) -> bool | None:
+        """Keep missing or unrecognized detector states unknown."""
+        if value == on:
+            return True
+        if value == off:
+            return False
+        return None
+
     def update_from_telegram(self, telegram: dict[str, Any]) -> None:
         """Update device state from a telegram message."""
         functions = telegram.get("functions", [])
@@ -378,6 +417,46 @@ class EnOceanDevice:
                 liquid_detected = self._parse_boolean(value)
                 if liquid_detected is not None:
                     channel.liquid_detected = liquid_detected
+
+            elif key == "smokeAlarm":
+                channel.smoke_alarm = self._parse_enum_boolean(value, "alarm", "idle")
+
+            elif key == "batteryLow":
+                channel.battery_low = self._parse_enum_boolean(value, "low", "ok")
+            elif key == "batteryLevel":
+                self._update_numeric_field(
+                    channel, "battery_level", value, 0, 100, allow_unavailable=True
+                )
+
+            elif key == "motionDetector":
+                channel.motion = self._parse_enum_boolean(value, "detected", "noMotion")
+
+            elif key in ("illuminance", "supplyVoltage"):
+                self._update_numeric_field(
+                    channel,
+                    "illuminance" if key == "illuminance" else "supply_voltage",
+                    value,
+                    minimum=0,
+                    allow_unavailable=True,
+                )
+
+            elif key == "handleState":
+                if value == "tilt":
+                    value = "tilted"
+                channel.handle_state = (
+                    value if value in ("open", "closed", "tilted") else None
+                )
+
+            elif key == "lock":
+                channel.is_locked = self._parse_enum_boolean(
+                    value, "locked", "unlocked"
+                )
+
+            elif key == "unlockRequest":
+                channel.unlock_request = self._parse_boolean(value)
+
+            elif key == "mechanicsFault":
+                channel.mechanics_fault = self._parse_boolean(value)
 
             # Climate keys
             elif key == KEY_TEMPERATURE:
