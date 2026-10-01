@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0b1] - 2026-10-01
+
+Beta follow-up incorporating fubu2k's reports and proposed corrections for #42–#46. Enable pre-release versions in HACS, select **v0.4.0b1**, and restart Home Assistant.
+
+### Fixed
+
+- **RWM smoke detectors (#42):** Accept `alarm=on/off` and boolean low-battery feedback alongside the existing beta formats. Preserve explicit transmit-mode keys and fill only missing or empty fallback keys. Invalid readings remain unknown.
+- **SMS presence detectors (#43):** Accept `motionDetected` and `illumination` for both A5-07-01 and A5-07-03, including snapshots and live updates. Accept battery percentages such as `85%` while retaining finite 0–100 validation.
+- **HOPPE handles (#44):** Accept `handle`, `unlock`, and `mechanics` feedback; show translated unlock-request states. Handle position, lock state, and diagnostics remain independent. AutoLock remains read-only pending manufacturer clarification.
+- **Immediate telemetry (#45):** Battery percentages, including JSON-quoted payloads, also work through the fast path without waiting for the multipart debounce.
+- Named state updates now work after indexed snapshots instead of leaving entities stuck on stale readings.
+- Migrate community-fork illuminance and AutoLock unique IDs while preserving existing Home Assistant entity IDs, custom names, and settings. Guard migration against unrelated device and gateway entries; avoid duplicate AutoLock setup during rediscovery.
+
+### Added
+
+- German translations, including “Beleuchtungsstärke” for illuminance and readable HOPPE states.
+- Regression coverage for reported payload variants, HA entity updates, invalid values, migration/reload/duplicate/disabled cases, and translation consistency.
+
+### Upgrade notes
+
+If both the community-fork and beta entities exist for the same device and gateway, the fork entity is preserved and the duplicate beta entry is removed. Update any dashboards or automations referencing the removed beta entity; both IDs are logged. Existing fork references continue using the preserved entity ID. Automations comparing the AutoLock unlock-request sensor with boolean text should use `requested` / `not_requested` instead.
+
+### Validation
+
+**735 tests** pass on Home Assistant **2026.8.2** and **2026.9.4**, with Ruff and Hassfest checks. Manual device removal (#46) remains covered. Physical IQ-DOT/EnOcean validation is still needed; percentage battery strings are supported, but a real payload capture is still needed to confirm the cause of the reported battery issue.
+
+Thanks to **fubu2k** for the detailed reports, working examples, and proposed patches.
+
 ## [0.4.0b0] - 2026-09-30
 
 Beta release for community validation of issues #42–#46. Enable pre-release
