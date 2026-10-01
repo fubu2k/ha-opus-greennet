@@ -10,9 +10,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import OpusGreenNetConfigEntry
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL, DOMAIN
-from .coordinator import SIGNAL_DEVICE_DISCOVERED, OpusGreenNetCoordinator
+from .coordinator import (
+    SIGNAL_DEVICE_DISCOVERED,
+    SIGNAL_DEVICE_REMOVED,
+    OpusGreenNetCoordinator,
+)
 from .enocean_device import EnOceanDevice
-from .entity import OpusGreenNetEntity
+from .entity import OpusGreenNetEntity, migrate_legacy_entity_suffix
 
 PARALLEL_UPDATES = 0
 
@@ -25,10 +29,20 @@ async def async_setup_entry(
     """Add status entities for AutoLock handles only."""
     coordinator = entry.runtime_data.coordinator
     eag_id = entry.data[CONF_EAG_ID]
+    added_devices: set[str] = set()
 
     @callback
     def async_add_lock(device: EnOceanDevice) -> None:
-        if device.has_autolock:
+        if device.has_autolock and device.device_id not in added_devices:
+            migrate_legacy_entity_suffix(
+                hass,
+                entry.entry_id,
+                "lock",
+                f"{eag_id}_{device.device_id}",
+                "window_handle_lock",
+                "autolock",
+            )
+            added_devices.add(device.device_id)
             async_add_entities(
                 [
                     OpusGreenNetAutoLock(
@@ -40,6 +54,11 @@ async def async_setup_entry(
                 ]
             )
 
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass, f"{SIGNAL_DEVICE_REMOVED}_{eag_id}", added_devices.discard
+        )
+    )
     entry.async_on_unload(
         async_dispatcher_connect(
             hass, f"{SIGNAL_DEVICE_DISCOVERED}_{eag_id}", async_add_lock

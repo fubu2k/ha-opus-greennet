@@ -109,7 +109,11 @@
         }
       },
       "unlock_request": {
-        "name": "Unlock request"
+        "name": "Unlock request",
+        "state": {
+          "requested": "Requested",
+          "notRequested": "Not requested"
+        }
       }
     },
     "switch": {

@@ -10,6 +10,8 @@ import pytest
     "key,payload,expected",
     [
         ("batteryLevel", "85", 85),
+        ("batteryLevel", "85%", 85),
+        ("batteryLevel", b'" 82.5 % "', 82.5),
         ("batteryLevel", b'"82.5"', 82.5),
         ("dbm", "-61", -61),
         ("dbm", '"-70"', -70),
