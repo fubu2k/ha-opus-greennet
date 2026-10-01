@@ -435,9 +435,14 @@ pytest -v --cov
 Use Python 3.14 for development. Tests cover device properties, telegram parsing,
 ordered multi-channel commands, gateway errors, entity behavior, rocker events,
 diagnostic redaction, and real Home Assistant configuration and lifecycle paths.
-CI resolves dependencies separately for Home Assistant 2026.8.2 and 2026.9.4 and
-also runs Ruff and Hassfest. MQTT transport is simulated in automated tests;
-physical-device verification remains part of beta testing.
+CI resolves the latest stable Home Assistant release from PyPI on each run and
+tests that exact version, recorded in the workflow summary. It runs on pull
+requests, pushes to main, every Monday at 06:17 UTC, and manual dispatch. Beta
+releases and older HA versions are excluded from the test matrix. If a future
+stable release requires a newer Python version, CI fails explicitly until the
+runner is updated rather than silently testing an older HA release. Ruff,
+dependency compatibility, coverage, and Hassfest checks remain enabled. MQTT
+transport is simulated; physical-device verification remains part of beta testing.
 
 ### Beta testing
 
