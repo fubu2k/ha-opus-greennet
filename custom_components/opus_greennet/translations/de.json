@@ -1,0 +1,229 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Opus GreenNet Bridge",
+        "description": "Konfiguriere die Bridge, die mit deinem MQTT-Broker verbunden ist. Beim Einrichten wird geprüft, ob die angegebene Bridge antwortet.",
+        "data": {
+          "eag_id": "EAG-Kennung"
+        },
+        "data_description": {
+          "eag_id": "Die achtstellige Bridge-Kennung, die in den MQTT-Topics verwendet wird, z. B. A1B2C3D4 (fiktiv)."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum MQTT-Broker fehlgeschlagen",
+      "invalid_eag_id": "Die EAG-Kennung muss genau acht hexadezimale Zeichen enthalten",
+      "unknown": "Unerwarteter Fehler",
+      "gateway_unavailable": "Der MQTT-Broker ist verbunden, aber die Bridge antwortet nicht. Prüfe die Kennung und die MQTT-Bridge-Verbindung."
+    },
+    "abort": {
+      "already_configured": "Diese Bridge ist bereits konfiguriert",
+      "mqtt_not_configured": "Richte die MQTT-Integration ein und verbinde sie, bevor du diese Bridge hinzufügst"
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "actuator_battery": {
+        "name": "Aktor-Batterie"
+      },
+      "actuator_deactivated": {
+        "name": "Aktor deaktiviert"
+      },
+      "actuator_not_responding": {
+        "name": "Aktor antwortet nicht"
+      },
+      "circuit_in_use": {
+        "name": "Kreis in Benutzung"
+      },
+      "missing_temperature": {
+        "name": "Temperatur fehlt"
+      },
+      "water_leak": {
+        "name": "Wasserleck"
+      },
+      "window": {
+        "name": "Fenster"
+      },
+      "smoke_alarm": {
+        "name": "Rauchalarm"
+      },
+      "battery_low": {
+        "name": "Batterie schwach"
+      },
+      "motion": {
+        "name": "Bewegung"
+      },
+      "handle_open": {
+        "name": "Griff offen"
+      },
+      "handle_tilt": {
+        "name": "Griff gekippt"
+      },
+      "handle_closed": {
+        "name": "Griff geschlossen"
+      },
+      "mechanics_fault": {
+        "name": "Mechanik-Fehler"
+      }
+    },
+    "cover": {
+      "channel": {
+        "name": "Kanal {channel}"
+      }
+    },
+    "light": {
+      "channel": {
+        "name": "Kanal {channel}"
+      }
+    },
+    "sensor": {
+      "feed_temperature": {
+        "name": "Vorlauftemperatur"
+      },
+      "humidity": {
+        "name": "Luftfeuchtigkeit"
+      },
+      "power_consumption": {
+        "name": "Leistungsaufnahme"
+      },
+      "signal_strength": {
+        "name": "Signalstärke"
+      },
+      "illuminance": {
+        "name": "Beleuchtungsstärke"
+      },
+      "supply_voltage": {
+        "name": "Versorgungsspannung"
+      },
+      "battery_level": {
+        "name": "Batteriestand"
+      },
+      "handle_state": {
+        "name": "Griffstellung",
+        "state": {
+          "open": "Offen",
+          "closed": "Geschlossen",
+          "tilted": "Gekippt"
+        }
+      },
+      "unlock_request": {
+        "name": "Entsperranfrage",
+        "state": {
+          "requested": "Angefordert",
+          "not_requested": "Nicht angefordert"
+        }
+      }
+    },
+    "switch": {
+      "channel": {
+        "name": "Kanal {channel}"
+      }
+    },
+    "lock": {
+      "autolock": {
+        "name": "AutoLock"
+      }
+    }
+  },
+  "exceptions": {
+    "config_entry_not_found": {
+      "message": "Es existiert kein Opus-GreenNet-Konfigurationseintrag mit der ID {config_entry_id}."
+    },
+    "config_entry_not_loaded": {
+      "message": "Der Opus-GreenNet-Konfigurationseintrag {config_entry_id} ist nicht geladen."
+    },
+    "config_entry_required": {
+      "message": "Bitte wähle ein Gateway aus, da mehr als ein Opus-GreenNet-Konfigurationseintrag geladen ist."
+    },
+    "device_not_found": {
+      "message": "Gerät {device_id} wurde auf dem ausgewählten Gateway nicht gefunden."
+    },
+    "device_request_timeout": {
+      "message": "Das Gateway hat auf die Anfrage für Gerät {device_id} nicht geantwortet."
+    },
+    "mqtt_setup_failed": {
+      "message": "MQTT-Abonnement oder -Veröffentlichung war nicht möglich."
+    },
+    "no_loaded_config_entry": {
+      "message": "Es ist kein Opus-GreenNet-Gateway geladen."
+    },
+    "gateway_unavailable": {
+      "message": "Das OPUS-Gateway ist nicht erreichbar. Prüfe die Bridge-Verbindung und versuche es erneut."
+    },
+    "mqtt_unavailable": {
+      "message": "Die MQTT-Verbindung von Home Assistant ist nicht verfügbar."
+    },
+    "request_rejected": {
+      "message": "Das Gateway hat die Anfrage für {device_id} abgelehnt: {reason}"
+    },
+    "request_timeout": {
+      "message": "Das Gateway hat die Anfrage für {device_id} nicht bestätigt. Der Ausgang ist unbekannt; prüfe das Gerät, bevor du es erneut versuchst."
+    },
+    "request_cancelled": {
+      "message": "Die Anfrage wurde abgebrochen, weil die Integration entladen wird oder die Verbindung verloren ging."
+    },
+    "autolock_read_only": {
+      "message": "Die AutoLock-Steuerung über MQTT ist bis zur Klärung durch den Hersteller deaktiviert. Es wird nur der gemeldete Schlosszustand angezeigt."
+    }
+  },
+  "services": {
+    "get_device_configuration": {
+      "description": "Ruft die gespeicherte Konfiguration eines EnOcean-Geräts über die ReCom-API ab.",
+      "fields": {
+        "config_entry_id": {
+          "description": "Zu verwendendes Gateway. Auswahl erforderlich, wenn mehrere Gateways geladen sind.",
+          "name": "Gateway"
+        },
+        "device_id": {
+          "description": "EURID des EnOcean-Geräts.",
+          "name": "Geräte-ID"
+        }
+      },
+      "name": "Gerätekonfiguration abrufen"
+    },
+    "get_device_parameters": {
+      "description": "Ruft DDF-Parameter eines EnOcean-Geräts über die ReCom-API ab.",
+      "fields": {
+        "config_entry_id": {
+          "description": "Zu verwendendes Gateway. Auswahl erforderlich, wenn mehrere Gateways geladen sind.",
+          "name": "Gateway"
+        },
+        "device_id": {
+          "description": "EURID des EnOcean-Geräts.",
+          "name": "Geräte-ID"
+        }
+      },
+      "name": "Geräteparameter abrufen"
+    },
+    "reload_entry": {
+      "description": "Lädt ein Gateway oder, falls keines ausgewählt ist, alle geladenen Opus-GreenNet-Gateways neu.",
+      "fields": {
+        "config_entry_id": {
+          "description": "Neu zu ladendes Gateway. Leer lassen, um alle Gateways neu zu laden.",
+          "name": "Gateway"
+        }
+      },
+      "name": "Integration neu laden"
+    },
+    "set_device_configuration": {
+      "description": "Schreibt eine Konfiguration auf ein EnOcean-Gerät über die ReCom-API.",
+      "fields": {
+        "config_entry_id": {
+          "description": "Zu verwendendes Gateway. Auswahl erforderlich, wenn mehrere Gateways geladen sind.",
+          "name": "Gateway"
+        },
+        "configuration": {
+          "description": "Auf das Gerät zu schreibendes Konfigurationsobjekt.",
+          "name": "Konfiguration"
+        },
+        "device_id": {
+          "description": "EURID des EnOcean-Geräts.",
+          "name": "Geräte-ID"
+        }
+      },
+      "name": "Gerätekonfiguration setzen"
+    }
+  }
+}

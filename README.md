@@ -84,6 +84,31 @@ Assistant device. The replacement and other devices stay operational. Review
 and update automations referencing the old entities; references are not migrated
 automatically.
 
+### Upgrading from community test versions
+
+German translations include “Beleuchtungsstärke” for illuminance and readable
+HOPPE unlock-request states. Custom entity names remain unchanged.
+The unlock-request sensor uses `requested` / `not_requested`; update automations
+that previously compared its state with boolean text.
+
+The integration migrates the community fork's `_illumination` and
+`_window_handle_lock` unique IDs to the upstream equivalents while preserving
+the existing Home Assistant entity IDs, custom names, and settings. If both the
+fork and beta entries exist for the same device and gateway, the older fork
+entity is preserved and the duplicate beta entry is removed. References to the
+removed beta entity must be updated manually; the integration logs both entity
+IDs. Entries belonging to another gateway or device are left untouched.
+
+### Gateway payload compatibility
+
+Detector feedback accepts both the beta's descriptive keys and the gateway keys
+reported on OPUS IQ-DOT firmware 1.21.30: `alarm` (on/off), boolean `batteryLow`,
+`motionDetected` (boolean), `illumination`, and HOPPE `handle`, `unlock`
+(requested/notRequested), and `mechanics` (error/ok). The existing key/value
+formats remain supported. Battery percentages accept an optional `%` suffix in
+snapshots, indexed updates, and the immediate telemetry path, with finite 0–100
+validation. Unknown values are never interpreted as no alarm or a closed handle.
+
 ## Prerequisites
 
 1. **Home Assistant** with MQTT integration configured (e.g., Mosquitto add-on)
@@ -371,7 +396,8 @@ custom_components/opus_greennet/
 ├── services.yaml         # HA service definitions
 ├── strings.json          # UI, service, and exception translation source
 └── translations/
-    └── en.json           # English translations
+    ├── en.json           # English translations
+    └── de.json           # German translations
 tests/
 ├── conftest.py                  # Shared fixtures
 ├── ha_helpers.py                # Simulated MQTT boundary for real HA tests
@@ -380,6 +406,8 @@ tests/
 ├── test_coordinator_mqtt.py     # MQTT finalization tests
 ├── test_coordinator_parsing.py  # JSON telegrams, fragments, and late discovery
 ├── test_coordinator_transport.py # Subscription, request, and recovery tests
+├── test_gateway_payload_compatibility.py # Reported IQ-DOT payload regression tests
+├── test_beta_entity_migration.py # Fork IDs, duplicate cleanup, and translations
 ├── test_detector_support.py     # Sensor discovery and live MQTT updates
 ├── test_scalar_telemetry.py      # Immediate battery and signal-strength updates
 ├── test_window_handles.py        # Handle positions and protected AutoLock actions

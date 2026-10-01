@@ -492,6 +492,8 @@ class OpusGreenNetCoordinator:
         if device is None or property_path not in FAST_PATH_PROPERTIES:
             return False
         value = self._parse_value(payload)
+        if property_path == "batteryLevel":
+            value = EnOceanDevice._normalize_battery_level(value)
         if value != "notAvailable":
             parsed = EnOceanDevice._parse_number(
                 value,
@@ -1010,6 +1012,20 @@ class OpusGreenNetCoordinator:
             not part or (part.isdigit() and int(part) > 255) for part in parts
         ):
             raise ValueError("Invalid or oversized MQTT property path")
+        # Gateways can mix named state updates with an indexed snapshot. Keep
+        # the snapshot's layout and update its matching function in place.
+        if (
+            len(parts) == 2
+            and parts[0] == "states"
+            and not parts[1].isdigit()
+            and isinstance(data.get("states"), list)
+        ):
+            for function in data["states"]:
+                if isinstance(function, dict) and function.get("key") == parts[1]:
+                    function["value"] = self._parse_value(value)
+                    return
+            data["states"].append({"key": parts[1], "value": self._parse_value(value)})
+            return
         current = data
 
         for i, part in enumerate(parts[:-1]):
@@ -1298,7 +1314,7 @@ class OpusGreenNetCoordinator:
                 function
                 for function in modes
                 if isinstance(function, dict)
-                and function.get("key") in ("smokeAlarm", "batteryLow")
+                and function.get("key") in ("alarm", "smokeAlarm", "batteryLow")
                 and "value" in function
             )
         if "batteryLevel" in data:
@@ -1313,12 +1329,16 @@ class OpusGreenNetCoordinator:
     def _rwm_transmit_modes(modes: list) -> list:
         """Resolve the RWM's documented value-only slots, scoped to F6-05-02."""
         keys = ("smokeAlarm", "batteryLow")
-        return [
-            {"key": keys[index], **mode}
-            if index < len(keys) and isinstance(mode, dict)
-            else mode
-            for index, mode in enumerate(modes)
-        ]
+        resolved = []
+        for index, mode in enumerate(modes):
+            if not isinstance(mode, dict):
+                resolved.append(mode)
+                continue
+            entry = dict(mode)
+            if index < len(keys) and entry.get("key") in (None, ""):
+                entry["key"] = keys[index]
+            resolved.append(entry)
+        return resolved
 
     @staticmethod
     def _has_operational_state(functions: list[dict[str, Any]]) -> bool:

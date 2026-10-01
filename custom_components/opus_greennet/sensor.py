@@ -28,7 +28,7 @@ from .coordinator import (
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanDevice
-from .entity import OpusGreenNetEntity
+from .entity import OpusGreenNetEntity, migrate_legacy_entity_suffix
 
 # Sensor state is pushed by the coordinator.
 PARALLEL_UPDATES = 0
@@ -85,6 +85,15 @@ async def async_setup_entry(
                 )
 
         if device.is_presence_detector:
+            if f"{eag_id}_{device.device_id}_illuminance" not in added_unique_ids:
+                migrate_legacy_entity_suffix(
+                    hass,
+                    entry.entry_id,
+                    "sensor",
+                    f"{eag_id}_{device.device_id}",
+                    "illumination",
+                    "illuminance",
+                )
             for suffix, device_class, unit in (
                 ("illuminance", SensorDeviceClass.ILLUMINANCE, LIGHT_LUX),
                 (
@@ -357,9 +366,15 @@ class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
         if suffix == "handle_state":
             self._attr_device_class = SensorDeviceClass.ENUM
             self._attr_options = ["open", "closed", "tilted"]
+        elif suffix == "unlock_request":
+            self._attr_device_class = SensorDeviceClass.ENUM
+            self._attr_options = ["requested", "not_requested"]
 
     @property
-    def native_value(self) -> str | bool | None:
+    def native_value(self) -> str | None:
         """Return the reported value independently of other handle attributes."""
         channel = self._device.channels.get(DEFAULT_CHANNEL)
-        return getattr(channel, self._state_attribute, None)
+        value = getattr(channel, self._state_attribute, None)
+        if self._state_attribute == "unlock_request" and value is not None:
+            return "requested" if value else "not_requested"
+        return value

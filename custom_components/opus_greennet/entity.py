@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, Entity
 from homeassistant.helpers.entity_registry import EntityRegistry
@@ -19,6 +21,53 @@ from .diagnostics import log_entity_state_write
 from .enocean_device import EnOceanChannel, EnOceanDevice
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@callback
+def migrate_legacy_entity_suffix(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    entity_domain: str,
+    device_prefix: str,
+    legacy_suffix: str,
+    current_suffix: str,
+) -> None:
+    """Preserve fork entity IDs and settings while adopting upstream unique IDs."""
+    registry = er.async_get(hass)
+    legacy_id = registry.async_get_entity_id(
+        entity_domain, DOMAIN, f"{device_prefix}_{legacy_suffix}"
+    )
+    if legacy_id is None:
+        return
+    legacy = registry.async_get(legacy_id)
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, device_prefix), config_entry_id
+    )
+    if (
+        legacy is None
+        or device is None
+        or legacy.config_entry_id != config_entry_id
+        or legacy.device_id != device.id
+    ):
+        return
+    current_unique_id = f"{device_prefix}_{current_suffix}"
+    current_id = registry.async_get_entity_id(entity_domain, DOMAIN, current_unique_id)
+    if current_id is not None:
+        current = registry.async_get(current_id)
+        if (
+            current is None
+            or current.config_entry_id != config_entry_id
+            or current.device_id != device.id
+        ):
+            return
+        registry.async_remove(current_id)
+        _LOGGER.warning(
+            "Removed duplicate beta entity %s; preserved %s. Update any dashboard "
+            "or automation references to the removed entity ID",
+            current_id,
+            legacy_id,
+        )
+    registry.async_update_entity(legacy_id, new_unique_id=current_unique_id)
 
 
 @callback

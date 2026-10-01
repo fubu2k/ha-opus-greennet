@@ -325,6 +325,21 @@ class EnOceanDevice:
             return False
         return None
 
+    @staticmethod
+    def _parse_detector_boolean(value: Any, active: str, inactive: str) -> bool | None:
+        """Accept explicit detector enums or booleans, never arbitrary truthiness."""
+        if isinstance(value, str):
+            value = value.strip()
+        parsed = EnOceanDevice._parse_enum_boolean(value, active, inactive)
+        return parsed if parsed is not None else EnOceanDevice._parse_boolean(value)
+
+    @staticmethod
+    def _normalize_battery_level(value: Any) -> Any:
+        """Accept an optional percent suffix before the shared numeric validation."""
+        if isinstance(value, str):
+            return value.strip().removesuffix("%").strip()
+        return value
+
     def update_from_telegram(self, telegram: dict[str, Any]) -> None:
         """Update device state from a telegram message."""
         functions = telegram.get("functions", [])
@@ -418,29 +433,44 @@ class EnOceanDevice:
                 if liquid_detected is not None:
                     channel.liquid_detected = liquid_detected
 
-            elif key == "smokeAlarm":
-                channel.smoke_alarm = self._parse_enum_boolean(value, "alarm", "idle")
-
-            elif key == "batteryLow":
-                channel.battery_low = self._parse_enum_boolean(value, "low", "ok")
-            elif key == "batteryLevel":
-                self._update_numeric_field(
-                    channel, "battery_level", value, 0, 100, allow_unavailable=True
+            elif key == "smokeAlarm" or (key == "alarm" and self.is_smoke_detector):
+                channel.smoke_alarm = (
+                    value == "on"
+                    if value in ("on", "off")
+                    else self._parse_detector_boolean(value, "alarm", "idle")
                 )
 
-            elif key == "motionDetector":
-                channel.motion = self._parse_enum_boolean(value, "detected", "noMotion")
-
-            elif key in ("illuminance", "supplyVoltage"):
+            elif key == "batteryLow":
+                channel.battery_low = self._parse_detector_boolean(value, "low", "ok")
+            elif key == "batteryLevel":
                 self._update_numeric_field(
                     channel,
-                    "illuminance" if key == "illuminance" else "supply_voltage",
+                    "battery_level",
+                    self._normalize_battery_level(value),
+                    0,
+                    100,
+                    allow_unavailable=True,
+                )
+
+            elif key == "motionDetector" or (
+                key == "motionDetected" and self.is_presence_detector
+            ):
+                channel.motion = self._parse_detector_boolean(
+                    value, "detected", "noMotion"
+                )
+
+            elif key in ("illuminance", "supplyVoltage") or (
+                key == "illumination" and self.is_presence_detector
+            ):
+                self._update_numeric_field(
+                    channel,
+                    "supply_voltage" if key == "supplyVoltage" else "illuminance",
                     value,
                     minimum=0,
                     allow_unavailable=True,
                 )
 
-            elif key == "handleState":
+            elif key == "handleState" or (key == "handle" and self.is_window_handle):
                 if value == "tilt":
                     value = "tilted"
                 channel.handle_state = (
@@ -452,11 +482,15 @@ class EnOceanDevice:
                     value, "locked", "unlocked"
                 )
 
-            elif key == "unlockRequest":
-                channel.unlock_request = self._parse_boolean(value)
+            elif key == "unlockRequest" or (key == "unlock" and self.has_autolock):
+                channel.unlock_request = self._parse_detector_boolean(
+                    value, "requested", "notRequested"
+                )
 
-            elif key == "mechanicsFault":
-                channel.mechanics_fault = self._parse_boolean(value)
+            elif key == "mechanicsFault" or (key == "mechanics" and self.has_autolock):
+                channel.mechanics_fault = self._parse_detector_boolean(
+                    value, "error", "ok"
+                )
 
             # Climate keys
             elif key == KEY_TEMPERATURE:
