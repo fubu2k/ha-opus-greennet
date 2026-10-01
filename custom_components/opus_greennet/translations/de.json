@@ -112,7 +112,7 @@
         "name": "Entsperranfrage",
         "state": {
           "requested": "Angefordert",
-          "notRequested": "Nicht angefordert"
+          "not_requested": "Nicht angefordert"
         }
       }
     },

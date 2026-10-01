@@ -112,7 +112,7 @@
         "name": "Unlock request",
         "state": {
           "requested": "Requested",
-          "notRequested": "Not requested"
+          "not_requested": "Not requested"
         }
       }
     },

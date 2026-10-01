@@ -142,6 +142,7 @@ def test_translations_have_matching_keys_and_placeholders():
         if isinstance(original, dict):
             assert original.keys() == translated.keys()
             for key in original:
+                assert re.fullmatch(r"[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?", key)
                 compare(original[key], translated[key])
         else:
             assert set(re.findall(r"\{[^}]+\}", original)) == set(

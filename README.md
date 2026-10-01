@@ -88,6 +88,8 @@ automatically.
 
 German translations include “Beleuchtungsstärke” for illuminance and readable
 HOPPE unlock-request states. Custom entity names remain unchanged.
+The unlock-request sensor uses `requested` / `not_requested`; update automations
+that previously compared its state with boolean text.
 
 The integration migrates the community fork's `_illumination` and
 `_window_handle_lock` unique IDs to the upstream equivalents while preserving

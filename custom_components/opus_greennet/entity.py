@@ -40,7 +40,9 @@ def migrate_legacy_entity_suffix(
     if legacy_id is None:
         return
     legacy = registry.async_get(legacy_id)
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, device_prefix)})
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, device_prefix), config_entry_id
+    )
     if (
         legacy is None
         or device is None

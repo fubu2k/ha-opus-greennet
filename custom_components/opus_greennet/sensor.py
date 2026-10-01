@@ -368,7 +368,7 @@ class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
             self._attr_options = ["open", "closed", "tilted"]
         elif suffix == "unlock_request":
             self._attr_device_class = SensorDeviceClass.ENUM
-            self._attr_options = ["requested", "notRequested"]
+            self._attr_options = ["requested", "not_requested"]
 
     @property
     def native_value(self) -> str | None:
@@ -376,5 +376,5 @@ class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
         channel = self._device.channels.get(DEFAULT_CHANNEL)
         value = getattr(channel, self._state_attribute, None)
         if self._state_attribute == "unlock_request" and value is not None:
-            return "requested" if value else "notRequested"
+            return "requested" if value else "not_requested"
         return value

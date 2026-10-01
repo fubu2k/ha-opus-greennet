@@ -143,7 +143,7 @@ async def test_hoppe_original_keys_reach_position_entities(hass, mqtt_transport,
         request = await wait_for_entity(
             hass, "sensor", "AABB0011_HANDLE_unlock_request"
         )
-        assert hass.states.get(request).state == "notRequested"
+        assert hass.states.get(request).state == "not_requested"
         assert hass.states.get(request).attributes["device_class"] == "enum"
     for index, (key, value) in enumerate(
         {"handle": "tilt", "unlock": "requested", "mechanics": "error"}.items()
