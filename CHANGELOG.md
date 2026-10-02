@@ -2,32 +2,93 @@
 
 All notable changes to this project will be documented in this file.
 
-[0.3.4] - 2026-09-27
-First independently versioned release of this fork, based on kegelmeier/ha-opus-greennet.
+## [0.4.0b1] - 2026-10-01
 
-Fixed
-Gateway health probe compatibility: Replaced the unsupported get/config/system/info probe with get/config/system/uptime, which is supported by OPUS-IQ-DOT firmware version 1.21 and newer. This removes the previous 10-second timeout warning during every Home Assistant startup.
+Beta follow-up incorporating fubu2k's reports and proposed corrections for #42–#46. Enable pre-release versions in HACS, select **v0.4.0b1**, and restart Home Assistant.
 
-HOPPE AutoLock writeback: async_lock() and async_unlock() now immediately raise a HomeAssistantError. The integration no longer pretends to change the lock state locally when the HOPPE AutoLock device cannot receive an MQTT write command.
+### Fixed
 
-Added
-D2-06-40 HOPPE window handle with AutoLock: Adds a read-only lock entity, handle_state and unlock_request sensors, plus a mechanics_fault binary sensor.
+- **RWM smoke detectors (#42):** Accept `alarm=on/off` and boolean low-battery feedback alongside the existing beta formats. Preserve explicit transmit-mode keys and fill only missing or empty fallback keys. Invalid readings remain unknown.
+- **SMS presence detectors (#43):** Accept `motionDetected` and `illumination` for both A5-07-01 and A5-07-03, including snapshots and live updates. Accept battery percentages such as `85%` while retaining finite 0–100 validation.
+- **HOPPE handles (#44):** Accept `handle`, `unlock`, and `mechanics` feedback; show translated unlock-request states. Handle position, lock state, and diagnostics remain independent. AutoLock remains read-only pending manufacturer clarification.
+- **Immediate telemetry (#45):** Battery percentages, including JSON-quoted payloads, also work through the fast path without waiting for the multipart debounce.
+- Named state updates now work after indexed snapshots instead of leaving entities stuck on stale readings.
+- Migrate community-fork illuminance and AutoLock unique IDs while preserving existing Home Assistant entity IDs, custom names, and settings. Guard migration against unrelated device and gateway entries; avoid duplicate AutoLock setup during rediscovery.
 
-F6-10-00 and D2-03-10 passive HOPPE window handles: Adds a handle_state sensor.
+### Added
 
-F6-05-02 Jaeger Direkt / OPUS smoke detector RWM: Adds smoke_alarm and battery_low binary sensors.
+- German translations, including “Beleuchtungsstärke” for illuminance and readable HOPPE states.
+- Regression coverage for reported payload variants, HA entity updates, invalid values, migration/reload/duplicate/disabled cases, and translation consistency.
 
-A5-07-03 Jaeger Direkt / OPUS SMS presence sensor: Adds a motion binary sensor plus illuminance, supply_voltage, and battery_level sensors.
+### Upgrade notes
 
-Changed
-Fork release versioning: This is the first independently versioned release of the fubu2k/ha-opus-greennet fork.
+If both the community-fork and beta entities exist for the same device and gateway, the fork entity is preserved and the duplicate beta entry is removed. Update any dashboards or automations referencing the removed beta entity; both IDs are logged. Existing fork references continue using the preserved entity ID. Automations comparing the AutoLock unlock-request sensor with boolean text should use `requested` / `not_requested` instead.
 
-Minimum Home Assistant version: Home Assistant 2026.8 or newer is required.
+### Validation
 
-Pull Requests
-1 — Fix HOPPE read-only writeback and replace the /info health probe with /uptime.
+**735 tests** pass on Home Assistant **2026.8.2** and **2026.9.4**, with Ruff and Hassfest checks. Manual device removal (#46) remains covered. Physical IQ-DOT/EnOcean validation is still needed; percentage battery strings are supported, but a real payload capture is still needed to confirm the cause of the reported battery issue.
 
-2 — Add new device support and include the HOPPE AutoLock and uptime-probe fixes.
+Thanks to **fubu2k** for the detailed reports, working examples, and proposed patches.
+
+## [0.4.0b0] - 2026-09-30
+
+Beta release for community validation of issues #42–#46. Enable pre-release
+versions in HACS, select v0.4.0b0, and restart Home Assistant.
+
+### Added
+
+- **OPUS RWM smoke detectors (#42):** F6-05-02 smoke-alarm and low-battery binary sensors, including indexed `transmitModes` snapshots and value-only live updates.
+- **OPUS SMS presence sensors (#43):** A5-07-01 and A5-07-03 motion, illuminance, supply-voltage, and battery-level entities.
+- **HOPPE window handles (#44):** D2-06-40, F6-10-00, and D2-03-10 handle-position sensors and separate Open, Tilted, and Closed binary sensors for automations such as CCA. D2-06-40 also exposes read-only AutoLock status, unlock requests, and mechanics faults. AutoLock MQTT control remains disabled pending manufacturer clarification; lock/unlock actions send no commands.
+- **Manual device removal (#46):** Remove stale child devices from Home Assistant without unpairing them from OPUS or disrupting other devices. The gateway is protected. Devices still reported by the gateway can be rediscovered without duplicate entities; automation references must be updated separately.
+
+### Fixed
+
+- **Immediate telemetry (#45):** Flat battery-level and signal-strength updates bypass the multipart state debounce, validate readings, and preserve buffered structural updates.
+- Missing or invalid detector/handle readings remain unknown, and gateway outages mark entities unavailable. Handle position and lock state remain independent.
+
+### Changed
+
+- Added device documentation, English entity names, and removal/reload/rediscovery coverage for the new profiles.
+- Automated validation passes **668 tests** on Home Assistant **2026.8.2** and **2026.9.4**, plus Ruff and Hassfest. Physical-device behavior still needs beta validation.
+
+## [0.3.3] - 2026-09-30
+
+Stable release of the fixes validated in the 0.3.3 beta series. Existing entity
+IDs, rocker event names, and configured MQTT routes are preserved.
+
+### Fixed
+
+- **Cover Stop (#37):** Send the dedicated stop command with the correct actuator channel and check the final position/tilt where supported.
+- **State confirmation (#35):** Keep delayed status checks active through unknown, invalid, or unrelated feedback. Confirm commands only with valid feedback for the requested field and channel, including queued and overlapping commands.
+- **Gateway startup and recovery:** Use fresh uptime replies for health checks, tolerate missing system-information responses, and handle retained snapshots and MQTT reconnects reliably. Broker and gateway outages mark entities unavailable and cancel pending requests.
+- **Command errors:** Validate gateway acknowledgements and report rejection or timeout instead of silently assuming success.
+- **Device state parsing:** Handle complete JSON telegrams, list-form snapshots, indexed updates, and channel context without replaying cached rocker events.
+- **Entity state and controls:** Preserve unknown/unavailable readings correctly, keep very low nonzero brightness on, report climate activity accurately, support standard climate actions, and hide tilt controls when rotation is disabled.
+- **Diagnostics:** Redact identifiers and credentials from diagnostic data, including error details.
+
+### Changed
+
+- README and the MQTT protocol reference describe command confirmation, Stop encoding, scoped broker routes, and optional bridge-status reporting. Public examples use fictional identifiers.
+- Automated validation covers Home Assistant 2026.8.2 and 2026.9.4: **612 tests**, plus Ruff and Hassfest checks.
+
+## [0.3.3b1] - 2026-09-30
+
+Existing entity IDs and configured MQTT routes are preserved.
+
+### Fixed
+
+- **Cover Stop (#37):** Send the dedicated `stop: "true"` command instead of an invalid position value, retain the actuator channel, and request final position/tilt where supported.
+- **State confirmation (#35):** Unknown, invalid, unavailable, malformed, or unrelated feedback no longer cancels delayed status checks. Confirmation is isolated to the requested field and channel, including feedback before acknowledgement and queued or overlapping commands.
+- **Gateway startup:** Use fresh uptime responses for health when firmware does not answer system-information requests. System information is optional.
+- **Device state parsing:** Read list-form snapshots and indexed updates with the correct channel, without replaying cached rocker events.
+- **Startup and reconnect:** Probe health before large retained subscriptions, separate subscription waiting from command deadlines, and reduce repetitive retained-data debug logging.
+- **Shutter capabilities:** Read actual device configuration so shutters with zero rotation time do not expose tilt controls.
+
+### Changed
+
+- README and the MQTT protocol reference document command confirmation and Stop encoding. MQTT remains the integration transport.
+- All **612 tests pass** on both Home Assistant 2026.8.2 and 2026.9.4, with **90.88% coverage** on 2026.9.4. Ruff and Hassfest validation pass.
 
 ## [0.3.3b0] - 2026-09-11
 
@@ -50,7 +111,7 @@ Beta release for physical-device testing. Existing entity IDs and rocker event n
 ## [0.3.2] - 2026-09-11
 
 ### Fixed
-- **Duplicate signal-strength entities** (#26): Repeated discovery no longer causes duplicate unique-ID errors at startup, while newly recognized sensor types can still be added. The reporter confirmed the official beta across two restarts, with all 59 signal-strength sensors present and updating.
+- **Duplicate signal-strength entities** (#26): Repeated discovery no longer causes duplicate unique-ID errors at startup, while newly recognized sensor types can still be added.
 - **Tilt controls on roller shutters** (#28): Tilt controls are hidden when the bridge reports `rotationTime` as `0` or `noRotation`. Existing discovery and state updates refresh this setting without extra configuration queries; ordinary position controls remain available, and devices without a valid rotation-time value retain their existing EEP behavior.
 
 ## [0.3.2b0] - 2026-08-31
@@ -240,7 +301,7 @@ Beta release for physical-device testing. Existing entity IDs and rocker event n
 ## [0.0.4] - 2024-11-24
 
 ### Fixed
-- **Commands now use correct device ID**: Fixed critical bug where commands were sent using the friendly name (e.g., `KG_Vorrat-1K-1`) instead of the actual EnOcean device ID (e.g., `01A02F6C`). This prevented lights, switches, and covers from responding to commands.
+- **Commands now use correct device ID**: Fixed critical bug where commands were sent using the friendly name instead of the actual EnOcean device ID. This prevented lights, switches, and covers from responding to commands.
 - **Updated repository URLs**: Fixed documentation and issue tracker URLs in manifest to point to the correct repository (`opus_homeassistant`).
 
 ## [0.0.3] - 2024-11-24

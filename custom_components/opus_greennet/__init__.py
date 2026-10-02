@@ -1,8 +1,4 @@
-"""The Opus GreenNet Bridge integration.
-
-Base: kegelmeier v0.3.3b0. Platform.LOCK re-added (see lock.py module
-docstring for why the native MQTT-discovery experiment was reverted).
-"""
+"""The Opus GreenNet Bridge integration."""
 
 from __future__ import annotations
 
@@ -39,12 +35,12 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,
     Platform.SWITCH,
-    Platform.LOCK,  # HOPPE eLock window handle (D2-06-40), see lock.py
     Platform.COVER,
     Platform.CLIMATE,
     Platform.SENSOR,
     Platform.BINARY_SENSOR,
     Platform.EVENT,
+    Platform.LOCK,
 ]
 
 SERVICE_GET_DEVICE_CONFIG = "get_device_configuration"
@@ -111,11 +107,13 @@ def _loaded_entry(
     loaded_entries = hass.config_entries.async_loaded_entries(DOMAIN)
     if not loaded_entries:
         raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="no_loaded_config_entry"
+            translation_domain=DOMAIN,
+            translation_key="no_loaded_config_entry",
         )
     if len(loaded_entries) > 1:
         raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="config_entry_required"
+            translation_domain=DOMAIN,
+            translation_key="config_entry_required",
         )
     return cast(OpusGreenNetConfigEntry, loaded_entries[0])
 
@@ -153,7 +151,8 @@ async def async_setup_entry(
     except (HomeAssistantError, OSError) as err:
         await coordinator.async_unload()
         raise ConfigEntryNotReady(
-            translation_domain=DOMAIN, translation_key="gateway_unavailable"
+            translation_domain=DOMAIN,
+            translation_key="gateway_unavailable",
         ) from err
     except BaseException:
         await coordinator.async_unload()
@@ -170,7 +169,8 @@ async def async_setup_entry(
             serial_number=eag_id,
         )
         entry.runtime_data = OpusGreenNetRuntimeData(
-            coordinator=coordinator, gateway_device_id=gateway_device.id
+            coordinator=coordinator,
+            gateway_device_id=gateway_device.id,
         )
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except BaseException:
@@ -187,6 +187,7 @@ async def async_unload_entry(
     """Unload a config entry."""
     if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         return False
+
     await entry.runtime_data.coordinator.async_unload()
     return True
 
@@ -196,12 +197,25 @@ async def async_remove_config_entry_device(
     entry: OpusGreenNetConfigEntry,
     device_entry: dr.DeviceEntry,
 ) -> bool:
-    """Allow the user to remove a device manually from the device page.
-
-    The OPUS gateway does not provide a reliable "device removed" signal, so
-    this integration cannot safely auto-detect and remove stale devices.
-    Always allow manual removal instead.
-    """
+    """Forget one child locally; never unpair it or remove the gateway."""
+    eag_id = entry.data[CONF_EAG_ID]
+    if device_entry.config_entry_id != entry.entry_id:
+        return False
+    if (DOMAIN, eag_id) in device_entry.identifiers:
+        return False
+    prefix = f"{eag_id}_"
+    child_ids = [
+        identifier[len(prefix) :]
+        for domain, identifier in device_entry.identifiers
+        if domain == DOMAIN
+        and identifier.startswith(prefix)
+        and identifier[len(prefix) :]
+    ]
+    if len(child_ids) != 1:
+        return False
+    # Registry-only stale devices can also be removed when this entry is unloaded.
+    if entry.state is ConfigEntryState.LOADED:
+        entry.runtime_data.coordinator.async_forget_device(child_ids[0])
     return True
 
 
@@ -210,7 +224,9 @@ def _register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_GET_DEVICE_CONFIG):
         return
 
-    async def handle_get_device_configuration(call: ServiceCall) -> ServiceResponse:
+    async def handle_get_device_configuration(
+        call: ServiceCall,
+    ) -> ServiceResponse:
         coordinator = _coordinator_for_call(hass, call)
         device_id = call.data[ATTR_DEVICE_ID]
         _validate_service_device(coordinator, device_id)
@@ -250,6 +266,7 @@ def _register_services(hass: HomeAssistant) -> None:
             entry = _loaded_entry(hass, config_entry_id)
             await hass.config_entries.async_reload(entry.entry_id)
             return
+
         for loaded_entry in hass.config_entries.async_loaded_entries(DOMAIN):
             await hass.config_entries.async_reload(loaded_entry.entry_id)
 

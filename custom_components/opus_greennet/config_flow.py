@@ -1,28 +1,4 @@
-"""Config flow for Opus GreenNet Bridge integration.
-
-Base: kegelmeier v0.3.3b0.
-
-FIX (this revision): validate_input() previously required
-async_probe_gateway() (a request for get/config/system/info) to succeed
-before the config entry could even be created. This duplicated - separately
-from and inconsistently with - the coordinator's own gateway probe, which
-was already made best-effort (non-fatal) because some Mosquitto bridge
-configurations legitimately never relay this diagnostic-only endpoint (see
-coordinator.py's ISSUE_SYSTEM_INFO_UNSUPPORTED handling). The config flow
-was never updated to match, so re-adding a gateway with exactly this bridge
-setup failed at the very first step with "gateway_unavailable", even though
-the coordinator would have set up and worked correctly.
-
-Now: the config flow still confirms MQTT itself is connected (a real,
-blocking prerequisite - if the HA MQTT integration isn't set up at all,
-nothing can ever work), but a failed/timed-out system-info probe during
-setup is now only logged as a warning, not fatal. The actual gateway
-health/availability - based on subscriptions and device discovery, not this
-one optional diagnostic topic - is still verified afterwards by the
-coordinator during async_setup_entry(), which correctly fails
-ConfigEntryNotReady if the gateway is truly unreachable (e.g. MQTT bridge
-down entirely, wrong EAG ID with no devices ever reporting).
-"""
+"""Config flow for Opus GreenNet Bridge integration."""
 
 from __future__ import annotations
 
@@ -41,6 +17,7 @@ from .mqtt_transport import async_probe_gateway
 
 _LOGGER = logging.getLogger(__name__)
 
+# Regex pattern for EAG ID (8 hex characters)
 EAG_ID_PATTERN = re.compile(r"[0-9A-Fa-f]{8}")
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -53,33 +30,22 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect.
 
-    Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the
-    user.
+    Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
     eag_id = data[CONF_EAG_ID].strip().upper()
 
+    # Validate EAG ID format
     if not EAG_ID_PATTERN.fullmatch(eag_id):
         raise InvalidEagId
 
+    # Check if MQTT is available
     if not mqtt.is_connected(hass):
         raise CannotConnect
 
     try:
         await async_probe_gateway(hass, eag_id)
     except HomeAssistantError as err:
-        # FIX: no longer fatal. get/config/system/info is diagnostic-only
-        # and some Mosquitto bridge configurations never relay it - the
-        # coordinator's own setup (which uses get/devices, the topic that
-        # actually matters for functionality) still validates real gateway
-        # reachability right after this flow completes.
-        _LOGGER.warning(
-            "OPUS gateway %s did not answer the setup-time system-info probe "
-            "(%s). Continuing anyway - check your Mosquitto bridge if the "
-            "gateway does not become available after setup. Device control "
-            "and discovery do not depend on this probe.",
-            eag_id,
-            err,
-        )
+        raise GatewayUnavailable from err
 
     return {"title": f"Opus GreenNet ({eag_id})", "eag_id": eag_id}
 
@@ -95,6 +61,7 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         errors: dict[str, str] = {}
 
+        # Check if MQTT integration is available
         if not await mqtt.async_wait_for_mqtt_client(self.hass):
             return self.async_abort(reason="mqtt_not_configured")
 
@@ -107,6 +74,8 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
                 info = await validate_input(self.hass, user_input)
             except CannotConnect:
                 errors["base"] = "cannot_connect"
+            except GatewayUnavailable:
+                errors["base"] = "gateway_unavailable"
             except InvalidEagId:
                 errors[CONF_EAG_ID] = "invalid_eag_id"
             except Exception:  # pylint: disable=broad-except
@@ -131,3 +100,7 @@ class CannotConnect(HomeAssistantError):
 
 class InvalidEagId(HomeAssistantError):
     """Error to indicate the EAG ID is invalid."""
+
+
+class GatewayUnavailable(HomeAssistantError):
+    """The broker is connected but the specified gateway did not respond."""

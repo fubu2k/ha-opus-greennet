@@ -8,14 +8,15 @@
           "eag_id": "EAG-Kennung"
         },
         "data_description": {
-          "eag_id": "Die achtstellige Bridge-Kennung, die in den MQTT-Topics verwendet wird, z. B. 050B4DFA."
+          "eag_id": "Die achtstellige Bridge-Kennung, die in den MQTT-Topics verwendet wird, z. B. A1B2C3D4 (fiktiv)."
         }
       }
     },
     "error": {
       "cannot_connect": "Verbindung zum MQTT-Broker fehlgeschlagen",
       "invalid_eag_id": "Die EAG-Kennung muss genau acht hexadezimale Zeichen enthalten",
-      "unknown": "Unerwarteter Fehler"
+      "unknown": "Unerwarteter Fehler",
+      "gateway_unavailable": "Der MQTT-Broker ist verbunden, aber die Bridge antwortet nicht. Prüfe die Kennung und die MQTT-Bridge-Verbindung."
     },
     "abort": {
       "already_configured": "Diese Bridge ist bereits konfiguriert",
@@ -45,26 +46,26 @@
       "window": {
         "name": "Fenster"
       },
-      "motion": {
-        "name": "Bewegung"
-      },
       "smoke_alarm": {
         "name": "Rauchalarm"
       },
       "battery_low": {
         "name": "Batterie schwach"
       },
-      "mechanics_fault": {
-        "name": "Mechanik-Fehler"
-      },
-      "handle_closed": {
-        "name": "Griff geschlossen"
+      "motion": {
+        "name": "Bewegung"
       },
       "handle_open": {
         "name": "Griff offen"
       },
       "handle_tilt": {
         "name": "Griff gekippt"
+      },
+      "handle_closed": {
+        "name": "Griff geschlossen"
+      },
+      "mechanics_fault": {
+        "name": "Mechanik-Fehler"
       }
     },
     "cover": {
@@ -75,11 +76,6 @@
     "light": {
       "channel": {
         "name": "Kanal {channel}"
-      }
-    },
-    "lock": {
-      "window_handle_lock": {
-        "name": "AutoLock"
       }
     },
     "sensor": {
@@ -107,22 +103,27 @@
       "handle_state": {
         "name": "Griffstellung",
         "state": {
-          "closed": "Geschlossen",
           "open": "Offen",
-          "tilt": "Gekippt"
+          "closed": "Geschlossen",
+          "tilted": "Gekippt"
         }
       },
       "unlock_request": {
         "name": "Entsperranfrage",
         "state": {
-          "notRequested": "Nicht angefordert",
-          "requested": "Angefordert"
+          "requested": "Angefordert",
+          "not_requested": "Nicht angefordert"
         }
       }
     },
     "switch": {
       "channel": {
         "name": "Kanal {channel}"
+      }
+    },
+    "lock": {
+      "autolock": {
+        "name": "AutoLock"
       }
     }
   },
@@ -162,12 +163,9 @@
     },
     "request_cancelled": {
       "message": "Die Anfrage wurde abgebrochen, weil die Integration entladen wird oder die Verbindung verloren ging."
-    }
-  },
-  "issues": {
-    "system_info_unsupported": {
-      "title": "Gateway-Systeminformationen nicht verfügbar",
-      "description": "Das OPUS-Gateway {eag_id} hat auf eine Anfrage nach Systeminformationen (Modell, Firmware) nicht geantwortet. Dies ist rein diagnostisch und beeinträchtigt weder die Gerätesteuerung noch die Erkennung. Falls du diese Metadaten in den Diagnosedaten sehen möchtest, prüfe, ob deine Mosquitto-Bridge `get/config/system/info` und `getAnswer/config/system/info` für dieses Gateway durchleitet. Dieser Hinweis kann verworfen werden."
+    },
+    "autolock_read_only": {
+      "message": "Die AutoLock-Steuerung über MQTT ist bis zur Klärung durch den Hersteller deaktiviert. Es wird nur der gemeldete Schlosszustand angezeigt."
     }
   },
   "services": {

@@ -1,23 +1,4 @@
-"""Bounded MQTT request/response operations for the OPUS bridge.
-
-Base: kegelmeier v0.3.3b0 - functionally unchanged. The gateway-connection
-regression reported after switching to v0.3.3b0 was NOT in this file; it was
-a duplicate subscription to the same answer topic in coordinator.py's
-async_setup() racing against the request-scoped subscription this module
-opens in MQTTRequestManager.async_request() (see coordinator.py module
-docstring for the full root-cause analysis and fix).
-
-FIX 2026-09-26: async_probe_gateway() now uses TOPIC_GET_SYSTEM_UPTIME /
-TOPIC_GET_ANSWER_SYSTEM_UPTIME instead of the unsupported
-get/config/system/info endpoint. The OPUS-IQ-DOT gateway does not respond
-to /info; using /uptime eliminates the 10-second timeout + WARNING that
-appeared in the Home Assistant log on every integration start.
-Real gateway response verified via MQTT Explorer:
-  Topic:   EnOcean/{eag_id}/getAnswer/config/system/uptime
-  Payload: {"header":{"httpStatus":200,"content":"Uptime",
-             "gateway":"OPUS-IQ-DOT v1.21.30",…},
-            "systemUptimeResponse":{"uptime":16766}}
-"""
+"""Bounded MQTT request/response operations for the OPUS bridge."""
 
 from __future__ import annotations
 
@@ -25,6 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
+from math import isfinite
 from typing import Any
 
 from homeassistant.components import mqtt
@@ -39,9 +21,12 @@ from .const import (
     TOPIC_GET_SYSTEM_UPTIME,
 )
 
-_LOGGER = logging.getLogger(__name__)
-
 REQUEST_TIMEOUT = 10.0
+# HA processes wildcard subscriptions before exact response topics. Large
+# retained device snapshots need more time than a single gateway operation.
+SUBSCRIPTION_TIMEOUT = 30.0
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def request_error(key: str, device_id: str, reason: str = "") -> HomeAssistantError:
@@ -88,10 +73,6 @@ async def async_wait_for_subscriptions(hass: HomeAssistant, topics: list[str]) -
     @callback
     def subscription_done(topic: str) -> None:
         pending.discard(topic)
-        _LOGGER.debug(
-            "SUBACK received for %s (%d topic(s) still pending)",
-            topic, len(pending),
-        )
         if not pending and not ready.done():
             ready.set_result(None)
 
@@ -103,16 +84,13 @@ async def async_wait_for_subscriptions(hass: HomeAssistant, topics: list[str]) -
                 )
             )
         if pending:
-            async with asyncio.timeout(REQUEST_TIMEOUT):
+            async with asyncio.timeout(SUBSCRIPTION_TIMEOUT):
                 await ready
     except TimeoutError:
         _LOGGER.warning(
-            "Timed out waiting for MQTT SUBACK on: %s. If one of these topics "
-            "is already subscribed elsewhere in the integration, Home "
-            "Assistant's MQTT client may not re-fire its SUBACK callback - "
-            "do not add a second standing subscription to a topic that is "
-            "also used as a request/response answer topic.",
-            sorted(pending),
+            "Timed out after %.0fs waiting for OPUS MQTT subscriptions: %s",
+            SUBSCRIPTION_TIMEOUT,
+            ", ".join(sorted(pending)),
         )
         raise
     finally:
@@ -127,6 +105,7 @@ class MQTTRequestManager:
         self.hass = hass
         self._closed = False
         self._generation = 0
+        self._device_generations: dict[str, int] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._waiters: dict[asyncio.Future, str] = {}
         self._cleanups: set[Callable[[], None]] = set()
@@ -154,6 +133,16 @@ class MQTTRequestManager:
             cancel()
 
     @callback
+    def async_cancel_device(self, device_id: str) -> None:
+        """Invalidate active and queued requests for a removed child only."""
+        self._device_generations[device_id] = (
+            self._device_generations.get(device_id, 0) + 1
+        )
+        for future, owner in self._waiters.copy().items():
+            if owner == device_id and not future.done():
+                future.set_exception(request_error("request_cancelled", device_id))
+
+    @callback
     def async_close(self) -> None:
         """Prevent new operations and cancel current response waits."""
         self._closed = True
@@ -168,22 +157,21 @@ class MQTTRequestManager:
         *,
         require_status: bool = False,
         is_available: Callable[[], bool] | None = None,
+        before_publish: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
-        """Subscribe, await SUBACK, publish, and validate one fresh response.
-
-        IMPORTANT: `answer_topic` must not already have a standing
-        subscription elsewhere in the integration. Home Assistant's MQTT
-        client does not reliably re-fire async_on_subscribe_done() for a
-        topic that is already subscribed, which would make the `await
-        subscribed` below hang until REQUEST_TIMEOUT on every call. If a
-        topic needs both a permanent listener and to be used here, route
-        the permanent listener's data through this method's response
-        instead of subscribing twice.
-        """
+        """Subscribe, await SUBACK, publish, and validate one fresh response."""
+        # The OPUS response has no request ID. Only one local operation may use
+        # an answer topic at a time; a late response after timeout remains an
+        # inherent protocol limitation and is never treated as device state.
         lock = self._locks.setdefault(answer_topic, asyncio.Lock())
         generation = self._generation
+        device_generation = self._device_generations.get(device_id, 0)
         async with lock:
-            if self._closed or generation != self._generation:
+            if (
+                self._closed
+                or generation != self._generation
+                or device_generation != self._device_generations.get(device_id, 0)
+            ):
                 raise request_error("request_cancelled", device_id)
             if not mqtt.is_connected(self.hass):
                 raise request_error("mqtt_unavailable", device_id)
@@ -218,10 +206,6 @@ class MQTTRequestManager:
 
             try:
                 async with asyncio.timeout(REQUEST_TIMEOUT):
-                    _LOGGER.debug(
-                        "Subscribing to answer topic %s for device %s",
-                        answer_topic, device_id,
-                    )
                     cancellations.append(
                         self._own_cleanup(
                             await mqtt.async_subscribe(
@@ -237,31 +221,28 @@ class MQTTRequestManager:
                         )
                     )
                     await subscribed
-                    _LOGGER.debug(
-                        "SUBACK received for %s - publishing request to %s",
-                        answer_topic, topic,
-                    )
-                    if self._closed or generation != self._generation:
+                    if (
+                        self._closed
+                        or generation != self._generation
+                        or device_generation
+                        != self._device_generations.get(device_id, 0)
+                    ):
                         raise request_error("request_cancelled", device_id)
                     if not mqtt.is_connected(self.hass):
                         raise request_error("mqtt_unavailable", device_id)
                     if is_available is not None and not is_available():
                         raise request_error("gateway_unavailable", device_id)
+                    if before_publish is not None:
+                        before_publish()
                     sent = True
                     await mqtt.async_publish(
                         self.hass, topic, payload, qos=1, retain=False
                     )
                     result = await response
-                    _LOGGER.debug("Response received on %s", answer_topic)
+                    if device_generation != self._device_generations.get(device_id, 0):
+                        raise request_error("request_cancelled", device_id)
                     return result
             except TimeoutError as err:
-                _LOGGER.warning(
-                    "OPUS request timed out for device %s (topic=%s, answer=%s, "
-                    "subscribed=%s). If `subscribed` is False, this topic is "
-                    "likely already subscribed elsewhere in the integration "
-                    "and never received a SUBACK for this request.",
-                    device_id, topic, answer_topic, subscribed.done(),
-                )
                 raise request_error("request_timeout", device_id) from err
             finally:
                 for cancel in cancellations:
@@ -269,25 +250,50 @@ class MQTTRequestManager:
                 for future in (subscribed, response):
                     self._waiters.pop(future, None)
                     if future.done() and not future.cancelled():
+                        # Unload may have failed both futures while we were
+                        # awaiting only one; always retrieve both exceptions.
                         future.exception()
                     elif not future.done():
                         future.cancel()
 
 
-async def async_probe_gateway(hass: HomeAssistant, eag_id: str) -> dict[str, Any]:
-    """Verify gateway connectivity via the supported uptime endpoint.
+def gateway_uptime_value(data: dict[str, Any]) -> str:
+    """Read and validate the gateway's system uptime response."""
+    response = data.get("systemUptimeResponse")
+    value = response.get("uptime") if isinstance(response, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise ValueError("The gateway returned an invalid uptime")
+    try:
+        uptime = float(value)
+    except (ValueError, OverflowError) as err:
+        raise ValueError("The gateway returned an invalid uptime") from err
+    if not isfinite(uptime) or uptime < 0:
+        raise ValueError("The gateway returned an invalid uptime")
+    return str(value)
 
-    Uses get/config/system/uptime instead of the unsupported
-    get/config/system/info - the gateway responds reliably to the former.
-    """
+
+async def async_get_gateway_uptime(
+    manager: MQTTRequestManager, eag_id: str
+) -> dict[str, Any]:
+    """Probe a working MQTT endpoint without requiring optional system info."""
+    data = await manager.async_request(
+        TOPIC_GET_SYSTEM_UPTIME.format(base=TOPIC_BASE, eag_id=eag_id),
+        TOPIC_GET_ANSWER_SYSTEM_UPTIME.format(base=TOPIC_BASE, eag_id=eag_id),
+        eag_id,
+        require_status=True,
+    )
+    try:
+        gateway_uptime_value(data)
+    except ValueError as err:
+        raise request_error("request_rejected", eag_id, str(err)) from err
+    return data
+
+
+async def async_probe_gateway(hass: HomeAssistant, eag_id: str) -> dict[str, Any]:
+    """Verify the selected gateway using its fresh MQTT uptime response."""
     manager = MQTTRequestManager(hass)
     try:
-        return await manager.async_request(
-            TOPIC_GET_SYSTEM_UPTIME.format(base=TOPIC_BASE, eag_id=eag_id),
-            TOPIC_GET_ANSWER_SYSTEM_UPTIME.format(base=TOPIC_BASE, eag_id=eag_id),
-            eag_id,
-            require_status=True,
-        )
+        return await async_get_gateway_uptime(manager, eag_id)
     except HomeAssistantError as err:
         if err.translation_key == "mqtt_unavailable":
             raise

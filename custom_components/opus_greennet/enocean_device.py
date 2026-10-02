@@ -1,23 +1,4 @@
-"""EnOcean device representation for Opus GreenNet Bridge.
-
-Base: kegelmeier v0.3.3b0 (strict numeric/enum parsing, per-channel
-`state_revision` for race-condition guards). Extended with fields for the
-four ported devices (HOPPE window handles, Jaeger Direkt RWM, OPUS SMS
-presence sensor).
-
-FIX (2026-09-23): `mechanics_status` (EEP D2-06-40 "Mechanics Status" byte,
-key="mechanics", values "ok"/"error") was referenced by
-entity_descriptions.py's mechanics_fault binary_sensor description, but the
-field was never actually added to EnOceanChannel in a previously-deployed
-copy of this file - causing `AttributeError: 'EnOceanChannel' object has no
-attribute 'mechanics_status'` on every state write for the HOPPE eLock
-device. Added now, along with its update_from_telegram() parsing branch.
-
-`handle_state` (Handle Status: open/closed/tilt) and `lock_state` (Lock
-Status: locked/unlocked) are two independent EEP fields from two different
-keys ("handle" vs "lock") - never conflate them. The lock entity must only
-ever read `lock_state`.
-"""
+"""EnOcean device representation for Opus GreenNet Bridge."""
 
 from __future__ import annotations
 
@@ -32,37 +13,28 @@ from .const import (
     KEY_ACTUATOR_DEACTIVATED,
     KEY_ACTUATOR_LOW_BATTERY,
     KEY_ACTUATOR_NOT_RESPONDING,
-    KEY_ALARM,
     KEY_ANGLE,
-    KEY_BATTERY_LOW,
     KEY_CHANNEL,
     KEY_CIRCUIT_IN_USE,
     KEY_DIMMER,
     KEY_ENERGY,
     KEY_ENERGY_CONSUMPTION,
     KEY_FEED_TEMPERATURE,
-    KEY_HANDLE,
     KEY_HEATER_MODE,
     KEY_HUMIDITY,
-    KEY_ILLUMINATION,
     KEY_LIQUID_DETECTED,
     KEY_LOCAL_CONTROL,
-    KEY_LOCK,
-    KEY_MECHANICS,
     KEY_MISSING_TEMPERATURE,
-    KEY_MOTION_DETECTED,
     KEY_POSITION,
     KEY_POWER,
     KEY_POWER_STATE,
     KEY_ROTATION_TIME,
     KEY_SUMMER_MODE,
-    KEY_SUPPLY_VOLTAGE,
     KEY_SWITCH,
     KEY_TEMPERATURE,
     KEY_TEMPERATURE_ORIGIN,
     KEY_TEMPERATURE_SETPOINT,
     KEY_THERMAL_MODE,
-    KEY_UNLOCK,
     KEY_WINDOW_OPEN,
     STATE_ON,
 )
@@ -75,14 +47,24 @@ class EnOceanChannel:
     channel_id: int
     state_revision: int = field(default=0, repr=False, compare=False)
     is_on: bool | None = None
-    brightness: int | None = None
-    position: int | None = None
-    angle: int | None = None
-    rotation_time: float | None = None
+    brightness: int | None = None  # 0-100 for dimmers
+    position: int | None = None  # 0-100 for covers
+    angle: int | None = None  # Tilt angle for blinds
+    rotation_time: float | None = None  # Zero means the cover has no slat rotation
     local_control: bool | None = None
     energy: float | None = None
     power: float | None = None
     liquid_detected: bool | None = None
+    smoke_alarm: bool | None = None
+    battery_low: bool | None = None
+    battery_level: float | None = None
+    motion: bool | None = None
+    illuminance: float | None = None
+    supply_voltage: float | None = None
+    handle_state: str | None = None
+    is_locked: bool | None = None
+    unlock_request: bool | None = None
+    mechanics_fault: bool | None = None
     # Climate fields
     temperature: float | None = None
     temperature_setpoint: float | None = None
@@ -101,23 +83,8 @@ class EnOceanChannel:
     actuator_not_responding: str | None = None
     missing_temperature: str | None = None
     circuit_in_use: str | None = None
-    # --- OPUS SMS Anwesenheit (A5-07-03) ------------------------------
-    motion_detected: bool | None = None
-    illumination: float | None = None
-    supply_voltage: float | None = None
-    # --- HOPPE window handle (D2-06-40 / F6-10-00 / D2-03-10) ----------
-    # NOTE: handle_state (window open/closed/tilt) and lock_state (lock-bolt
-    # locked/unlocked) are two INDEPENDENT EEP fields from two different
-    # keys ("handle" vs "lock"). The HA lock entity must only ever read
-    # lock_state.
-    handle_state: str | None = None
-    mechanics_status: str | None = None
-    lock_state: str | None = None
-    unlock_state: str | None = None
-    # --- Jaeger Direkt RWM (F6-05-02) ----------------------------------
-    smoke_alarm: bool | None = None
-    battery_low: bool | None = None
-    # Transient rocker-switch state, reset on every update_from_telegram call.
+    # Transient rocker-switch state: set only by the most recent telegram and
+    # emitted by the event entity. Reset on every update_from_telegram call.
     last_button: str | None = None
     last_button_action: str | None = None
 
@@ -133,8 +100,6 @@ class EnOceanDevice:
     physical_device: str = ""
     first_seen: str = ""
     last_seen: str = ""
-    software_revision: str = ""
-    hardware_revision: str = ""
     last_update_source: str = ""
     last_update_received_monotonic: float | None = field(
         default=None, repr=False, compare=False
@@ -146,7 +111,6 @@ class EnOceanDevice:
         default=None, repr=False, compare=False
     )
     dbm: int | None = None
-    battery_level: int | None = None
     last_command_error: str | None = None
     channels: dict[int, EnOceanChannel] = field(default_factory=dict)
     profile: dict[str, Any] | None = None
@@ -160,7 +124,7 @@ class EnOceanDevice:
 
     @property
     def entity_type(self) -> str | None:
-        """Determine the primary entity type based on the primary EEP."""
+        """Determine the entity type based on the primary EEP."""
         eep = self.primary_eep
         if eep and eep in EEP_MAPPINGS:
             return EEP_MAPPINGS[eep][0]
@@ -189,28 +153,68 @@ class EnOceanDevice:
     def is_cover(self) -> bool:
         """Check if this device is a cover/blind."""
         eep = self.primary_eep
-        return bool(eep and eep.startswith("D2-05-"))
+        if eep:
+            return eep.startswith("D2-05-")
+        return False
+
+    @property
+    def supports_tilt(self) -> bool:
+        """Check if this cover supports tilt/angle control."""
+        return self.supports_tilt_for_channel()
 
     def supports_tilt_for_channel(self, channel_id: int = DEFAULT_CHANNEL) -> bool:
         """Use the reported rotation time when available, otherwise the EEP."""
         eep = self.primary_eep
-        if eep not in ("D2-05-00", "D2-05-02"):
+        if eep not in ["D2-05-00", "D2-05-02"]:
             return False
         channel = self.channels.get(channel_id)
         return channel is None or channel.rotation_time != 0
 
     @property
+    def is_smoke_detector(self) -> bool:
+        """Return whether this is an OPUS RWM smoke detector."""
+        return self.primary_eep == "F6-05-02"
+
+    @property
+    def is_presence_detector(self) -> bool:
+        """Return whether this is a supported SMS presence detector."""
+        return self.primary_eep in ("A5-07-01", "A5-07-03")
+
+    @property
+    def is_window_handle(self) -> bool:
+        """Return whether this profile reports HOPPE handle positions."""
+        return self.primary_eep in ("D2-06-40", "F6-10-00", "D2-03-10")
+
+    @property
+    def has_autolock(self) -> bool:
+        """Return whether this handle reports SecureConnect lock status."""
+        return self.primary_eep == "D2-06-40"
+
+    @property
     def is_climate(self) -> bool:
         """Check if this device is a climate/heating device."""
         eep = self.primary_eep
-        return eep in ("D1-4B-05", "D1-4B-06", "D1-4B-07") if eep else False
+        if eep:
+            return eep in ["D1-4B-05", "D1-4B-06", "D1-4B-07"]
+        return False
+
+    @property
+    def heat_area_type(self) -> str | None:
+        """Return the specific heat area type."""
+        eep = self.primary_eep
+        eep_type_map = {
+            "D1-4B-05": "valve",
+            "D1-4B-06": "cositherm",
+            "D1-4B-07": "electro",
+        }
+        return eep_type_map.get(eep)
 
     @property
     def setpoint_step(self) -> float:
         """Return the temperature setpoint step size for this device."""
         if self.primary_eep == "D1-4B-05":
             return 0.5
-        return 0.1
+        return 0.1  # D1-4B-06 and D1-4B-07 both use 0.1
 
     @property
     def channel_count(self) -> int:
@@ -218,6 +222,8 @@ class EnOceanDevice:
         eep = self.primary_eep
         if not eep:
             return 1
+
+        # Multi-channel actuators
         channel_map = {
             "D2-01-04": 2,
             "D2-01-05": 2,
@@ -231,6 +237,9 @@ class EnOceanDevice:
             "D2-01-0E": 8,
             "D2-01-0F": 8,
             "D2-01-10": 8,
+            # Local Control variants: same channel count as their non-LC counterparts
+            # D2-01-11 = 2-ch switch with local control (same as D2-01-04/05)
+            # D2-01-12 = 2-ch dimmer with local control (same as D2-01-06/07)
             "D2-01-11": 2,
             "D2-01-12": 2,
         }
@@ -243,8 +252,6 @@ class EnOceanDevice:
         if channel_id not in self.channels:
             self.channels[channel_id] = EnOceanChannel(channel_id=channel_id)
         return self.channels[channel_id]
-
-    # ── Strict parsing helpers (v0.3.3b0) ──────────────────────────────────
 
     @staticmethod
     def _parse_number(
@@ -259,7 +266,7 @@ class EnOceanDevice:
             return None
         try:
             number = float(value)
-        except (ValueError, OverflowError):
+        except ValueError, OverflowError:
             return None
         if (
             not isfinite(number)
@@ -310,14 +317,28 @@ class EnOceanDevice:
         return None
 
     @staticmethod
-    def parse_battery_level(value: Any) -> int | None:
-        """Parse an OPUS battery percentage such as 72 or '72%'."""
-        if isinstance(value, str):
-            value = value.strip().removesuffix("%").strip()
-        parsed = EnOceanDevice._parse_number(value, minimum=0, maximum=100)
-        return round(parsed) if parsed is not None else None
+    def _parse_enum_boolean(value: Any, on: str, off: str) -> bool | None:
+        """Keep missing or unrecognized detector states unknown."""
+        if value == on:
+            return True
+        if value == off:
+            return False
+        return None
 
-    # ── Telegram application ───────────────────────────────────────────────
+    @staticmethod
+    def _parse_detector_boolean(value: Any, active: str, inactive: str) -> bool | None:
+        """Accept explicit detector enums or booleans, never arbitrary truthiness."""
+        if isinstance(value, str):
+            value = value.strip()
+        parsed = EnOceanDevice._parse_enum_boolean(value, active, inactive)
+        return parsed if parsed is not None else EnOceanDevice._parse_boolean(value)
+
+    @staticmethod
+    def _normalize_battery_level(value: Any) -> Any:
+        """Accept an optional percent suffix before the shared numeric validation."""
+        if isinstance(value, str):
+            return value.strip().removesuffix("%").strip()
+        return value
 
     def update_from_telegram(self, telegram: dict[str, Any]) -> None:
         """Update device state from a telegram message."""
@@ -328,18 +349,21 @@ class EnOceanDevice:
             functions = []
         functions = [func for func in functions if isinstance(func, dict)]
 
+        # Button fields describe only this telegram, including metadata-only updates.
         for channel in self.channels.values():
             channel.last_button = None
             channel.last_button_action = None
 
+        # Determine default channel from telegram-level channel function.
         default_channel_id = DEFAULT_CHANNEL
         for func in functions:
             if func.get("key") == KEY_CHANNEL:
-                parsed = self._parse_channel_id(func.get("value", DEFAULT_CHANNEL))
-                if parsed is not None:
-                    default_channel_id = parsed
+                default_channel_id = self._parse_channel_id(
+                    func.get("value", DEFAULT_CHANNEL)
+                )
                 break
 
+        # Update channel state from functions
         for func in functions:
             key = func.get("key")
             if key == KEY_CHANNEL:
@@ -380,11 +404,18 @@ class EnOceanDevice:
                 )
 
             elif key == KEY_ROTATION_TIME:
+                # EEP D2-05-00 uses noRotation; OPUS also reports numeric zero.
+                # Unknown/noChange values must not erase a known configuration.
                 if isinstance(value, str) and value.strip() == "noRotation":
                     channel.rotation_time = 0
-                else:
-                    rotation_time = self._parse_number(value, minimum=0)
-                    if rotation_time is not None:
+                elif isinstance(value, (int, float, str)) and not isinstance(
+                    value, bool
+                ):
+                    try:
+                        rotation_time = float(value)
+                    except ValueError, OverflowError:
+                        continue
+                    if isfinite(rotation_time) and rotation_time >= 0:
                         channel.rotation_time = rotation_time
 
             elif key == KEY_LOCAL_CONTROL:
@@ -402,61 +433,71 @@ class EnOceanDevice:
                 if liquid_detected is not None:
                     channel.liquid_detected = liquid_detected
 
-            # --- OPUS SMS Anwesenheit (A5-07-03) ---------------------------
-            elif key == KEY_MOTION_DETECTED:
-                if value == "notAvailable":
-                    channel.motion_detected = None
-                else:
-                    parsed_motion = self._parse_boolean(value)
-                    if parsed_motion is not None:
-                        channel.motion_detected = parsed_motion
-
-            elif key == KEY_ILLUMINATION:
-                self._update_numeric_field(
-                    channel, "illumination", value, 0, allow_unavailable=True
+            elif key == "smokeAlarm" or (key == "alarm" and self.is_smoke_detector):
+                channel.smoke_alarm = (
+                    value == "on"
+                    if value in ("on", "off")
+                    else self._parse_detector_boolean(value, "alarm", "idle")
                 )
 
-            elif key == KEY_SUPPLY_VOLTAGE:
+            elif key == "batteryLow":
+                channel.battery_low = self._parse_detector_boolean(value, "low", "ok")
+            elif key == "batteryLevel":
                 self._update_numeric_field(
-                    channel, "supply_voltage", value, 0, allow_unavailable=True
+                    channel,
+                    "battery_level",
+                    self._normalize_battery_level(value),
+                    0,
+                    100,
+                    allow_unavailable=True,
                 )
 
-            # --- HOPPE window handle (Handle Status - window open/tilt) ---
-            elif key == KEY_HANDLE:
-                if value in ("closed", "open", "tilt"):
-                    channel.handle_state = value
+            elif key == "motionDetector" or (
+                key == "motionDetected" and self.is_presence_detector
+            ):
+                channel.motion = self._parse_detector_boolean(
+                    value, "detected", "noMotion"
+                )
 
-            # --- HOPPE window handle (Mechanics Status) --------------------
-            elif key == KEY_MECHANICS:
-                if value in ("ok", "error"):
-                    channel.mechanics_status = value
+            elif key in ("illuminance", "supplyVoltage") or (
+                key == "illumination" and self.is_presence_detector
+            ):
+                self._update_numeric_field(
+                    channel,
+                    "supply_voltage" if key == "supplyVoltage" else "illuminance",
+                    value,
+                    minimum=0,
+                    allow_unavailable=True,
+                )
 
-            # --- HOPPE window handle (Lock Status - lock-bolt, drives the
-            # lock entity; NEVER conflate with KEY_HANDLE above) -----------
-            elif key == KEY_LOCK:
-                if value in ("locked", "unlocked"):
-                    channel.lock_state = value
+            elif key == "handleState" or (key == "handle" and self.is_window_handle):
+                if value == "tilt":
+                    value = "tilted"
+                channel.handle_state = (
+                    value if value in ("open", "closed", "tilted") else None
+                )
 
-            # --- HOPPE window handle (Unlock Query) ------------------------
-            elif key == KEY_UNLOCK:
-                if value in ("notRequested", "requested"):
-                    channel.unlock_state = value
+            elif key == "lock":
+                channel.is_locked = self._parse_enum_boolean(
+                    value, "locked", "unlocked"
+                )
 
-            # --- Jaeger Direkt RWM (F6-05-02) ------------------------------
-            elif key == KEY_ALARM:
-                if value in ("on", "off"):
-                    channel.smoke_alarm = value == STATE_ON
+            elif key == "unlockRequest" or (key == "unlock" and self.has_autolock):
+                channel.unlock_request = self._parse_detector_boolean(
+                    value, "requested", "notRequested"
+                )
 
-            elif key == KEY_BATTERY_LOW:
-                battery_low = self._parse_boolean(value)
-                if battery_low is not None:
-                    channel.battery_low = battery_low
+            elif key == "mechanicsFault" or (key == "mechanics" and self.has_autolock):
+                channel.mechanics_fault = self._parse_detector_boolean(
+                    value, "error", "ok"
+                )
 
             # Climate keys
             elif key == KEY_TEMPERATURE:
                 self._update_numeric_field(
                     channel, "temperature", value, 0, 40, allow_unavailable=True
                 )
+
             elif key == KEY_TEMPERATURE_SETPOINT:
                 self._update_numeric_field(
                     channel,
@@ -466,6 +507,7 @@ class EnOceanDevice:
                     40,
                     allow_unavailable=True,
                 )
+
             elif key == KEY_HEATER_MODE:
                 if value in (
                     "heating",
@@ -476,32 +518,38 @@ class EnOceanDevice:
                     "error",
                 ):
                     channel.heater_mode = value
+
             elif key == KEY_HUMIDITY:
                 self._update_numeric_field(
                     channel, "humidity", value, 0, 100, allow_unavailable=True
                 )
+
             elif key == KEY_WINDOW_OPEN:
-                parsed_bool = self._parse_boolean(value)
-                if parsed_bool is not None:
-                    channel.window_open = parsed_bool
+                if (parsed := self._parse_boolean(value)) is not None:
+                    channel.window_open = parsed
+
             elif key == KEY_SUMMER_MODE:
-                parsed_bool = self._parse_boolean(value)
-                if parsed_bool is not None:
-                    channel.summer_mode = parsed_bool
+                if (parsed := self._parse_boolean(value)) is not None:
+                    channel.summer_mode = parsed
+
             elif key == KEY_FEED_TEMPERATURE:
                 self._update_numeric_field(
                     channel, "feed_temperature", value, 0, 80, allow_unavailable=True
                 )
+
             elif key == KEY_THERMAL_MODE:
                 if value in ("heating", "cooling"):
                     channel.thermal_mode = value
+
             elif key == KEY_ENERGY_CONSUMPTION:
                 self._update_numeric_field(
                     channel, "energy_consumption", value, 0, 10, allow_unavailable=True
                 )
+
             elif key == KEY_POWER_STATE:
                 if value in ("active", "inactive"):
                     channel.power_state = value
+
             elif key == KEY_TEMPERATURE_ORIGIN:
                 if value in ("external", "internal"):
                     channel.temperature_origin = value
@@ -510,19 +558,24 @@ class EnOceanDevice:
             elif key == KEY_ACTUATOR_DEACTIVATED:
                 if value in ("info", "reset"):
                     channel.actuator_deactivated = value
+
             elif key == KEY_ACTUATOR_LOW_BATTERY:
                 if value in ("warning", "reset"):
                     channel.actuator_low_battery = value
+
             elif key == KEY_ACTUATOR_NOT_RESPONDING:
                 if value in ("warning", "error", "reset"):
                     channel.actuator_not_responding = value
+
             elif key == KEY_MISSING_TEMPERATURE:
                 if value in ("info", "warning", "error", "reset"):
                     channel.missing_temperature = value
+
             elif key == KEY_CIRCUIT_IN_USE:
                 if value in ("error", "reset"):
                     channel.circuit_in_use = value
 
+        # Update last seen from telegram
         if isinstance(telegram.get("timestamp"), str):
             self.last_seen = telegram["timestamp"]
         if isinstance(telegram.get("telegramInfo"), dict):
@@ -535,6 +588,7 @@ class EnOceanDevice:
         """Create an EnOceanDevice from a device JSON object."""
         device = device_data.get("device", device_data)
         dbm = cls._parse_number(device.get("dbm"), integer=True)
+
         return cls(
             device_id=device.get("deviceId", ""),
             friendly_id=device.get("friendlyId", ""),
@@ -543,8 +597,5 @@ class EnOceanDevice:
             physical_device=device.get("physicalDevice", ""),
             first_seen=device.get("firstSeen", ""),
             last_seen=device.get("lastSeen", ""),
-            software_revision=str(device.get("softwareRevision", "")),
-            hardware_revision=str(device.get("hardwareRevision", "")),
             dbm=int(dbm) if dbm is not None else None,
-            battery_level=cls.parse_battery_level(device.get("batteryLevel")),
         )

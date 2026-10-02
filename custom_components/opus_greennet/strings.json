@@ -8,14 +8,15 @@
           "eag_id": "EAG identifier"
         },
         "data_description": {
-          "eag_id": "The eight-character bridge identifier used in MQTT topics, for example 050B4DFA."
+          "eag_id": "The eight-character bridge identifier used in MQTT topics, for example A1B2C3D4 (fictional)."
         }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to the MQTT broker",
       "invalid_eag_id": "The EAG identifier must contain exactly eight hexadecimal characters",
-      "unknown": "Unexpected error"
+      "unknown": "Unexpected error",
+      "gateway_unavailable": "The MQTT broker is connected, but the bridge did not respond. Check its identifier and the MQTT bridge connection."
     },
     "abort": {
       "already_configured": "This bridge is already configured",
@@ -45,26 +46,26 @@
       "window": {
         "name": "Window"
       },
-      "motion": {
-        "name": "Motion"
-      },
       "smoke_alarm": {
         "name": "Smoke alarm"
       },
       "battery_low": {
         "name": "Battery low"
       },
-      "mechanics_fault": {
-        "name": "Mechanics fault"
-      },
-      "handle_closed": {
-        "name": "Handle closed"
+      "motion": {
+        "name": "Motion"
       },
       "handle_open": {
         "name": "Handle open"
       },
       "handle_tilt": {
         "name": "Handle tilted"
+      },
+      "handle_closed": {
+        "name": "Handle closed"
+      },
+      "mechanics_fault": {
+        "name": "Mechanics fault"
       }
     },
     "cover": {
@@ -75,11 +76,6 @@
     "light": {
       "channel": {
         "name": "Channel {channel}"
-      }
-    },
-    "lock": {
-      "window_handle_lock": {
-        "name": "AutoLock"
       }
     },
     "sensor": {
@@ -105,24 +101,29 @@
         "name": "Battery level"
       },
       "handle_state": {
-        "name": "Handle state",
+        "name": "Handle position",
         "state": {
-          "closed": "Closed",
           "open": "Open",
-          "tilt": "Tilted"
+          "closed": "Closed",
+          "tilted": "Tilted"
         }
       },
       "unlock_request": {
         "name": "Unlock request",
         "state": {
-          "notRequested": "Not requested",
-          "requested": "Requested"
+          "requested": "Requested",
+          "not_requested": "Not requested"
         }
       }
     },
     "switch": {
       "channel": {
         "name": "Channel {channel}"
+      }
+    },
+    "lock": {
+      "autolock": {
+        "name": "AutoLock"
       }
     }
   },
@@ -162,12 +163,9 @@
     },
     "request_cancelled": {
       "message": "The request was cancelled because the integration is unloading or its connection was lost."
-    }
-  },
-  "issues": {
-    "system_info_unsupported": {
-      "title": "Gateway system info not available",
-      "description": "The OPUS gateway {eag_id} did not answer a request for its system information (model, firmware). This is diagnostic-only and does not affect device control or discovery. If you want this metadata in diagnostics, check that your Mosquitto bridge relays `get/config/system/info` and `getAnswer/config/system/info` for this gateway. This issue can be dismissed."
+    },
+    "autolock_read_only": {
+      "message": "AutoLock control via MQTT is disabled pending manufacturer clarification. Only the reported lock state is available."
     }
   },
   "services": {
