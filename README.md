@@ -397,6 +397,7 @@ custom_components/opus_greennet/
 ├── climate.py            # Climate entity platform (HeatArea)
 ├── sensor.py             # Sensor entity platform
 ├── binary_sensor.py      # Binary sensor entity platform
+├── binary_sensor_descriptions.py # Moisture and HeatArea sensor definitions
 ├── event.py              # Event entity platform (rocker switches)
 ├── services.yaml         # HA service definitions
 ├── strings.json          # UI, service, and exception translation source
@@ -414,6 +415,7 @@ tests/
 ├── test_gateway_payload_compatibility.py # Reported IQ-DOT payload regression tests
 ├── test_beta_entity_migration.py # Fork IDs, duplicate cleanup, and translations
 ├── test_binary_sensor_discovery.py # Repeated discovery and removal ordering
+├── test_binary_sensor_descriptions.py # Stable sensor inventory and metadata
 ├── test_detector_support.py     # Sensor discovery and live MQTT updates
 ├── test_scalar_telemetry.py      # Immediate battery and signal-strength updates
 ├── test_window_handles.py        # Handle positions and protected AutoLock actions
