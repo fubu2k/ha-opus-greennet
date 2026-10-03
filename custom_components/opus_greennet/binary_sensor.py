@@ -9,10 +9,13 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import OpusGreenNetConfigEntry
+from .binary_sensor_descriptions import (
+    BINARY_SENSOR_DESCRIPTIONS,
+    OpusBinarySensorDescription,
+)
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL
 from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
@@ -168,94 +171,13 @@ async def async_setup_entry(
                     )
                 )
 
-        if device.primary_eep == "F6-05-01":
-            entities.append(
-                OpusGreenNetMoistureSensor(
-                    coordinator=coordinator,
-                    eag_id=eag_id,
-                    gateway_device_id=gateway_device_id,
-                    device=device,
-                )
+        entities.extend(
+            OpusGreenNetDescriptiveBinarySensor(
+                coordinator, eag_id, gateway_device_id, device, description
             )
-
-        if not device.is_climate:
-            async_add_new(entities)
-            return
-
-        # Window open (all HeatArea types)
-        entities.append(
-            OpusGreenNetWindowSensor(
-                coordinator=coordinator,
-                eag_id=eag_id,
-                gateway_device_id=gateway_device_id,
-                device=device,
-            )
+            for description in BINARY_SENSOR_DESCRIPTIONS
+            if description.applies_to(device)
         )
-
-        # Actuator not responding (all types)
-        entities.append(
-            OpusGreenNetProblemSensor(
-                coordinator=coordinator,
-                eag_id=eag_id,
-                gateway_device_id=gateway_device_id,
-                device=device,
-                suffix="actuator_not_responding",
-                translation_key="actuator_not_responding",
-                attr_name="actuator_not_responding",
-            )
-        )
-
-        # Missing temperature (all types)
-        entities.append(
-            OpusGreenNetProblemSensor(
-                coordinator=coordinator,
-                eag_id=eag_id,
-                gateway_device_id=gateway_device_id,
-                device=device,
-                suffix="missing_temperature",
-                translation_key="missing_temperature",
-                attr_name="missing_temperature",
-            )
-        )
-
-        # Actuator low battery (D1-4B-05 Valve only)
-        if device.primary_eep == "D1-4B-05":
-            entities.append(
-                OpusGreenNetBatterySensor(
-                    coordinator=coordinator,
-                    eag_id=eag_id,
-                    gateway_device_id=gateway_device_id,
-                    device=device,
-                )
-            )
-
-            # Actuator deactivated (D1-4B-05 Valve only)
-            entities.append(
-                OpusGreenNetProblemSensor(
-                    coordinator=coordinator,
-                    eag_id=eag_id,
-                    gateway_device_id=gateway_device_id,
-                    device=device,
-                    suffix="actuator_deactivated",
-                    translation_key="actuator_deactivated",
-                    attr_name="actuator_deactivated",
-                )
-            )
-
-        # Circuit in use (D1-4B-06 CosiTherm only)
-        if device.primary_eep == "D1-4B-06":
-            entities.append(
-                OpusGreenNetProblemSensor(
-                    coordinator=coordinator,
-                    eag_id=eag_id,
-                    gateway_device_id=gateway_device_id,
-                    device=device,
-                    suffix="circuit_in_use",
-                    translation_key="circuit_in_use",
-                    attr_name="circuit_in_use",
-                )
-            )
-
         async_add_new(entities)
 
     # Listen for new device discoveries
@@ -292,10 +214,8 @@ class OpusGreenNetBaseBinarySensor(OpusGreenNetEntity, BinarySensorEntity):
         self._attr_translation_key = translation_key
 
 
-class OpusGreenNetWindowSensor(OpusGreenNetBaseBinarySensor):
-    """Window open binary sensor for HeatArea devices."""
-
-    _attr_device_class = BinarySensorDeviceClass.WINDOW
+class OpusGreenNetDescriptiveBinarySensor(OpusGreenNetBaseBinarySensor):
+    """A described sensor using the shared availability and update lifecycle."""
 
     def __init__(
         self,
@@ -303,123 +223,24 @@ class OpusGreenNetWindowSensor(OpusGreenNetBaseBinarySensor):
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
+        description: OpusBinarySensorDescription,
     ) -> None:
-        """Initialize the window sensor."""
-        super().__init__(
-            coordinator, eag_id, gateway_device_id, device, "window_open", "window"
-        )
-
-    @property
-    def is_on(self) -> bool | None:
-        """Return true if window is open."""
-        channel = self._device.channels.get(DEFAULT_CHANNEL)
-        if channel:
-            return channel.window_open
-        return None
-
-
-class OpusGreenNetMoistureSensor(OpusGreenNetBaseBinarySensor):
-    """Water leak binary sensor for F6-05-01 devices."""
-
-    _attr_device_class = BinarySensorDeviceClass.MOISTURE
-
-    def __init__(
-        self,
-        coordinator: OpusGreenNetCoordinator,
-        eag_id: str,
-        gateway_device_id: str,
-        device: EnOceanDevice,
-    ) -> None:
-        """Initialize the moisture sensor."""
         super().__init__(
             coordinator,
             eag_id,
             gateway_device_id,
             device,
-            "liquid_detected",
-            "water_leak",
+            description.key,
+            description.translation_key,
         )
+        self._opus_description = description
+        self._attr_device_class = description.device_class
+        self._attr_entity_category = description.entity_category
+        self._attr_entity_registry_enabled_default = description.enabled_by_default
 
     @property
     def is_on(self) -> bool | None:
-        """Return true when liquid is detected."""
-        channel = self._device.channels.get(DEFAULT_CHANNEL)
-        if channel:
-            return channel.liquid_detected
-        return None
-
-
-class OpusGreenNetProblemSensor(OpusGreenNetBaseBinarySensor):
-    """Problem/error binary sensor for HeatArea devices."""
-
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(
-        self,
-        coordinator: OpusGreenNetCoordinator,
-        eag_id: str,
-        gateway_device_id: str,
-        device: EnOceanDevice,
-        suffix: str,
-        translation_key: str,
-        attr_name: str,
-    ) -> None:
-        """Initialize the problem sensor."""
-        super().__init__(
-            coordinator, eag_id, gateway_device_id, device, suffix, translation_key
-        )
-        self._attr_name_key = attr_name
-
-    @property
-    def is_on(self) -> bool | None:
-        """Return true if there is a problem (value is not 'reset' and not None)."""
-        channel = self._device.channels.get(DEFAULT_CHANNEL)
-        if not channel:
-            return None
-        value = getattr(channel, self._attr_name_key, None)
-        if value is None:
-            return None
-        # "reset" means the error/warning has been cleared
-        return value != "reset"
-
-
-class OpusGreenNetBatterySensor(OpusGreenNetBaseBinarySensor):
-    """Low battery binary sensor for Valve Area (D1-4B-05) devices."""
-
-    _attr_device_class = BinarySensorDeviceClass.BATTERY
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(
-        self,
-        coordinator: OpusGreenNetCoordinator,
-        eag_id: str,
-        gateway_device_id: str,
-        device: EnOceanDevice,
-    ) -> None:
-        """Initialize the battery sensor."""
-        super().__init__(
-            coordinator,
-            eag_id,
-            gateway_device_id,
-            device,
-            "actuator_low_battery",
-            "actuator_battery",
-        )
-
-    @property
-    def is_on(self) -> bool | None:
-        """Return true if battery is low.
-
-        Note: BinarySensorDeviceClass.BATTERY is_on=True means low battery.
-        """
-        channel = self._device.channels.get(DEFAULT_CHANNEL)
-        if not channel:
-            return None
-        value = channel.actuator_low_battery
-        if value is None:
-            return None
-        return value != "reset"
+        return self._opus_description.value_fn(self._device)
 
 
 class OpusGreenNetStateBinarySensor(OpusGreenNetBaseBinarySensor):

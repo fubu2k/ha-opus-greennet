@@ -17,13 +17,13 @@ from homeassistant.const import UnitOfPower
 
 from custom_components.opus_greennet import OpusGreenNetRuntimeData
 from custom_components.opus_greennet.binary_sensor import (
-    OpusGreenNetBatterySensor,
-    OpusGreenNetMoistureSensor,
-    OpusGreenNetProblemSensor,
-    OpusGreenNetWindowSensor,
+    OpusGreenNetDescriptiveBinarySensor,
 )
 from custom_components.opus_greennet.binary_sensor import (
     async_setup_entry as async_setup_binary_sensors,
+)
+from custom_components.opus_greennet.binary_sensor_descriptions import (
+    BINARY_SENSOR_DESCRIPTIONS,
 )
 from custom_components.opus_greennet.climate import (
     OpusGreenNetClimate,
@@ -354,17 +354,15 @@ def test_binary_sensor_values() -> None:
         actuator_low_battery="reset",
     )
 
-    window = OpusGreenNetWindowSensor(coordinator, EAG_ID, GATEWAY_DEVICE_ID, device)
-    problem = OpusGreenNetProblemSensor(
-        coordinator,
-        EAG_ID,
-        GATEWAY_DEVICE_ID,
-        device,
-        suffix="actuator_not_responding",
-        translation_key="actuator_not_responding",
-        attr_name="actuator_not_responding",
+    descriptions = {
+        description.key: description for description in BINARY_SENSOR_DESCRIPTIONS
+    }
+    window, problem, battery = (
+        OpusGreenNetDescriptiveBinarySensor(
+            coordinator, EAG_ID, GATEWAY_DEVICE_ID, device, descriptions[key]
+        )
+        for key in ("window_open", "actuator_not_responding", "actuator_low_battery")
     )
-    battery = OpusGreenNetBatterySensor(coordinator, EAG_ID, GATEWAY_DEVICE_ID, device)
 
     assert window.is_on is True
     assert problem.is_on is True
@@ -374,8 +372,8 @@ def test_binary_sensor_values() -> None:
 def test_moisture_sensor_values_and_metadata() -> None:
     coordinator = _coordinator()
     device = _device("F6-05-01")
-    moisture = OpusGreenNetMoistureSensor(
-        coordinator, EAG_ID, GATEWAY_DEVICE_ID, device
+    moisture = OpusGreenNetDescriptiveBinarySensor(
+        coordinator, EAG_ID, GATEWAY_DEVICE_ID, device, BINARY_SENSOR_DESCRIPTIONS[0]
     )
 
     assert moisture.is_on is None
