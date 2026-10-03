@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-10-03
+
+Stable release of the device support and fixes validated in the 0.4.0 beta series. Community feedback confirms smoke-detector states, SMS readings and existing dashboards, HOPPE handle/AutoLock status, and the telemetry fast path. Device removal was also confirmed working.
+
+### Added
+- OPUS RWM F6-05-02 smoke-alarm and low-battery sensors. Numeric battery values are not invented when the gateway does not publish them (#42).
+- OPUS SMS A5-07-01/A5-07-03 motion, illuminance, supply-voltage, and battery readings (#43).
+- HOPPE D2-06-40, F6-10-00, and D2-03-10 handle-position sensors. AutoLock models also expose reported lock status, unlock requests, and mechanics faults (#44).
+- Manual removal of stale child devices, with gateway protection and rediscovery support (#46).
+- German translations and migration of community-fork illuminance/AutoLock entries while retaining existing Home Assistant entity IDs and settings.
+
+### Fixed
+- Accept the gateway payload formats reported by testers alongside the original beta formats, including percentage battery strings and RWM transmit-mode updates.
+- Apply battery and signal-strength telemetry immediately, retaining validation and protection against stale buffered values (#45).
+- Handle named state updates following indexed snapshots without leaving stale readings.
+
+### Upgrade notes
+- AutoLock MQTT control remains disabled pending manufacturer guidance. Handle position is independent of lock status.
+- If both fork and beta illuminance/AutoLock entries exist for the same device and gateway, the fork entry is preserved and the duplicate beta entry removed. Update references to the removed beta ID; the integration logs both IDs.
+- Unlock-request states are `requested` / `not_requested`; update automations that previously compared boolean text.
+- Removal does not unpair a device from the gateway. Devices still reported by the gateway can reappear.
+
+### Validation
+- 735 automated tests pass on Home Assistant 2026.9.4, with Ruff, dependency validation, and Hassfest checks. Earlier beta validation also covered 2026.8.2.
+- CI now tracks the latest stable Home Assistant release automatically, with weekly and manual runs.
+
+Thanks to fubu2k for the patches and hardware validation. The new proposals in #55, #57, and #58 are reserved for the next beta.
+
 ## [0.4.0b1] - 2026-10-01
 
 Beta follow-up incorporating fubu2k's reports and proposed corrections for #42–#46. Enable pre-release versions in HACS, select **v0.4.0b1**, and restart Home Assistant.
