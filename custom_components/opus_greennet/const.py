@@ -139,6 +139,9 @@ KEY_POSITION: Final = "position"
 KEY_STOP: Final = "stop"
 KEY_ANGLE: Final = "angle"
 KEY_ROTATION_TIME: Final = "rotationTime"
+KEY_VERTICAL_MOVEMENT_TIME: Final = "verticalMovementTime"
+COVER_MOVEMENT_GRACE_SECONDS: Final = 5.0
+COVER_RECONCILIATION_DELAYS: Final = (10.0, 20.0)
 KEY_CHANNEL: Final = "channel"
 KEY_LOCAL_CONTROL: Final = "localControl"
 KEY_ENERGY: Final = "energy"
@@ -205,6 +208,7 @@ KNOWN_STATE_KEYS: Final = frozenset(
         "position",
         "angle",
         KEY_ROTATION_TIME,
+        KEY_VERTICAL_MOVEMENT_TIME,
         "localControl",
         "energy",
         "power",

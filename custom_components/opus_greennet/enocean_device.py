@@ -35,6 +35,7 @@ from .const import (
     KEY_TEMPERATURE_ORIGIN,
     KEY_TEMPERATURE_SETPOINT,
     KEY_THERMAL_MODE,
+    KEY_VERTICAL_MOVEMENT_TIME,
     KEY_WINDOW_OPEN,
     STATE_ON,
 )
@@ -51,6 +52,8 @@ class EnOceanChannel:
     position: int | None = None  # 0-100 for covers
     angle: int | None = None  # Tilt angle for blinds
     rotation_time: float | None = None  # Zero means the cover has no slat rotation
+    vertical_movement_time: float | None = None
+    movement: str | None = None  # Estimated opening/closing, never physical feedback
     local_control: bool | None = None
     energy: float | None = None
     power: float | None = None
@@ -401,6 +404,11 @@ class EnOceanDevice:
             elif key == KEY_ANGLE:
                 self._update_numeric_field(
                     channel, "angle", value, 0, 100, integer=True
+                )
+
+            elif key == KEY_VERTICAL_MOVEMENT_TIME:
+                self._update_numeric_field(
+                    channel, "vertical_movement_time", value, minimum=0
                 )
 
             elif key == KEY_ROTATION_TIME:

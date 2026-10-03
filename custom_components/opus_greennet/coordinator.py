@@ -7,6 +7,7 @@ import json
 import logging
 import re
 from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from datetime import timedelta
 from time import monotonic
 from typing import Any
@@ -20,11 +21,14 @@ from homeassistant.helpers.event import async_call_later, async_track_time_inter
 
 from .const import (
     BUTTON_KEYS,
+    COVER_MOVEMENT_GRACE_SECONDS,
+    COVER_RECONCILIATION_DELAYS,
     DOMAIN,
     INDEXED_STATE_CONTAINERS,
     KEY_CHANNEL,
     KEY_ROTATION_TIME,
     KEY_STOP,
+    KEY_VERTICAL_MOVEMENT_TIME,
     KNOWN_STATE_KEYS,
     TOPIC_BASE,
     TOPIC_GET_ANSWER_DEVICE_CONFIGURATION,
@@ -89,6 +93,21 @@ PUT_ANSWER_STATE_TOPIC_PATTERN = re.compile(
 )
 
 
+@dataclass
+class CoverMovement:
+    """One channel's replaceable travel estimate and cancellation handle."""
+
+    start_position: float | None
+    target: int
+    started_at: float
+    travel: float
+    cancel: Callable[[], None] | None = None
+
+    @property
+    def ends_at(self) -> float:
+        return self.started_at + self.travel + COVER_MOVEMENT_GRACE_SECONDS
+
+
 class OpusGreenNetCoordinator:
     """Coordinator for managing MQTT communication with Opus GreenNet Bridge."""
 
@@ -112,6 +131,7 @@ class OpusGreenNetCoordinator:
         self._pending_reconciliation_queries: dict[
             tuple[str, int], list[Callable[[], None]]
         ] = {}
+        self._cover_movements: dict[tuple[str, int], CoverMovement] = {}
         self._pending_reconciliation_fields: dict[tuple[str, int], set[str]] = {}
         self._feedback_revisions: dict[tuple[str, int, str], int] = {}
         self._discovery_timer: Callable | None = None
@@ -133,6 +153,9 @@ class OpusGreenNetCoordinator:
     @callback
     def async_forget_device(self, device_id: str) -> None:
         """Discard only this child's state and queued work, without MQTT writes."""
+        for did, channel_id in list(self._cover_movements):
+            if did == device_id:
+                self._clear_cover_movement(did, channel_id, notify=False)
         self.devices.pop(device_id, None)
         self._pending_devices.discard(device_id)
         for cache in (
@@ -332,6 +355,8 @@ class OpusGreenNetCoordinator:
 
     @callback
     def _cancel_background_work(self) -> None:
+        for device_id, channel_id in list(self._cover_movements):
+            self._clear_cover_movement(device_id, channel_id, notify=False)
         for task in self._tasks:
             task.cancel()
         for device_id, channel_id in list(self._pending_reconciliation_queries):
@@ -938,6 +963,120 @@ class OpusGreenNetCoordinator:
         async_dispatcher_send(self.hass, signal, device)
         return True
 
+    def _dispatch_cover_estimate(self, device_id: str) -> None:
+        if (device := self.get_device(device_id)) is not None:
+            async_dispatcher_send(
+                self.hass,
+                f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}",
+                device,
+            )
+
+    def _clear_cover_movement(
+        self, device_id: str, channel_id: int, *, notify: bool = True
+    ) -> None:
+        movement = self._cover_movements.pop((device_id, channel_id), None)
+        if movement is None:
+            return
+        if movement.cancel is not None:
+            movement.cancel()
+        if (device := self.get_device(device_id)) is not None:
+            device.get_or_create_channel(channel_id).movement = None
+        if notify:
+            self._dispatch_cover_estimate(device_id)
+
+    def _start_cover_movement(
+        self, device: EnOceanDevice, channel_id: int, target: int
+    ) -> CoverMovement | None:
+        channel = device.get_or_create_channel(channel_id)
+        key = (device.device_id, channel_id)
+        previous = self._cover_movements.get(key)
+        if previous is not None and previous.target == target:
+            # An outbound echo must not extend the same movement's deadline.
+            # A repeated local request must also suppress the entity's target
+            # assignment after its ACK, just like the first request does.
+            channel.state_revision += 1
+            return previous
+        current = channel.position
+        now = monotonic()
+        if previous is not None:
+            current = previous.start_position
+            if current is not None:
+                progress = min(
+                    1.0, max(0.0, (now - previous.started_at) / previous.travel)
+                )
+                current += (previous.target - current) * progress
+        self._clear_cover_movement(device.device_id, channel_id, notify=False)
+        full_time = channel.vertical_movement_time
+        if full_time is None or full_time <= 0:
+            return None
+        travel = (
+            full_time if current is None else abs(target - current) / 100 * full_time
+        )
+        if travel == 0:
+            self._dispatch_cover_estimate(device.device_id)
+            return None
+        # A replacement must stop old status queries before waiting for its ACK.
+        # Keep other unconfirmed fields (e.g. tilt) for the replacement schedule.
+        pending = self._pending_reconciliation_fields.get(key, set())
+        self._cancel_reconciliation_queries(device.device_id, channel_id)
+        if pending:
+            self._pending_reconciliation_fields[key] = pending
+            self._pending_reconciliation_queries[key] = []
+        channel.movement = (
+            "closing"
+            if (target > 50 if current is None else target > current)
+            else "opening"
+        )
+        # Prevent an entity awaiting its command ACK from replacing the last
+        # reported position with the target while the cover is still travelling.
+        channel.state_revision += 1
+        movement = CoverMovement(current, target, now, travel)
+        self._cover_movements[key] = movement
+
+        @callback
+        def finished(_now):
+            if self._cover_movements.get(key) is not movement:
+                return
+            self._clear_cover_movement(device.device_id, channel_id, notify=False)
+            channel.position = target  # Still assumed, not confirmed device feedback.
+            channel.state_revision += 1
+            self._dispatch_cover_estimate(device.device_id)
+
+        movement.cancel = async_call_later(
+            self.hass, travel + COVER_MOVEMENT_GRACE_SECONDS, finished
+        )
+        self._dispatch_cover_estimate(device.device_id)
+        return movement
+
+    def _start_cover_commands(
+        self, device: EnOceanDevice | None, functions: list[dict[str, Any]]
+    ) -> dict[int, CoverMovement]:
+        started = {}
+        if device is None or device.entity_type != "cover":
+            return started
+        default = self._channel_from_functions(functions)
+        for function in functions:
+            channel = EnOceanDevice._parse_number(
+                function.get("channel", default), minimum=0, integer=True
+            )
+            if channel is None:
+                continue
+            channel_id = int(channel)
+            if function.get("key") == KEY_STOP and function.get("value") == "true":
+                self._clear_cover_movement(device.device_id, channel_id)
+                self._cancel_reconciliation_queries(device.device_id, channel_id)
+            elif function.get("key") == "position":
+                target = EnOceanDevice._parse_number(
+                    function.get("value"), minimum=0, maximum=100, integer=True
+                )
+                if target is not None:
+                    movement = self._start_cover_movement(
+                        device, channel_id, int(target)
+                    )
+                    if movement is not None:
+                        started[channel_id] = movement
+        return started
+
     def _cancel_reconciliation_queries(
         self, device_id: str, channel_id: int | None = None
     ) -> None:
@@ -967,7 +1106,11 @@ class OpusGreenNetCoordinator:
         if expected:
             self._pending_reconciliation_fields[key] = expected
 
-        for delay in OUTBOUND_STATE_RECONCILIATION_DELAYS:
+        delays = OUTBOUND_STATE_RECONCILIATION_DELAYS
+        if "position" in expected and (movement := self._cover_movements.get(key)):
+            remaining = max(0.0, movement.ends_at - monotonic())
+            delays = tuple(remaining + delay for delay in COVER_RECONCILIATION_DELAYS)
+        for delay in delays:
 
             @callback
             def query_callback(_now, did=device_id, channel=channel_id, seconds=delay):
@@ -1243,7 +1386,7 @@ class OpusGreenNetCoordinator:
 
     @staticmethod
     def _configuration_state_functions(data: dict) -> list[dict[str, Any]]:
-        """Read explicitly reported cover rotation, never parameter defaults."""
+        """Read reported cover movement times, never parameter defaults."""
         configuration = data.get("configuration")
         if not isinstance(configuration, dict):
             return []
@@ -1257,7 +1400,10 @@ class OpusGreenNetCoordinator:
                 continue
             if parameter.get("key") == KEY_CHANNEL:
                 channel = parameter.get("value")
-            elif parameter.get("key") == KEY_ROTATION_TIME and "value" in parameter:
+            elif (
+                parameter.get("key") in (KEY_ROTATION_TIME, KEY_VERTICAL_MOVEMENT_TIME)
+                and "value" in parameter
+            ):
                 functions.append({"channel": channel, **parameter})
         return functions
 
@@ -1407,6 +1553,8 @@ class OpusGreenNetCoordinator:
         """Confirm only reported fields on their own channel, including during ACK."""
         confirmed = self._confirmed_fields_by_channel(functions)
         for channel_id, fields in confirmed.items():
+            if "position" in fields:
+                self._clear_cover_movement(device_id, channel_id, notify=False)
             for field in fields:
                 key = (device_id, channel_id, field)
                 self._feedback_revisions[key] = self._feedback_revisions.get(key, 0) + 1
@@ -1713,6 +1861,22 @@ class OpusGreenNetCoordinator:
                 len(functions),
                 functions,
             )
+        if is_outbound_command:
+            estimated = self._start_cover_commands(device, functions)
+            default_channel = self._channel_from_functions(functions)
+            telegram["functions"] = [
+                function
+                for function in functions
+                if not (
+                    function.get("key") == "position"
+                    and EnOceanDevice._parse_number(
+                        function.get("channel", default_channel),
+                        minimum=0,
+                        integer=True,
+                    )
+                    in estimated
+                )
+            ]
         device.update_from_telegram(telegram)
         if not is_outbound_command and self._has_operational_state(functions):
             device.last_command_error = None
@@ -1760,11 +1924,13 @@ class OpusGreenNetCoordinator:
         device = self.get_device(device_id)
         fields_by_channel = self._command_fields_by_channel(functions, device)
         revisions: dict[tuple[int, str], int] = {}
+        started_movements: dict[int, CoverMovement] = {}
 
         @callback
         def snapshot_feedback() -> None:
             # Run inside the request manager's endpoint lock, immediately before
             # publish. Feedback for an earlier queued command cannot confirm this one.
+            started_movements.update(self._start_cover_commands(device, functions))
             revisions.update(
                 {
                     (channel_id, field): self._feedback_revisions.get(
@@ -1800,6 +1966,12 @@ class OpusGreenNetCoordinator:
                         self._schedule_reconciliation_queries(
                             device_id, channel_id, fields=unconfirmed
                         )
+        except BaseException:
+            for channel_id, movement in started_movements.items():
+                if self._cover_movements.get((device_id, channel_id)) is movement:
+                    self._clear_cover_movement(device_id, channel_id)
+                    self._cancel_reconciliation_queries(device_id, channel_id)
+            raise
         finally:
             remaining = self._command_waiters[device_id] - 1
             if remaining:
@@ -1859,7 +2031,7 @@ class OpusGreenNetCoordinator:
         position: int,
         channel: int = 0,
     ) -> None:
-        """Set cover position (0 = closed, 100 = open)."""
+        """Set OPUS position (0 = open, 100 = closed)."""
         functions = [{"key": "position", "value": str(position)}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
         await self.async_send_command(device_id, functions)
@@ -1877,6 +2049,8 @@ class OpusGreenNetCoordinator:
 
     async def async_stop_cover(self, device_id: str, channel: int = 0) -> None:
         """Stop cover movement."""
+        self._clear_cover_movement(device_id, channel)
+        self._cancel_reconciliation_queries(device_id, channel)
         functions = [{"key": KEY_STOP, "value": "true"}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
         await self.async_send_command(device_id, functions)
