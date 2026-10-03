@@ -102,6 +102,8 @@ class CoverMovement:
     started_at: float
     travel: float
     cancel: Callable[[], None] | None = None
+    accepted: bool = True
+    elapsed: bool = False
 
     @property
     def ends_at(self) -> float:
@@ -1035,18 +1037,31 @@ class OpusGreenNetCoordinator:
 
         @callback
         def finished(_now):
-            if self._cover_movements.get(key) is not movement:
-                return
-            self._clear_cover_movement(device.device_id, channel_id, notify=False)
-            channel.position = target  # Still assumed, not confirmed device feedback.
-            channel.state_revision += 1
-            self._dispatch_cover_estimate(device.device_id)
+            self._finish_cover_movement(device.device_id, channel_id, movement)
 
         movement.cancel = async_call_later(
             self.hass, travel + COVER_MOVEMENT_GRACE_SECONDS, finished
         )
         self._dispatch_cover_estimate(device.device_id)
         return movement
+
+    def _finish_cover_movement(
+        self, device_id: str, channel_id: int, movement: CoverMovement
+    ) -> None:
+        if self._cover_movements.get((device_id, channel_id)) is not movement:
+            return
+        movement.elapsed = True
+        # Very short travel can end before the request's acknowledgement timeout.
+        # Keep the estimate cancellable and never assume an unaccepted target.
+        if not movement.accepted:
+            return
+        device = self.get_device(device_id)
+        self._clear_cover_movement(device_id, channel_id, notify=False)
+        if device is not None:
+            channel = device.get_or_create_channel(channel_id)
+            channel.position = movement.target  # Assumed, not physical feedback.
+            channel.state_revision += 1
+            self._dispatch_cover_estimate(device_id)
 
     def _start_cover_commands(
         self, device: EnOceanDevice | None, functions: list[dict[str, Any]]
@@ -1931,6 +1946,8 @@ class OpusGreenNetCoordinator:
             # Run inside the request manager's endpoint lock, immediately before
             # publish. Feedback for an earlier queued command cannot confirm this one.
             started_movements.update(self._start_cover_commands(device, functions))
+            for movement in started_movements.values():
+                movement.accepted = False
             revisions.update(
                 {
                     (channel_id, field): self._feedback_revisions.get(
@@ -1966,6 +1983,10 @@ class OpusGreenNetCoordinator:
                         self._schedule_reconciliation_queries(
                             device_id, channel_id, fields=unconfirmed
                         )
+                for channel_id, movement in started_movements.items():
+                    movement.accepted = True
+                    if movement.elapsed:
+                        self._finish_cover_movement(device_id, channel_id, movement)
         except BaseException:
             for channel_id, movement in started_movements.items():
                 if self._cover_movements.get((device_id, channel_id)) is movement:

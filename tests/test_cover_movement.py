@@ -415,3 +415,31 @@ def test_configured_travel_is_channel_scoped_and_ignores_default_values(motion):
     assert channel.vertical_movement_time == 25
     assert device.channels[1].vertical_movement_time == 40
     assert device.channels[2].vertical_movement_time == 12.5
+
+
+@pytest.mark.parametrize("status", [200, 400])
+async def test_short_travel_waits_for_ack_before_assuming_target(
+    motion, broker, timers, status
+):
+    coord, channel, clock = motion
+    channel.position = 1
+    broker.auto_respond = False
+    task = asyncio.create_task(coord.async_set_cover_position("DEV1", 0))
+    await asyncio.sleep(0)
+    assert timers[0][0] == 5.25
+    clock[0] += 6
+    timers[0][1](None)
+    assert channel.position == 1
+    assert channel.movement == "opening"
+    broker.receive(ANSWER_TOPIC, {"header": {"httpStatus": status}})
+    if status == 400:
+        with pytest.raises(HomeAssistantError):
+            await task
+        assert channel.position == 1
+        assert not coord._pending_reconciliation_queries
+    else:
+        await task
+        assert channel.position == 0
+        assert [delay for delay, _, _ in timers[-2:]] == [10, 20]
+    assert channel.movement is None
+    assert not coord._cover_movements
