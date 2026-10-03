@@ -52,6 +52,21 @@ Cover tilt controls are hidden when the bridge reports `rotationTime` as `0` or
 device discovery and state updates, without extra configuration queries. When no
 valid rotation time is available, tilt support follows the device's EEP profile.
 
+Covers with a positive configured `verticalMovementTime` show estimated
+`opening` / `closing` while travelling, instead of immediately showing the target
+position. The estimate uses the distance from the last known position, or a full
+travel when the starting position is unknown, plus five seconds of grace. This
+is an estimate, not a physical movement sensor; an incorrect configured time or
+a stalled motor can make it inaccurate. A new target replaces the estimate.
+Numeric position feedback, Stop, or a rejected command ends it immediately.
+
+Status checks for these movements wait until 10 and 20 seconds after the estimate
+ends, to avoid early cached target responses. For a 25-second full travel, the UI
+shows movement for up to 30 seconds and checks status at 40 and 50 seconds.
+Without feedback, the target becomes the assumed position when the movement
+timer expires. Covers without a configured travel time retain their existing
+behaviour. Existing entity IDs, tilt support, and Stop commands are unchanged.
+
 ### HOPPE window handles
 
 All three handle profiles provide a position sensor and separate Open, Tilted,
@@ -422,6 +437,7 @@ tests/
 
 ├── test_device_removal.py        # Child removal, rediscovery and request isolation
 ├── test_cover_stop.py           # Stop command encoding and follow-up queries
+├── test_cover_movement.py       # Estimated travel, feedback, timing and cleanup
 ├── test_reconciliation_feedback.py # Valid feedback, channels, and command timing
 ├── test_event_entity.py         # Rocker switch event entity tests
 ├── test_entities.py             # Entity state and Home Assistant service tests

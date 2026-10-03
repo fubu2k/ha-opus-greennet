@@ -146,13 +146,19 @@ class OpusGreenNetCover(OpusGreenNetEntity, CoverEntity):
 
     @property
     def is_opening(self) -> bool | None:
-        """Return if the cover is opening."""
-        return None
+        """Return the configured travel estimate, when supported."""
+        channel = self._device.channels.get(self._channel_id)
+        if channel is None or not channel.vertical_movement_time:
+            return None
+        return channel.movement == "opening"
 
     @property
     def is_closing(self) -> bool | None:
-        """Return if the cover is closing."""
-        return None
+        """Return the configured travel estimate, when supported."""
+        channel = self._device.channels.get(self._channel_id)
+        if channel is None or not channel.vertical_movement_time:
+            return None
+        return channel.movement == "closing"
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
