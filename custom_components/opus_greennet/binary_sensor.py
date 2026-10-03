@@ -6,6 +6,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityCategory
@@ -15,6 +16,7 @@ from . import OpusGreenNetConfigEntry
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL
 from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
+    SIGNAL_DEVICE_REMOVED,
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanDevice
@@ -33,11 +35,88 @@ async def async_setup_entry(
     coordinator = entry.runtime_data.coordinator
     gateway_device_id = entry.runtime_data.gateway_device_id
     eag_id = entry.data[CONF_EAG_ID]
+    added_unique_ids: set[str] = set()
+    submitted: dict[str, dict[str, OpusGreenNetBaseBinarySensor]] = {}
+    removing: set[str] = set()
+    rediscovered: dict[str, EnOceanDevice] = {}
+
+    async def async_finish_removal(entity: OpusGreenNetBaseBinarySensor) -> None:
+        # HA invokes on-remove callbacks before completing state removal. Its
+        # public removal coroutine joins the in-progress removal future.
+        if getattr(entity, "hass", None) is not None:
+            await entity.async_remove()
+        async_removed(entity)
+
+    @callback
+    def async_removing(entity: OpusGreenNetBaseBinarySensor) -> None:
+        if (
+            entity._device.device_id in removing
+            and entry.state is ConfigEntryState.LOADED
+        ):
+            entry.async_create_background_task(
+                hass,
+                async_finish_removal(entity),
+                "opus binary sensor removal",
+                eager_start=False,
+            )
+
+    @callback
+    def async_removed(entity: OpusGreenNetBaseBinarySensor) -> None:
+        """Release a reservation only after the old live entity finishes removal."""
+        device_id = entity._device.device_id
+        tracked = submitted.get(device_id, {})
+        if device_id not in removing or tracked.get(entity.unique_id) is not entity:
+            return
+        tracked.pop(entity.unique_id)
+        added_unique_ids.discard(entity.unique_id)
+        if not tracked:
+            submitted.pop(device_id, None)
+            removing.discard(device_id)
+            pending = rediscovered.pop(device_id, None)
+            if pending is not None and entry.state is ConfigEntryState.LOADED:
+                async_add_binary_sensors(pending)
+
+    @callback
+    def async_add_new(entities: list[OpusGreenNetBaseBinarySensor]) -> None:
+        new_entities = []
+        for entity in entities:
+            unique_id = entity.unique_id
+            if unique_id is None:
+                raise ValueError("OPUS binary sensors require a unique ID")
+            if unique_id in added_unique_ids:
+                continue
+            added_unique_ids.add(unique_id)
+            submitted.setdefault(entity._device.device_id, {})[unique_id] = entity
+            entity.async_on_remove(lambda entity=entity: async_removing(entity))
+            new_entities.append(entity)
+        if new_entities:
+            async_add_entities(new_entities)
+
+    @callback
+    def async_forget(device_id: str) -> None:
+        tracked = submitted.get(device_id)
+        if not tracked:
+            return
+        removing.add(device_id)
+        for entity in list(tracked.values()):
+            # Disabled entries have no live entity to remove. Entries pending
+            # submission without a hass also have no old runtime listeners/state.
+            if getattr(entity, "hass", None) is None or not entity.enabled:
+                async_removed(entity)
+
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass, f"{SIGNAL_DEVICE_REMOVED}_{eag_id}", async_forget
+        )
+    )
 
     @callback
     def async_add_binary_sensors(device: EnOceanDevice) -> None:
         """Add binary sensor entities for a discovered device."""
-        entities: list[BinarySensorEntity] = []
+        if device.device_id in removing:
+            rediscovered[device.device_id] = device
+            return
+        entities: list[OpusGreenNetBaseBinarySensor] = []
 
         if device.is_presence_detector:
             entities.append(
@@ -100,8 +179,7 @@ async def async_setup_entry(
             )
 
         if not device.is_climate:
-            if entities:
-                async_add_entities(entities)
+            async_add_new(entities)
             return
 
         # Window open (all HeatArea types)
@@ -178,7 +256,7 @@ async def async_setup_entry(
                 )
             )
 
-        async_add_entities(entities)
+        async_add_new(entities)
 
     # Listen for new device discoveries
     entry.async_on_unload(

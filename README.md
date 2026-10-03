@@ -84,6 +84,11 @@ Assistant device. The replacement and other devices stay operational. Review
 and update automations referencing the old entities; references are not migrated
 automatically.
 
+Binary-sensor discovery submits each entity ID once per loaded gateway. Repeated
+discovery can still add newly discovered sensor types. Removing a device releases
+its IDs after its live entities finish removal, so rediscovery and reload can
+create them again without duplicate submissions.
+
 ### Upgrading from community test versions
 
 German translations include “Beleuchtungsstärke” for illuminance and readable
@@ -408,6 +413,7 @@ tests/
 ├── test_coordinator_transport.py # Subscription, request, and recovery tests
 ├── test_gateway_payload_compatibility.py # Reported IQ-DOT payload regression tests
 ├── test_beta_entity_migration.py # Fork IDs, duplicate cleanup, and translations
+├── test_binary_sensor_discovery.py # Repeated discovery and removal ordering
 ├── test_detector_support.py     # Sensor discovery and live MQTT updates
 ├── test_scalar_telemetry.py      # Immediate battery and signal-strength updates
 ├── test_window_handles.py        # Handle positions and protected AutoLock actions
