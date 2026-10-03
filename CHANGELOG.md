@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0b0] - 2026-10-03
+
+First beta of v0.5.0, building on the confirmed v0.4.0 stable release.
+
+### Added
+- Estimated opening/closing state for covers with a positive configured `verticalMovementTime` (#55). Travel is based on distance, or a full travel after startup when the position is unknown, plus five seconds of grace.
+- Cover status checks after estimated travel: with a 25-second full travel, movement lasts up to 30 seconds and status checks run at 40 and 50 seconds. Valid numeric feedback ends the estimate and cancels pending position checks.
+
+### Fixed
+- Repeated binary-sensor discovery no longer submits an existing entity ID twice. Newly discovered sensor types remain addable; removal waits for old entities to finish before rediscovery creates replacements (#57).
+
+### Changed
+- Moisture and HeatArea binary-sensor definitions share a declarative registry while preserving entity IDs, names, categories and state interpretation (#58).
+
+### Beta testing
+- Check full and partial shutter travel, a new target during travel, Stop, and the first movement after restarting Home Assistant. Please include configured travel time and MQTT position reports when reporting timing issues.
+- Motion and the final fallback position are estimates, not measurements. A stalled motor or incorrect configured travel time can make them inaccurate. Covers without a configured travel time retain previous behaviour.
+- Check existing moisture/HeatArea entities and repeat discovery, reload, and removal/rediscovery. Entity IDs and dashboard assignments should remain unchanged.
+- No new HOPPE AutoLock control commands are introduced; status remains read-only.
+
+Thanks to drldm for the shutter observations and proposal, and to fubu2k for the discovery and sensor-definition proposals.
+
+### Validation
+- 828 automated tests pass on Home Assistant 2026.9.4. Ruff, dependency compatibility and Hassfest checks pass. Physical shutter timing still needs beta validation.
+
 ## [0.4.0] - 2026-10-03
 
 Stable release of the device support and fixes validated in the 0.4.0 beta series. Community feedback confirms smoke-detector states, SMS readings and existing dashboards, HOPPE handle/AutoLock status, and the telemetry fast path. Device removal was also confirmed working.
