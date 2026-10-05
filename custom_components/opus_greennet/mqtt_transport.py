@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import heapq
+import itertools
 import json
 import logging
 from collections.abc import Callable
@@ -25,6 +27,11 @@ REQUEST_TIMEOUT = 10.0
 # HA processes wildcard subscriptions before exact response topics. Large
 # retained device snapshots need more time than a single gateway operation.
 SUBSCRIPTION_TIMEOUT = 30.0
+
+# Queue priorities: lower values are dispatched first. User-initiated control
+# commands must never wait behind background status queries/refreshes.
+PRIORITY_COMMAND = 0
+PRIORITY_QUERY = 10
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -98,6 +105,51 @@ async def async_wait_for_subscriptions(hass: HomeAssistant, topics: list[str]) -
             cancel()
 
 
+class PriorityLock:
+    """An asyncio lock whose waiters are woken by priority, then FIFO."""
+
+    def __init__(self) -> None:
+        self._locked = False
+        self._waiters: list[tuple[int, int, asyncio.Future]] = []
+        self._counter = itertools.count()
+
+    def locked(self) -> bool:
+        """Return whether the lock is currently held."""
+        return self._locked
+
+    async def acquire(self, priority: int = PRIORITY_COMMAND) -> None:
+        """Acquire the lock, queueing by priority while it is held."""
+        if not self._locked and not self._waiters:
+            self._locked = True
+            return
+        future = asyncio.get_running_loop().create_future()
+        entry = (priority, next(self._counter), future)
+        heapq.heappush(self._waiters, entry)
+        try:
+            await future
+        except BaseException:
+            if future.done() and not future.cancelled():
+                # Ownership was handed over just before cancellation.
+                self.release()
+            else:
+                try:
+                    self._waiters.remove(entry)
+                    heapq.heapify(self._waiters)
+                except ValueError:
+                    pass
+            raise
+
+    def release(self) -> None:
+        """Hand the lock to the highest-priority waiter, if any."""
+        while self._waiters:
+            _, _, future = heapq.heappop(self._waiters)
+            if not future.done():
+                # Ownership transfers directly; the lock stays held.
+                future.set_result(None)
+                return
+        self._locked = False
+
+
 class MQTTRequestManager:
     """Own subscriptions and serialize requests without protocol request IDs."""
 
@@ -106,7 +158,7 @@ class MQTTRequestManager:
         self._closed = False
         self._generation = 0
         self._device_generations: dict[str, int] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks: dict[str, PriorityLock] = {}
         self._waiters: dict[asyncio.Future, str] = {}
         self._cleanups: set[Callable[[], None]] = set()
 
@@ -158,15 +210,101 @@ class MQTTRequestManager:
         require_status: bool = False,
         is_available: Callable[[], bool] | None = None,
         before_publish: Callable[[], None] | None = None,
+        priority: int = PRIORITY_COMMAND,
     ) -> dict[str, Any]:
         """Subscribe, await SUBACK, publish, and validate one fresh response."""
         # The OPUS response has no request ID. Only one local operation may use
         # an answer topic at a time; a late response after timeout remains an
         # inherent protocol limitation and is never treated as device state.
-        lock = self._locks.setdefault(answer_topic, asyncio.Lock())
+        lock = self._locks.setdefault(answer_topic, PriorityLock())
         generation = self._generation
         device_generation = self._device_generations.get(device_id, 0)
-        async with lock:
+        await lock.acquire(priority)
+        try:
+            return await self._async_request_locked(
+                topic,
+                answer_topic,
+                device_id,
+                payload,
+                generation=generation,
+                device_generation=device_generation,
+                require_status=require_status,
+                is_available=is_available,
+                before_publish=before_publish,
+            )
+        finally:
+            lock.release()
+
+    async def _async_request_locked(
+        self,
+        topic: str,
+        answer_topic: str,
+        device_id: str,
+        payload: str,
+        *,
+        generation: int,
+        device_generation: int,
+        require_status: bool,
+        is_available: Callable[[], bool] | None,
+        before_publish: Callable[[], None] | None,
+    ) -> dict[str, Any]:
+        """Run one request while owning its answer-topic queue slot."""
+        if (
+            self._closed
+            or generation != self._generation
+            or device_generation != self._device_generations.get(device_id, 0)
+        ):
+            raise request_error("request_cancelled", device_id)
+        if not mqtt.is_connected(self.hass):
+            raise request_error("mqtt_unavailable", device_id)
+        if is_available is not None and not is_available():
+            raise request_error("gateway_unavailable", device_id)
+
+        loop = asyncio.get_running_loop()
+        subscribed = loop.create_future()
+        response = loop.create_future()
+        self._waiters[subscribed] = device_id
+        self._waiters[response] = device_id
+        sent = False
+        cancellations: list[Callable[[], None]] = []
+
+        @callback
+        def handle_response(msg: ReceiveMessage) -> None:
+            if not sent or response.done() or getattr(msg, "retain", False):
+                return
+            try:
+                data = decode_response(msg.payload, require_status=require_status)
+            except ValueError as err:
+                response.set_exception(
+                    request_error("request_rejected", device_id, str(err))
+                )
+            else:
+                response.set_result(data)
+
+        @callback
+        def subscription_done() -> None:
+            if not subscribed.done():
+                subscribed.set_result(None)
+
+        try:
+            # Subscription setup has its own bound. The acknowledgement
+            # deadline must not be consumed by queueing or SUBACK latency.
+            async with asyncio.timeout(SUBSCRIPTION_TIMEOUT):
+                cancellations.append(
+                    self._own_cleanup(
+                        await mqtt.async_subscribe(
+                            self.hass, answer_topic, handle_response, qos=1
+                        )
+                    )
+                )
+                cancellations.append(
+                    self._own_cleanup(
+                        mqtt.async_on_subscribe_done(
+                            self.hass, answer_topic, 1, subscription_done
+                        )
+                    )
+                )
+                await subscribed
             if (
                 self._closed
                 or generation != self._generation
@@ -177,84 +315,30 @@ class MQTTRequestManager:
                 raise request_error("mqtt_unavailable", device_id)
             if is_available is not None and not is_available():
                 raise request_error("gateway_unavailable", device_id)
-
-            loop = asyncio.get_running_loop()
-            subscribed = loop.create_future()
-            response = loop.create_future()
-            self._waiters[subscribed] = device_id
-            self._waiters[response] = device_id
-            sent = False
-            cancellations: list[Callable[[], None]] = []
-
-            @callback
-            def handle_response(msg: ReceiveMessage) -> None:
-                if not sent or response.done() or getattr(msg, "retain", False):
-                    return
-                try:
-                    data = decode_response(msg.payload, require_status=require_status)
-                except ValueError as err:
-                    response.set_exception(
-                        request_error("request_rejected", device_id, str(err))
-                    )
-                else:
-                    response.set_result(data)
-
-            @callback
-            def subscription_done() -> None:
-                if not subscribed.done():
-                    subscribed.set_result(None)
-
-            try:
-                async with asyncio.timeout(REQUEST_TIMEOUT):
-                    cancellations.append(
-                        self._own_cleanup(
-                            await mqtt.async_subscribe(
-                                self.hass, answer_topic, handle_response, qos=1
-                            )
-                        )
-                    )
-                    cancellations.append(
-                        self._own_cleanup(
-                            mqtt.async_on_subscribe_done(
-                                self.hass, answer_topic, 1, subscription_done
-                            )
-                        )
-                    )
-                    await subscribed
-                    if (
-                        self._closed
-                        or generation != self._generation
-                        or device_generation
-                        != self._device_generations.get(device_id, 0)
-                    ):
-                        raise request_error("request_cancelled", device_id)
-                    if not mqtt.is_connected(self.hass):
-                        raise request_error("mqtt_unavailable", device_id)
-                    if is_available is not None and not is_available():
-                        raise request_error("gateway_unavailable", device_id)
-                    if before_publish is not None:
-                        before_publish()
-                    sent = True
-                    await mqtt.async_publish(
-                        self.hass, topic, payload, qos=1, retain=False
-                    )
-                    result = await response
-                    if device_generation != self._device_generations.get(device_id, 0):
-                        raise request_error("request_cancelled", device_id)
-                    return result
-            except TimeoutError as err:
-                raise request_error("request_timeout", device_id) from err
-            finally:
-                for cancel in cancellations:
-                    cancel()
-                for future in (subscribed, response):
-                    self._waiters.pop(future, None)
-                    if future.done() and not future.cancelled():
-                        # Unload may have failed both futures while we were
-                        # awaiting only one; always retrieve both exceptions.
-                        future.exception()
-                    elif not future.done():
-                        future.cancel()
+            if before_publish is not None:
+                before_publish()
+            sent = True
+            await mqtt.async_publish(self.hass, topic, payload, qos=1, retain=False)
+            # The acknowledgement timeout starts exactly once the request
+            # has actually been published, never at creation or enqueue.
+            async with asyncio.timeout(REQUEST_TIMEOUT):
+                result = await response
+            if device_generation != self._device_generations.get(device_id, 0):
+                raise request_error("request_cancelled", device_id)
+            return result
+        except TimeoutError as err:
+            raise request_error("request_timeout", device_id) from err
+        finally:
+            for cancel in cancellations:
+                cancel()
+            for future in (subscribed, response):
+                self._waiters.pop(future, None)
+                if future.done() and not future.cancelled():
+                    # Unload may have failed both futures while we were
+                    # awaiting only one; always retrieve both exceptions.
+                    future.exception()
+                elif not future.done():
+                    future.cancel()
 
 
 def gateway_uptime_value(data: dict[str, Any]) -> str:

@@ -118,6 +118,20 @@ class EnOceanDevice:
     channels: dict[int, EnOceanChannel] = field(default_factory=dict)
     profile: dict[str, Any] | None = None
 
+    def __post_init__(self) -> None:
+        """Seed safe initial states for EEPs whose idle state is known."""
+        if self.primary_eep == "F6-05-01":
+            self.get_or_create_channel(DEFAULT_CHANNEL)
+
+    def _apply_initial_channel_state(self, channel: EnOceanChannel | None) -> None:
+        """Start F6-05-01 leakage sensors as dry (off) instead of unknown."""
+        if (
+            channel is not None
+            and self.primary_eep == "F6-05-01"
+            and channel.liquid_detected is None
+        ):
+            channel.liquid_detected = False
+
     @property
     def primary_eep(self) -> str | None:
         """Get the primary EEP for this device."""
@@ -253,7 +267,9 @@ class EnOceanDevice:
     ) -> EnOceanChannel:
         """Get or create a channel for this device."""
         if channel_id not in self.channels:
-            self.channels[channel_id] = EnOceanChannel(channel_id=channel_id)
+            channel = EnOceanChannel(channel_id=channel_id)
+            self.channels[channel_id] = channel
+            self._apply_initial_channel_state(channel)
         return self.channels[channel_id]
 
     @staticmethod
