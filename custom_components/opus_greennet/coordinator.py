@@ -52,6 +52,8 @@ from .const import (
 )
 from .enocean_device import EnOceanDevice
 from .mqtt_transport import (
+    PRIORITY_COMMAND,
+    PRIORITY_QUERY,
     MQTTRequestManager,
     async_get_gateway_uptime,
     async_wait_for_subscriptions,
@@ -1958,17 +1960,36 @@ class OpusGreenNetCoordinator:
                 }
             )
 
+        # Control commands overtake queued status queries/refreshes so that a
+        # burst of reconciliation traffic never delays a user action.
+        is_query = any(function.get("key") == "query" for function in functions)
+        priority = PRIORITY_QUERY if is_query else PRIORITY_COMMAND
+
         self._command_waiters[device_id] = self._command_waiters.get(device_id, 0) + 1
         try:
-            await self._requests.async_request(
-                topic,
-                f"{TOPIC_BASE}/{self.eag_id}/putAnswer/devices/{device_id}/state",
-                device_id,
-                payload,
-                require_status=True,
-                is_available=lambda: self.available,
-                before_publish=snapshot_feedback,
-            )
+            try:
+                await self._requests.async_request(
+                    topic,
+                    f"{TOPIC_BASE}/{self.eag_id}/putAnswer/devices/{device_id}/state",
+                    device_id,
+                    payload,
+                    require_status=True,
+                    is_available=lambda: self.available,
+                    before_publish=snapshot_feedback,
+                    priority=priority,
+                )
+            except HomeAssistantError as err:
+                if err.translation_key != "request_timeout":
+                    raise
+                # A missing acknowledgement only fails this entity action.
+                # Gateway availability is driven exclusively by MQTT/bridge
+                # connection state and the health probe, never by one command.
+                _LOGGER.warning(
+                    "OPUS device %s did not acknowledge a %s within the timeout",
+                    device_id,
+                    "status query" if is_query else "command",
+                )
+                raise request_error("request_timeout", device_id) from err
             if device is not None:
                 for channel_id, fields in fields_by_channel.items():
                     unconfirmed = {

@@ -539,3 +539,101 @@ async def test_fast_outage_after_suback_never_publishes_old_request(
         await task
     assert not broker.published
     broker.assert_clean()
+
+
+async def test_ack_timeout_starts_at_publish_not_at_enqueue(
+    broker, connected_coordinator, monkeypatch
+):
+    """A request queued longer than the ack timeout must still succeed."""
+    monkeypatch.setattr(
+        "custom_components.opus_greennet.mqtt_transport.REQUEST_TIMEOUT", 0.05
+    )
+    broker.auto_respond = False
+    answer = "EnOcean/AABB0011/putAnswer/devices/DEV1/state"
+    first = asyncio.create_task(connected_coordinator.async_turn_on("DEV1"))
+    second = asyncio.create_task(connected_coordinator.async_turn_off("DEV1"))
+    await asyncio.sleep(0.03)
+    broker.receive(answer, {"header": {"httpStatus": 200}})
+    await first
+    # The second command has now been queued for longer than half the timeout,
+    # but its deadline only starts once it is actually published.
+    await asyncio.sleep(0.035)
+    assert not second.done()
+    assert len(broker.published) == 2
+    broker.receive(answer, {"header": {"httpStatus": 200}})
+    await second
+    broker.assert_clean()
+
+
+async def test_ack_timeout_excludes_suback_latency(
+    broker, connected_coordinator, monkeypatch
+):
+    """Slow SUBACKs must not consume the acknowledgement deadline."""
+    monkeypatch.setattr(
+        "custom_components.opus_greennet.mqtt_transport.REQUEST_TIMEOUT", 0.05
+    )
+    broker.auto_ack = False
+    task = asyncio.create_task(connected_coordinator.async_turn_on("DEV1"))
+    await asyncio.sleep(0.08)
+    assert not task.done()
+    assert broker.published == []
+    answer = "EnOcean/AABB0011/putAnswer/devices/DEV1/state"
+    for acknowledge in list(broker.acknowledgements[answer]):
+        acknowledge()
+    await task
+    assert len(broker.published) == 1
+    broker.assert_clean()
+
+
+async def test_commands_overtake_queued_status_queries(broker, connected_coordinator):
+    broker.auto_respond = False
+    answer = "EnOcean/AABB0011/putAnswer/devices/DEV1/state"
+    busy = asyncio.create_task(connected_coordinator.async_turn_on("DEV1"))
+    await asyncio.sleep(0)
+    query = asyncio.create_task(connected_coordinator.async_query_device_status("DEV1"))
+    await asyncio.sleep(0)
+    command = asyncio.create_task(connected_coordinator.async_turn_off("DEV1"))
+    await asyncio.sleep(0)
+    assert len(broker.published) == 1
+
+    broker.receive(answer, {"header": {"httpStatus": 200}})
+    await busy
+    await asyncio.sleep(0)
+    # The later command is published before the earlier queued query.
+    assert len(broker.published) == 2
+    assert '"switch"' in broker.published[1][1]
+    assert '"off"' in broker.published[1][1]
+    broker.receive(answer, {"header": {"httpStatus": 200}})
+    await command
+    await asyncio.sleep(0)
+    assert len(broker.published) == 3
+    assert '"query"' in broker.published[2][1]
+    broker.receive(answer, {"header": {"httpStatus": 200}})
+    await query
+    broker.assert_clean()
+
+
+async def test_command_timeout_keeps_gateway_available(
+    broker, connected_coordinator, monkeypatch
+):
+    """One unacknowledged command fails only its own entity action."""
+    monkeypatch.setattr(
+        "custom_components.opus_greennet.mqtt_transport.REQUEST_TIMEOUT", 0.01
+    )
+    broker.auto_respond = False
+    with pytest.raises(HomeAssistantError) as raised:
+        await connected_coordinator.async_turn_on("DEV1")
+    assert raised.value.translation_key == "request_timeout"
+    assert connected_coordinator._gateway_available is True
+    assert connected_coordinator.available is True
+
+    # Subsequent commands for other entities are still dispatched.
+    broker.auto_respond = True
+    await connected_coordinator.async_turn_on("DEV2")
+    assert broker.published[-1][0].endswith("/devices/DEV2/state")
+    broker.assert_clean()
+
+
+async def test_mqtt_disconnect_still_marks_gateway_unavailable(connected_coordinator):
+    connected_coordinator._handle_connection_status(False)
+    assert connected_coordinator._gateway_available is False
