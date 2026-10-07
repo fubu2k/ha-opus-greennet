@@ -704,3 +704,37 @@ async def test_background_queries_wait_behind_commands(broker, connected_coordin
             await asyncio.sleep(0)
     await asyncio.gather(first, background, command)
     broker.assert_clean()
+
+
+async def test_flapping_reconnects_do_not_retrigger_snapshot(
+    broker, connected_coordinator
+):
+    """A reconnect may resync once, but flapping must not reflood the gateway."""
+    broker.response = UPTIME_RESPONSE
+    coord = connected_coordinator
+    coord._started = True
+    coord._subscription_topics = []
+    coord._control_topics = []
+    coord._stream_topics = []
+
+    coord._handle_connection_status(True)
+    await coord._refresh_task
+    snapshots = [t for t, _, _ in broker.published if t.endswith("/get/devices")]
+    assert len(snapshots) == 1
+
+    # A second reconnect within the debounce window only probes health.
+    coord._handle_connection_status(True)
+    await coord._refresh_task
+    snapshots = [t for t, _, _ in broker.published if t.endswith("/get/devices")]
+    assert len(snapshots) == 1
+    probes = [t for t, _, _ in broker.published if t.endswith("/uptime")]
+    assert len(probes) == 2
+
+    # After the debounce window, a reconnect requests a fresh snapshot again.
+    coord._last_reconnect_at = asyncio.get_running_loop().time() - 61
+    coord._handle_connection_status(True)
+    await coord._refresh_task
+    snapshots = [t for t, _, _ in broker.published if t.endswith("/get/devices")]
+    assert len(snapshots) == 2
+    await coord.async_unload()
+    broker.assert_clean()

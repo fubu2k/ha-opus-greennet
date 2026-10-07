@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0b3] - 2026-10-07
+
+Third beta of v0.5.0, reducing the load that large retained `stream/#` snapshots (15,000+ topics, 82 devices) put on the gateway, the broker, and the MQTT client.
+
+### Fixed
+- Flapping broker/bridge connections re-triggered the gateway's full device snapshot (several thousand retained messages) every few seconds, destabilizing the gateway further. A reconnect may still request one fresh snapshot, but further reconnects within a 60-second debounce window only run the health probe; the broker's retained replay keeps entity state fresh in the meantime.
+- Every replayed retained `stream/#` message required a QoS 1 PUBACK. The three telemetry wildcards (`stream/devices/#`, `stream/device/#`, `stream/telegram/#`) now subscribe at QoS 0, removing tens of thousands of acknowledgement round trips per (re)subscribe while periodic telegrams make a rare lost message self-healing. Request/response topics stay at QoS 1.
+
+### Changed
+- Answer routing is re-established on every gateway refresh, not only on full resyncs, so debounced reconnects still route command acknowledgements correctly.
+
+### Beta testing
+- Compare the `stream/#` message counts in MQTT Explorer before and after: with QoS 0 subscriptions the client no longer sends a PUBACK per replayed retained message. Topic counts themselves are created by the gateway firmware and are unaffected by the integration.
+- Force a few broker reconnects in quick succession and confirm the gateway no longer re-emits the full snapshot each time (watch for a single `get/devices` publish per debounce window).
+
+### Validation
+- 836 automated tests pass on Home Assistant 2026.9.4, including a new regression test for the reconnect debounce. Ruff checks pass. Physical validation on a large installation is still pending.
+
 ## [0.5.0b2] - 2026-10-07
 
 Second beta of v0.5.0, focused on scaling the transport and setup phase to large installations (60+ EnOcean devices, 140+ EEP entries, tens of thousands of retained `stream/#` topics).

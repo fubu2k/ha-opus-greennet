@@ -80,6 +80,16 @@ TELEGRAM_FINALIZE_DELAY = 0.15
 RAW_MQTT_DEBUG_PAYLOAD_LIMIT = 500
 OUTBOUND_STATE_RECONCILIATION_DELAYS = (5, 20)
 GATEWAY_HEALTH_INTERVAL = timedelta(seconds=60)
+# Each broker/bridge reconnect re-requests the full device snapshot so
+# entities catch up without live telegrams. A flapping connection must not
+# re-trigger that multi-thousand-message snapshot every few seconds: within
+# this window after the previous reconnect, only the health probe runs and
+# the retained replay refreshes entity state.
+RECONNECT_RESYNC_DEBOUNCE_SECONDS = 60.0
+# stream/# holds tens of thousands of retained telemetry topics. QoS 0
+# avoids one PUBACK per replayed message while periodic telegrams make a
+# rare lost message self-healing; request/response topics stay at QoS 1.
+STREAM_SUBSCRIPTION_QOS = 0
 
 # Regex to parse device topics (plural - initial full state at boot)
 # EnOcean/{EAG}/stream/devices/{DeviceID}/{property}
@@ -157,6 +167,7 @@ class OpusGreenNetCoordinator:
         self._reconciling: set[tuple[str, int]] = set()
         self._control_topics: list[str] = []
         self._stream_topics: list[str] = []
+        self._last_reconnect_at: float | None = None
         # Gateway info
         self.gateway_info: dict[str, Any] = {}
         self.gateway_uptime: str | None = None
@@ -200,43 +211,56 @@ class OpusGreenNetCoordinator:
             and mqtt.is_connected(self.hass)
         )
 
-    def _control_subscriptions(self) -> tuple[tuple[str, Callable], ...]:
+    def _control_subscriptions(self) -> tuple[tuple[str, Callable, int], ...]:
         """Small, non-retained answer/status topics needed for the probe."""
         return (
-            ("opus_greennet/{eag_id}/bridge/status", self._handle_bridge_status),
-            (TOPIC_GET_ANSWER_SYSTEM_UPTIME, self._handle_system_uptime),
-            (TOPIC_GET_ANSWER_SYSTEM_INFO, self._handle_system_info),
-            (TOPIC_SUB_PUT_ANSWER_STATE, self._handle_put_answer_state),
+            ("opus_greennet/{eag_id}/bridge/status", self._handle_bridge_status, 1),
+            (TOPIC_GET_ANSWER_SYSTEM_UPTIME, self._handle_system_uptime, 1),
+            (TOPIC_GET_ANSWER_SYSTEM_INFO, self._handle_system_info, 1),
+            (TOPIC_SUB_PUT_ANSWER_STATE, self._handle_put_answer_state, 1),
         )
 
-    def _stream_subscriptions(self) -> tuple[tuple[str, Callable], ...]:
+    def _stream_subscriptions(self) -> tuple[tuple[str, Callable, int], ...]:
         """Heavy wildcard topics, ordered by importance for discovery.
 
         stream/# replays a retained snapshot of up to ~30,000 topics. Each
         filter is subscribed and SUBACKed before the next one is requested,
-        so the broker never has to replay everything concurrently.
+        so the broker never has to replay everything concurrently. The three
+        telemetry wildcards use QoS 0 to keep the retained replay cheap.
         """
         return (
-            (TOPIC_GET_ANSWER_DEVICES, self._handle_get_answer_devices),
-            (TOPIC_SUB_DEVICES_ALL, self._handle_device_property_message),
-            (TOPIC_SUB_DEVICE_STREAM_ALL, self._handle_device_stream_message),
-            (TOPIC_SUB_TELEGRAM_FROM_ALL, self._handle_telegram_property_message),
+            (TOPIC_GET_ANSWER_DEVICES, self._handle_get_answer_devices, 1),
+            (
+                TOPIC_SUB_DEVICES_ALL,
+                self._handle_device_property_message,
+                STREAM_SUBSCRIPTION_QOS,
+            ),
+            (
+                TOPIC_SUB_DEVICE_STREAM_ALL,
+                self._handle_device_stream_message,
+                STREAM_SUBSCRIPTION_QOS,
+            ),
+            (
+                TOPIC_SUB_TELEGRAM_FROM_ALL,
+                self._handle_telegram_property_message,
+                STREAM_SUBSCRIPTION_QOS,
+            ),
         )
 
     async def _async_subscribe_group(
         self,
-        group: tuple[tuple[str, Callable], ...],
+        group: tuple[tuple[str, Callable, int], ...],
         target: list[str],
         *,
         staggered: bool,
     ) -> None:
         """Subscribe missing topics of one group, optionally one SUBACK at a time."""
-        for pattern, handler in group:
+        for pattern, handler, qos in group:
             topic = pattern.format(base=TOPIC_BASE, eag_id=self.eag_id)
             if topic in target:
                 continue
             self._subscriptions.append(
-                await mqtt.async_subscribe(self.hass, topic, handler, qos=1)
+                await mqtt.async_subscribe(self.hass, topic, handler, qos=qos)
             )
             target.append(topic)
             self._subscription_topics.append(topic)
@@ -315,6 +339,19 @@ class OpusGreenNetCoordinator:
         )
         async_dispatcher_send(self.hass, f"{SIGNAL_AVAILABILITY_UPDATE}_{self.eag_id}")
 
+    def _reconnect_requires_snapshot(self) -> bool:
+        """Decide whether a reconnect may re-request the full snapshot.
+
+        HA replays every retained stream topic on each broker reconnect, so
+        entities refresh anyway. Re-requesting the gateway's snapshot after
+        every quick reconnect of a flapping connection would overload the
+        gateway and the broker with tens of thousands of messages.
+        """
+        now = monotonic()
+        previous = self._last_reconnect_at
+        self._last_reconnect_at = now
+        return previous is None or now - previous >= RECONNECT_RESYNC_DEBOUNCE_SECONDS
+
     @callback
     def _handle_connection_status(self, connected: bool) -> None:
         """Invalidate outstanding work on disconnect and resync on reconnect."""
@@ -328,7 +365,7 @@ class OpusGreenNetCoordinator:
             self._requests.async_cancel_pending("mqtt_unavailable")
             self._cancel_background_work()
         elif self._started:
-            self._schedule_gateway_refresh(resync=True)
+            self._schedule_gateway_refresh(resync=self._reconnect_requires_snapshot())
 
     @callback
     def _handle_bridge_status(self, msg: ReceiveMessage) -> None:
@@ -344,7 +381,7 @@ class OpusGreenNetCoordinator:
             self._requests.async_cancel_pending("gateway_unavailable")
             self._cancel_background_work()
         elif self._started:
-            self._schedule_gateway_refresh(resync=True)
+            self._schedule_gateway_refresh(resync=self._reconnect_requires_snapshot())
 
     @callback
     def _async_health_tick(self, _now) -> None:
@@ -380,23 +417,23 @@ class OpusGreenNetCoordinator:
     async def _async_refresh_gateway(self, *, resync: bool) -> None:
         if self._bridge_connected is False:
             raise request_error("gateway_unavailable", self.eag_id)
+        # Always re-establish answer routing: HA resubscribes after every
+        # broker reconnect, and already-subscribed topics are skipped cheaply.
+        # This also resumes an interrupted phase 2.
+        await self._async_subscribe_group(
+            self._control_subscriptions(), self._control_topics, staggered=False
+        )
+        self._register_answer_routes()
         if resync:
-            # Control topics first (cheap), then the heavy stream wildcards
-            # one SUBACK at a time. Already subscribed topics are skipped, so
-            # this also resumes an interrupted phase 2 and covers HA's
-            # automatic resubscriptions after a broker reconnect.
-            await self._async_subscribe_group(
-                self._control_subscriptions(), self._control_topics, staggered=False
-            )
-            self._register_answer_routes()
+            # The heavy stream wildcards follow one SUBACK at a time.
             await self._async_subscribe_group(
                 self._stream_subscriptions(), self._stream_topics, staggered=True
             )
-            await async_wait_for_subscriptions(
-                self.hass,
-                self._subscription_topics,
-                timeout=SETUP_SUBSCRIPTION_TIMEOUT,
-            )
+        await async_wait_for_subscriptions(
+            self.hass,
+            self._subscription_topics,
+            timeout=SETUP_SUBSCRIPTION_TIMEOUT,
+        )
         # A resync coincides with a retained replay; allow a wider deadline.
         uptime_response = await async_get_gateway_uptime(
             self._requests,
