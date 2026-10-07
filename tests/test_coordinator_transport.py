@@ -346,6 +346,8 @@ async def test_startup_probes_before_retained_streams_and_discovers_after_suback
     monkeypatch.setattr(f"{module}.async_call_later", MagicMock())
 
     assert await connected_coordinator.async_setup() is True
+    # Setup returns after the probe; stream subscriptions run in phase 2.
+    await connected_coordinator._refresh_task
     first_probe = broker.events.index(
         (
             "publish",
@@ -356,12 +358,18 @@ async def test_startup_probes_before_retained_streams_and_discovers_after_suback
     wildcard_subscriptions = [
         (index, topic)
         for index, (event, topic) in enumerate(broker.events)
-        if event == "subscribe" and ("#" in topic or "+" in topic)
+        if event == "subscribe" and "#" in topic
     ]
     assert wildcard_subscriptions
     for index, topic in wildcard_subscriptions:
+        # Retained-heavy filters start only after the setup probe answered.
         assert first_probe < index
         assert broker.events.index(("suback", topic)) < discovery
+    # Heavy filters are staggered: each SUBACK precedes the next SUBSCRIBE.
+    for (_, earlier), (later_index, _) in zip(
+        wildcard_subscriptions, wildcard_subscriptions[1:], strict=False
+    ):
+        assert broker.events.index(("suback", earlier)) < later_index
     assert (
         sum(
             event == ("publish", "EnOcean/AABB0011/get/config/system/uptime")
@@ -413,6 +421,14 @@ async def test_reconnect_waiter_starts_after_ha_queues_resubscriptions(
     coord._started = True
     stream_topic = "EnOcean/AABB0011/stream/devices/#"
     coord._subscription_topics = [stream_topic]
+    # Pretend phase 2 already subscribed the heavy stream filters; the
+    # light control topics are (re)subscribed by the refresh itself.
+    coord._stream_topics = [
+        "EnOcean/AABB0011/getAnswer/devices/#",
+        stream_topic,
+        "EnOcean/AABB0011/stream/device/#",
+        "EnOcean/AABB0011/stream/telegram/#",
+    ]
     broker.response = UPTIME_RESPONSE
     pending = False
     waiting = []
@@ -435,7 +451,8 @@ async def test_reconnect_waiter_starts_after_ha_queues_resubscriptions(
     assert observations == []
     pending = True  # HA queues wildcard resubscriptions after the callback.
     await asyncio.sleep(0)
-    assert observations == [(stream_topic, True)]
+    assert observations
+    assert all(is_pending for _, is_pending in observations)
     assert not broker.published
 
     pending = False
@@ -637,3 +654,53 @@ async def test_command_timeout_keeps_gateway_available(
 async def test_mqtt_disconnect_still_marks_gateway_unavailable(connected_coordinator):
     connected_coordinator._handle_connection_status(False)
     assert connected_coordinator._gateway_available is False
+
+
+async def test_global_send_queue_keeps_one_request_in_flight(
+    broker, connected_coordinator
+):
+    """Different devices bypass endpoint locks but share one in-flight slot."""
+    broker.auto_respond = False
+    tasks = [
+        asyncio.create_task(connected_coordinator.async_turn_on(f"DEV{index}"))
+        for index in range(10)
+    ]
+    for index in range(10):
+        for _ in range(5):
+            await asyncio.sleep(0)
+        # Only the head of the queue has been published so far.
+        assert len(broker.published) == index + 1
+        broker.receive(
+            f"EnOcean/AABB0011/putAnswer/devices/DEV{index}/state",
+            {"header": {"httpStatus": 200}},
+        )
+    await asyncio.gather(*tasks)
+    broker.assert_clean()
+
+
+async def test_background_queries_wait_behind_commands(broker, connected_coordinator):
+    broker.auto_respond = False
+    first = asyncio.create_task(connected_coordinator.async_turn_on("DEV1"))
+    await asyncio.sleep(0)
+    background = asyncio.create_task(
+        connected_coordinator.async_query_device_status("DEV2", background=True)
+    )
+    command = asyncio.create_task(connected_coordinator.async_turn_on("DEV3"))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    broker.receive(
+        "EnOcean/AABB0011/putAnswer/devices/DEV1/state",
+        {"header": {"httpStatus": 200}},
+    )
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert broker.published[1][0].endswith("/DEV3/state")
+    for device in ("DEV3", "DEV2"):
+        broker.receive(
+            f"EnOcean/AABB0011/putAnswer/devices/{device}/state",
+            {"header": {"httpStatus": 200}},
+        )
+        for _ in range(5):
+            await asyncio.sleep(0)
+    await asyncio.gather(first, background, command)
+    broker.assert_clean()

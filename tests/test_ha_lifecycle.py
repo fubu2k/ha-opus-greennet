@@ -285,6 +285,8 @@ async def test_pending_entity_command_is_cancelled_on_disconnect_or_reload(
                 await hass.async_block_till_done()
             else:
                 assert await hass.config_entries.async_reload(entry.entry_id)
+                # Phase 2 (stream subscriptions) runs in the background.
+                await hass.async_block_till_done()
             with pytest.raises(HomeAssistantError) as error:
                 await asyncio.wait_for(pending_call, 1)
             assert error.value.translation_key == error_key

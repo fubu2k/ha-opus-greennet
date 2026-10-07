@@ -28,10 +28,23 @@ REQUEST_TIMEOUT = 10.0
 # retained device snapshots need more time than a single gateway operation.
 SUBSCRIPTION_TIMEOUT = 30.0
 
+# During setup and every resync the broker replays the gateway's retained
+# snapshot (tens of thousands of stream/# topics). SUBACKs and answers are
+# delayed by that replay, so these phases use deliberately wider bounds.
+SETUP_REQUEST_TIMEOUT = 30.0
+SETUP_SUBSCRIPTION_TIMEOUT = 180.0
+
+# Optional pause between two gateway requests (seconds). Strict one-in-flight
+# serialization already paces the gateway; raise this (e.g. 0.05-0.1) only if
+# a firmware needs extra breathing room for its EnOcean radio telegrams.
+MIN_SEND_INTERVAL = 0.0
+
 # Queue priorities: lower values are dispatched first. User-initiated control
-# commands must never wait behind background status queries/refreshes.
+# commands must never wait behind status queries, and delayed (background)
+# reconciliation queries must never compete with either of them.
 PRIORITY_COMMAND = 0
 PRIORITY_QUERY = 10
+PRIORITY_BACKGROUND = 20
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,7 +84,25 @@ def decode_response(payload: str | bytes, *, require_status: bool = False) -> di
     return data
 
 
-async def async_wait_for_subscriptions(hass: HomeAssistant, topics: list[str]) -> None:
+def topic_matches(pattern: str, topic: str) -> bool:
+    """Return whether an MQTT topic filter (with + and #) matches a topic."""
+    pattern_parts = pattern.split("/")
+    topic_parts = topic.split("/")
+    for index, part in enumerate(pattern_parts):
+        if part == "#":
+            return True
+        if index >= len(topic_parts):
+            return False
+        if part not in ("+", topic_parts[index]):
+            return False
+    return len(pattern_parts) == len(topic_parts)
+
+
+async def async_wait_for_subscriptions(
+    hass: HomeAssistant,
+    topics: list[str],
+    timeout: float = SUBSCRIPTION_TIMEOUT,
+) -> None:
     """Wait for broker subscription completion before publishing a request."""
     pending = set(topics)
     ready = asyncio.get_running_loop().create_future()
@@ -91,12 +122,12 @@ async def async_wait_for_subscriptions(hass: HomeAssistant, topics: list[str]) -
                 )
             )
         if pending:
-            async with asyncio.timeout(SUBSCRIPTION_TIMEOUT):
+            async with asyncio.timeout(timeout):
                 await ready
     except TimeoutError:
         _LOGGER.warning(
             "Timed out after %.0fs waiting for OPUS MQTT subscriptions: %s",
-            SUBSCRIPTION_TIMEOUT,
+            timeout,
             ", ".join(sorted(pending)),
         )
         raise
@@ -151,7 +182,21 @@ class PriorityLock:
 
 
 class MQTTRequestManager:
-    """Own subscriptions and serialize requests without protocol request IDs."""
+    """Own subscriptions and serialize requests without protocol request IDs.
+
+    Two lock levels exist:
+
+    * a per-answer-topic lock, because OPUS answers carry no request ID and
+      only one local operation may own an answer topic at a time, and
+    * one global send lock (the "global send queue"). The gateway handles
+      requests strictly sequentially; publishing 10+ requests within one
+      millisecond made the tail exceed its acknowledgement deadline. Exactly
+      one request is in flight at any time, dispatched by priority, then FIFO.
+
+    Answer subscriptions are prepared before entering the global queue, so
+    SUBACK latency never blocks the in-flight slot, and the acknowledgement
+    deadline starts only after the request was physically published.
+    """
 
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
@@ -159,8 +204,40 @@ class MQTTRequestManager:
         self._generation = 0
         self._device_generations: dict[str, int] = {}
         self._locks: dict[str, PriorityLock] = {}
+        self._send_lock = PriorityLock()
+        self._last_send_done = 0.0
         self._waiters: dict[asyncio.Future, str] = {}
         self._cleanups: set[Callable[[], None]] = set()
+        # Wildcard filters already subscribed (and SUBACKed) by the owner.
+        # Answers on matching topics are routed in-process instead of
+        # creating one broker subscription per request.
+        self._route_patterns: list[str] = []
+        self._routes: dict[str, Callable[[ReceiveMessage], None]] = {}
+
+    @property
+    def queue_depth(self) -> int:
+        """Return the number of requests waiting for the in-flight slot."""
+        return len(self._send_lock._waiters)  # noqa: SLF001
+
+    @callback
+    def async_add_route_pattern(self, pattern: str) -> None:
+        """Declare an active persistent subscription usable for answer routing."""
+        if pattern not in self._route_patterns:
+            self._route_patterns.append(pattern)
+
+    @callback
+    def async_clear_route_patterns(self) -> None:
+        """Forget persistent routes, e.g. while the broker resubscribes."""
+        self._route_patterns.clear()
+
+    @callback
+    def async_route(self, msg: ReceiveMessage) -> None:
+        """Feed a message from a persistent subscription to its pending request."""
+        if handler := self._routes.get(getattr(msg, "topic", "")):
+            handler(msg)
+
+    def _is_routed(self, answer_topic: str) -> bool:
+        return any(topic_matches(p, answer_topic) for p in self._route_patterns)
 
     def _own_cleanup(self, cleanup: Callable[[], None]) -> Callable[[], None]:
         """Make cleanup idempotent and immediately available to unload."""
@@ -211,8 +288,10 @@ class MQTTRequestManager:
         is_available: Callable[[], bool] | None = None,
         before_publish: Callable[[], None] | None = None,
         priority: int = PRIORITY_COMMAND,
+        timeout: float = REQUEST_TIMEOUT,
+        subscribe_timeout: float = SUBSCRIPTION_TIMEOUT,
     ) -> dict[str, Any]:
-        """Subscribe, await SUBACK, publish, and validate one fresh response."""
+        """Subscribe, await SUBACK, queue globally, publish, validate one answer."""
         # The OPUS response has no request ID. Only one local operation may use
         # an answer topic at a time; a late response after timeout remains an
         # inherent protocol limitation and is never treated as device state.
@@ -231,6 +310,9 @@ class MQTTRequestManager:
                 require_status=require_status,
                 is_available=is_available,
                 before_publish=before_publish,
+                priority=priority,
+                timeout=timeout,
+                subscribe_timeout=subscribe_timeout,
             )
         finally:
             lock.release()
@@ -247,18 +329,25 @@ class MQTTRequestManager:
         require_status: bool,
         is_available: Callable[[], bool] | None,
         before_publish: Callable[[], None] | None,
+        priority: int,
+        timeout: float,
+        subscribe_timeout: float,
     ) -> dict[str, Any]:
         """Run one request while owning its answer-topic queue slot."""
-        if (
-            self._closed
-            or generation != self._generation
-            or device_generation != self._device_generations.get(device_id, 0)
-        ):
-            raise request_error("request_cancelled", device_id)
-        if not mqtt.is_connected(self.hass):
-            raise request_error("mqtt_unavailable", device_id)
-        if is_available is not None and not is_available():
-            raise request_error("gateway_unavailable", device_id)
+
+        def check_still_valid() -> None:
+            if (
+                self._closed
+                or generation != self._generation
+                or device_generation != self._device_generations.get(device_id, 0)
+            ):
+                raise request_error("request_cancelled", device_id)
+            if not mqtt.is_connected(self.hass):
+                raise request_error("mqtt_unavailable", device_id)
+            if is_available is not None and not is_available():
+                raise request_error("gateway_unavailable", device_id)
+
+        check_still_valid()
 
         loop = asyncio.get_running_loop()
         subscribed = loop.create_future()
@@ -266,6 +355,8 @@ class MQTTRequestManager:
         self._waiters[subscribed] = device_id
         self._waiters[response] = device_id
         sent = False
+        send_slot = False
+        routed = False
         cancellations: list[Callable[[], None]] = []
 
         @callback
@@ -287,41 +378,60 @@ class MQTTRequestManager:
                 subscribed.set_result(None)
 
         try:
-            # Subscription setup has its own bound. The acknowledgement
-            # deadline must not be consumed by queueing or SUBACK latency.
-            async with asyncio.timeout(SUBSCRIPTION_TIMEOUT):
-                cancellations.append(
-                    self._own_cleanup(
-                        await mqtt.async_subscribe(
-                            self.hass, answer_topic, handle_response, qos=1
+            if self._is_routed(answer_topic):
+                # A persistent wildcard subscription already covers this
+                # answer topic: no extra SUBSCRIBE/SUBACK round trip needed.
+                self._routes[answer_topic] = handle_response
+                routed = True
+            else:
+                # Subscription setup has its own bound. The acknowledgement
+                # deadline must not be consumed by queueing or SUBACK latency.
+                async with asyncio.timeout(subscribe_timeout):
+                    cancellations.append(
+                        self._own_cleanup(
+                            await mqtt.async_subscribe(
+                                self.hass, answer_topic, handle_response, qos=1
+                            )
                         )
                     )
-                )
-                cancellations.append(
-                    self._own_cleanup(
-                        mqtt.async_on_subscribe_done(
-                            self.hass, answer_topic, 1, subscription_done
+                    cancellations.append(
+                        self._own_cleanup(
+                            mqtt.async_on_subscribe_done(
+                                self.hass, answer_topic, 1, subscription_done
+                            )
                         )
                     )
+                    await subscribed
+            check_still_valid()
+
+            # Global send queue: wait (by priority) for the single in-flight
+            # slot. Waiting here never counts towards the request deadline.
+            queued_at = asyncio.get_running_loop().time()
+            await self._send_lock.acquire(priority)
+            send_slot = True
+            waited = asyncio.get_running_loop().time() - queued_at
+            if waited > 1.0:
+                _LOGGER.debug(
+                    "OPUS request for %s waited %.2fs in the send queue "
+                    "(priority %d, %d still queued)",
+                    device_id,
+                    waited,
+                    priority,
+                    self.queue_depth,
                 )
-                await subscribed
-            if (
-                self._closed
-                or generation != self._generation
-                or device_generation != self._device_generations.get(device_id, 0)
-            ):
-                raise request_error("request_cancelled", device_id)
-            if not mqtt.is_connected(self.hass):
-                raise request_error("mqtt_unavailable", device_id)
-            if is_available is not None and not is_available():
-                raise request_error("gateway_unavailable", device_id)
+            gap = MIN_SEND_INTERVAL - (
+                asyncio.get_running_loop().time() - self._last_send_done
+            )
+            if MIN_SEND_INTERVAL > 0 and gap > 0:
+                await asyncio.sleep(gap)
+            check_still_valid()
             if before_publish is not None:
                 before_publish()
             sent = True
             await mqtt.async_publish(self.hass, topic, payload, qos=1, retain=False)
             # The acknowledgement timeout starts exactly once the request
             # has actually been published, never at creation or enqueue.
-            async with asyncio.timeout(REQUEST_TIMEOUT):
+            async with asyncio.timeout(timeout):
                 result = await response
             if device_generation != self._device_generations.get(device_id, 0):
                 raise request_error("request_cancelled", device_id)
@@ -329,6 +439,11 @@ class MQTTRequestManager:
         except TimeoutError as err:
             raise request_error("request_timeout", device_id) from err
         finally:
+            if send_slot:
+                self._last_send_done = asyncio.get_running_loop().time()
+                self._send_lock.release()
+            if routed and self._routes.get(answer_topic) is handle_response:
+                del self._routes[answer_topic]
             for cancel in cancellations:
                 cancel()
             for future in (subscribed, response):
@@ -357,7 +472,12 @@ def gateway_uptime_value(data: dict[str, Any]) -> str:
 
 
 async def async_get_gateway_uptime(
-    manager: MQTTRequestManager, eag_id: str
+    manager: MQTTRequestManager,
+    eag_id: str,
+    *,
+    priority: int = PRIORITY_QUERY,
+    timeout: float = REQUEST_TIMEOUT,
+    subscribe_timeout: float = SUBSCRIPTION_TIMEOUT,
 ) -> dict[str, Any]:
     """Probe a working MQTT endpoint without requiring optional system info."""
     data = await manager.async_request(
@@ -365,6 +485,9 @@ async def async_get_gateway_uptime(
         TOPIC_GET_ANSWER_SYSTEM_UPTIME.format(base=TOPIC_BASE, eag_id=eag_id),
         eag_id,
         require_status=True,
+        priority=priority,
+        timeout=timeout,
+        subscribe_timeout=subscribe_timeout,
     )
     try:
         gateway_uptime_value(data)
@@ -377,7 +500,14 @@ async def async_probe_gateway(hass: HomeAssistant, eag_id: str) -> dict[str, Any
     """Verify the selected gateway using its fresh MQTT uptime response."""
     manager = MQTTRequestManager(hass)
     try:
-        return await async_get_gateway_uptime(manager, eag_id)
+        # The config flow may run while a large retained replay is in progress.
+        return await async_get_gateway_uptime(
+            manager,
+            eag_id,
+            priority=PRIORITY_COMMAND,
+            timeout=SETUP_REQUEST_TIMEOUT,
+            subscribe_timeout=SETUP_SUBSCRIPTION_TIMEOUT,
+        )
     except HomeAssistantError as err:
         if err.translation_key == "mqtt_unavailable":
             raise

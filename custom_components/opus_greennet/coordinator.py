@@ -52,8 +52,12 @@ from .const import (
 )
 from .enocean_device import EnOceanDevice
 from .mqtt_transport import (
+    PRIORITY_BACKGROUND,
     PRIORITY_COMMAND,
     PRIORITY_QUERY,
+    REQUEST_TIMEOUT,
+    SETUP_REQUEST_TIMEOUT,
+    SETUP_SUBSCRIPTION_TIMEOUT,
     MQTTRequestManager,
     async_get_gateway_uptime,
     async_wait_for_subscriptions,
@@ -150,6 +154,9 @@ class OpusGreenNetCoordinator:
         self._resync_requested_at: float | None = None
         self._telegram_paths: dict[str, set[str]] = {}
         self._command_waiters: dict[str, int] = {}
+        self._reconciling: set[tuple[str, int]] = set()
+        self._control_topics: list[str] = []
+        self._stream_topics: list[str] = []
         # Gateway info
         self.gateway_info: dict[str, Any] = {}
         self.gateway_uptime: str | None = None
@@ -193,45 +200,103 @@ class OpusGreenNetCoordinator:
             and mqtt.is_connected(self.hass)
         )
 
-    async def async_setup(self) -> bool:
-        """Subscribe before probing the gateway and requesting its snapshot."""
-        subscriptions = (
-            (TOPIC_SUB_TELEGRAM_FROM_ALL, self._handle_telegram_property_message),
+    def _control_subscriptions(self) -> tuple[tuple[str, Callable], ...]:
+        """Small, non-retained answer/status topics needed for the probe."""
+        return (
+            ("opus_greennet/{eag_id}/bridge/status", self._handle_bridge_status),
+            (TOPIC_GET_ANSWER_SYSTEM_UPTIME, self._handle_system_uptime),
+            (TOPIC_GET_ANSWER_SYSTEM_INFO, self._handle_system_info),
+            (TOPIC_SUB_PUT_ANSWER_STATE, self._handle_put_answer_state),
+        )
+
+    def _stream_subscriptions(self) -> tuple[tuple[str, Callable], ...]:
+        """Heavy wildcard topics, ordered by importance for discovery.
+
+        stream/# replays a retained snapshot of up to ~30,000 topics. Each
+        filter is subscribed and SUBACKed before the next one is requested,
+        so the broker never has to replay everything concurrently.
+        """
+        return (
+            (TOPIC_GET_ANSWER_DEVICES, self._handle_get_answer_devices),
             (TOPIC_SUB_DEVICES_ALL, self._handle_device_property_message),
             (TOPIC_SUB_DEVICE_STREAM_ALL, self._handle_device_stream_message),
-            (TOPIC_GET_ANSWER_DEVICES, self._handle_get_answer_devices),
-            (TOPIC_SUB_PUT_ANSWER_STATE, self._handle_put_answer_state),
-            (TOPIC_GET_ANSWER_SYSTEM_INFO, self._handle_system_info),
-            (TOPIC_GET_ANSWER_SYSTEM_UPTIME, self._handle_system_uptime),
-            ("opus_greennet/{eag_id}/bridge/status", self._handle_bridge_status),
+            (TOPIC_SUB_TELEGRAM_FROM_ALL, self._handle_telegram_property_message),
         )
+
+    async def _async_subscribe_group(
+        self,
+        group: tuple[tuple[str, Callable], ...],
+        target: list[str],
+        *,
+        staggered: bool,
+    ) -> None:
+        """Subscribe missing topics of one group, optionally one SUBACK at a time."""
+        for pattern, handler in group:
+            topic = pattern.format(base=TOPIC_BASE, eag_id=self.eag_id)
+            if topic in target:
+                continue
+            self._subscriptions.append(
+                await mqtt.async_subscribe(self.hass, topic, handler, qos=1)
+            )
+            target.append(topic)
+            self._subscription_topics.append(topic)
+            if staggered:
+                await async_wait_for_subscriptions(
+                    self.hass, [topic], timeout=SETUP_SUBSCRIPTION_TIMEOUT
+                )
+                _LOGGER.debug("OPUS subscription ready: %s", topic)
+        if not staggered:
+            await async_wait_for_subscriptions(
+                self.hass, list(target), timeout=SETUP_SUBSCRIPTION_TIMEOUT
+            )
+
+    @callback
+    def _register_answer_routes(self) -> None:
+        """Route exact answers through the already active wildcard listeners."""
+        for pattern in (TOPIC_GET_ANSWER_SYSTEM_UPTIME, TOPIC_SUB_PUT_ANSWER_STATE):
+            self._requests.async_add_route_pattern(
+                pattern.format(base=TOPIC_BASE, eag_id=self.eag_id)
+            )
+
+    async def async_setup(self) -> bool:
+        """Probe the gateway quickly; load the retained snapshot in background.
+
+        Phase 1 (blocking, part of the config entry setup):
+          subscribe only the light control/answer topics, wait for their
+          SUBACKs and probe the uptime endpoint with setup-specific bounds.
+          No stream/# wildcard is active yet, so the retained flood cannot
+          delay the probe or the SUBACKs.
+        Phase 2 (background task):
+          subscribe the heavy stream/# wildcards one by one, then request a
+          fresh device snapshot. Entities are created via dispatcher signals
+          when discovery finalizes, so setup does not need to wait for this.
+        """
         self._subscriptions.append(
             mqtt.async_subscribe_connection_status(
                 self.hass, self._handle_connection_status
             )
         )
         try:
-            # Probe an exact response topic before wildcard subscriptions start
-            # replaying the gateway's large retained device-model snapshot.
-            # The normal refresh below rechecks health after their SUBACKs and
-            # requests a fresh snapshot only once every listener is ready.
+            await self._async_subscribe_group(
+                self._control_subscriptions(), self._control_topics, staggered=False
+            )
+            self._register_answer_routes()
             uptime_response = await async_get_gateway_uptime(
-                self._requests, self.eag_id
+                self._requests,
+                self.eag_id,
+                priority=PRIORITY_COMMAND,
+                timeout=SETUP_REQUEST_TIMEOUT,
+                subscribe_timeout=SETUP_SUBSCRIPTION_TIMEOUT,
             )
             self.gateway_uptime = gateway_uptime_value(uptime_response)
-            for pattern, handler in subscriptions:
-                topic = pattern.format(base=TOPIC_BASE, eag_id=self.eag_id)
-                self._subscriptions.append(
-                    await mqtt.async_subscribe(self.hass, topic, handler, qos=1)
-                )
-                self._subscription_topics.append(topic)
-            await self._async_refresh_gateway(resync=True)
             self._started = True
             self._subscriptions.append(
                 async_track_time_interval(
                     self.hass, self._async_health_tick, GATEWAY_HEALTH_INTERVAL
                 )
             )
+            # Phase 2: stream subscriptions + snapshot, decoupled from setup.
+            self._schedule_gateway_refresh(resync=True)
         except BaseException:
             await self.async_unload()
             raise
@@ -257,6 +322,9 @@ class OpusGreenNetCoordinator:
             return
         if not connected:
             self._set_gateway_available(False)
+            # HA resubscribes after reconnect; until those SUBACKs arrive the
+            # persistent wildcards cannot be trusted for answer routing.
+            self._requests.async_clear_route_patterns()
             self._requests.async_cancel_pending("mqtt_unavailable")
             self._cancel_background_work()
         elif self._started:
@@ -313,10 +381,30 @@ class OpusGreenNetCoordinator:
         if self._bridge_connected is False:
             raise request_error("gateway_unavailable", self.eag_id)
         if resync:
-            # This also covers HA's automatic wildcard resubscriptions after a
-            # broker reconnect. Do not spend the request deadline on replay.
-            await async_wait_for_subscriptions(self.hass, self._subscription_topics)
-        uptime_response = await async_get_gateway_uptime(self._requests, self.eag_id)
+            # Control topics first (cheap), then the heavy stream wildcards
+            # one SUBACK at a time. Already subscribed topics are skipped, so
+            # this also resumes an interrupted phase 2 and covers HA's
+            # automatic resubscriptions after a broker reconnect.
+            await self._async_subscribe_group(
+                self._control_subscriptions(), self._control_topics, staggered=False
+            )
+            self._register_answer_routes()
+            await self._async_subscribe_group(
+                self._stream_subscriptions(), self._stream_topics, staggered=True
+            )
+            await async_wait_for_subscriptions(
+                self.hass,
+                self._subscription_topics,
+                timeout=SETUP_SUBSCRIPTION_TIMEOUT,
+            )
+        # A resync coincides with a retained replay; allow a wider deadline.
+        uptime_response = await async_get_gateway_uptime(
+            self._requests,
+            self.eag_id,
+            priority=PRIORITY_QUERY,
+            timeout=SETUP_REQUEST_TIMEOUT if resync else REQUEST_TIMEOUT,
+            subscribe_timeout=SETUP_SUBSCRIPTION_TIMEOUT,
+        )
         self.gateway_uptime = gateway_uptime_value(uptime_response)
         if self._unloaded or self._bridge_connected is False:
             raise request_error("gateway_unavailable", self.eag_id)
@@ -400,6 +488,10 @@ class OpusGreenNetCoordinator:
         for unsubscribe in self._subscriptions:
             unsubscribe()
         self._subscriptions.clear()
+        self._subscription_topics.clear()
+        self._control_topics.clear()
+        self._stream_topics.clear()
+        self._requests.async_clear_route_patterns()
         self._pending_telegrams.clear()
         self._pending_device_streams.clear()
         self._telegram_data.clear()
@@ -719,6 +811,7 @@ class OpusGreenNetCoordinator:
     @callback
     def _handle_put_answer_state(self, msg: ReceiveMessage) -> None:
         """Handle the protocol's asynchronous command acknowledgement."""
+        self._requests.async_route(msg)
         if getattr(msg, "retain", False):
             return
         match = PUT_ANSWER_STATE_TOPIC_PATTERN.fullmatch(msg.topic)
@@ -786,6 +879,7 @@ class OpusGreenNetCoordinator:
     @callback
     def _handle_system_uptime(self, msg: ReceiveMessage) -> None:
         """Handle gateway uptime response."""
+        self._requests.async_route(msg)
         try:
             data = decode_response(msg.payload, require_status=True)
             self.gateway_uptime = gateway_uptime_value(data)
@@ -1137,7 +1231,9 @@ class OpusGreenNetCoordinator:
                     channel,
                     seconds,
                 )
-                if not self.available:
+                if not self.available or (did, channel) in self._reconciling:
+                    # Coalesce: one queued background query per channel is
+                    # enough; never pile up behind a command burst.
                     return
                 self._create_task(self._async_reconcile_status(did, channel))
 
@@ -1148,10 +1244,14 @@ class OpusGreenNetCoordinator:
     async def _async_reconcile_status(self, device_id: str, channel_id: int) -> None:
         if self.get_device(device_id) is None:
             return
+        key = (device_id, channel_id)
+        self._reconciling.add(key)
         try:
-            await self.async_query_device_status(device_id, channel_id)
+            await self.async_query_device_status(device_id, channel_id, background=True)
         except HomeAssistantError:
             _LOGGER.debug("Could not reconcile OPUS state for %s", device_id)
+        finally:
+            self._reconciling.discard(key)
 
     @staticmethod
     def _channel_from_functions(functions: list[dict[str, Any]]) -> int | None:
@@ -1921,8 +2021,15 @@ class OpusGreenNetCoordinator:
         self,
         device_id: str,
         functions: list[dict[str, Any]],
+        *,
+        background: bool = False,
     ) -> None:
-        """Send a command to a device using JSON state message."""
+        """Send a command to a device using JSON state message.
+
+        All requests pass the transport's global send queue (one in flight).
+        ``background`` marks delayed reconciliation queries, which are only
+        dispatched when no user command or interactive query is waiting.
+        """
         topic = TOPIC_PUT_STATE.format(
             base=TOPIC_BASE, eag_id=self.eag_id, device_id=device_id
         )
@@ -1963,7 +2070,12 @@ class OpusGreenNetCoordinator:
         # Control commands overtake queued status queries/refreshes so that a
         # burst of reconciliation traffic never delays a user action.
         is_query = any(function.get("key") == "query" for function in functions)
-        priority = PRIORITY_QUERY if is_query else PRIORITY_COMMAND
+        if background:
+            priority = PRIORITY_BACKGROUND
+        elif is_query:
+            priority = PRIORITY_QUERY
+        else:
+            priority = PRIORITY_COMMAND
 
         self._command_waiters[device_id] = self._command_waiters.get(device_id, 0) + 1
         try:
@@ -2101,11 +2213,13 @@ class OpusGreenNetCoordinator:
         self,
         device_id: str,
         channel: int = 0,
+        *,
+        background: bool = False,
     ) -> None:
         """Query the current device status."""
         functions = [{"key": "query", "value": "status"}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
-        await self.async_send_command(device_id, functions)
+        await self.async_send_command(device_id, functions, background=background)
 
     # ──────────────────────────────────────────────────────────────────────
     # Climate commands
@@ -2168,6 +2282,7 @@ class OpusGreenNetCoordinator:
             payload,
             require_status=require_status,
             is_available=lambda: self.available,
+            priority=PRIORITY_QUERY,
         )
 
     async def async_get_device_configuration(self, device_id: str) -> dict[str, Any]:

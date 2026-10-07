@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0b2] - 2026-10-07
+
+Second beta of v0.5.0, focused on scaling the transport and setup phase to large installations (60+ EnOcean devices, 140+ EEP entries, tens of thousands of retained `stream/#` topics).
+
+### Fixed
+- Gateway stalls when many commands are sent at once (e.g. 10+ covers via one service call). All outgoing requests now pass a global priority send queue that keeps exactly one request in flight to the gateway. Commands overtake interactive queries, and delayed status-reconciliation queries run at a new background priority so they never compete with user commands. The acknowledgement deadline still starts only when a request is physically published (#62 follow-up).
+- Config entry setup fails on large installations because the retained-message flood delays SUBACKs and the uptime probe. Setup is now two-phase: only the light control/answer topics are subscribed before the uptime probe (with setup-specific timeouts of 30s for the probe and 180s for subscriptions), and the heavy `stream/#` wildcard subscriptions plus the device snapshot request run afterwards in a background task, staggered one SUBACK at a time. A failed background phase is retried by the regular health tick instead of failing setup.
+
+### Changed
+- Command answers are routed through the already-active `putAnswer/devices/+/state` and uptime-answer subscriptions instead of opening one extra SUBSCRIBE/SUBACK round trip per request, reducing broker chatter during command bursts.
+- Reconciliation queries are coalesced to at most one queued background query per device and channel.
+
+### Beta testing
+- Drive 10+ covers simultaneously from one scene/service call and confirm all commands complete without `request_timeout` errors. With strict one-in-flight sending, the tail of a large burst now waits for earlier answers instead of overloading the gateway; report if a firmware needs extra pacing (`MIN_SEND_INTERVAL`).
+- Restart Home Assistant on a large installation and confirm the config entry sets up without `gateway_unavailable` retries, entities appear after discovery finalizes, and the MQTT client no longer logs "No ACK from MQTT server".
+
+### Validation
+- 835 automated tests pass on Home Assistant 2026.9.4 (833 pre-existing plus two new regression tests for the global send queue). Ruff checks pass. Physical validation on an 80+ device gateway is still pending.
+
 ## [0.5.0b0] - 2026-10-03
 
 First beta of v0.5.0, building on the confirmed v0.4.0 stable release.
