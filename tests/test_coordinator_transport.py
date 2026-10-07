@@ -40,6 +40,7 @@ class Broker:
         self.responses = {}
         self.subscriptions = {}
         self.acknowledgements = {}
+        self.ack_qos: dict[str, int] = {}
         self.published = []
         self.events = []
 
@@ -53,6 +54,7 @@ class Broker:
         return unsubscribe
 
     def on_subscribe_done(self, hass, topic, qos, callback):
+        self.ack_qos[topic] = qos
         self.acknowledgements.setdefault(topic, []).append(callback)
         if self.auto_ack:
             callback()
@@ -736,5 +738,53 @@ async def test_flapping_reconnects_do_not_retrigger_snapshot(
     await coord._refresh_task
     snapshots = [t for t, _, _ in broker.published if t.endswith("/get/devices")]
     assert len(snapshots) == 2
+    await coord.async_unload()
+    broker.assert_clean()
+
+
+async def test_stream_subscriptions_wait_for_matching_qos_suback(
+    broker, connected_coordinator
+):
+    """The done callback fires per topic AND qos; waits must match QoS 0."""
+    broker.response = UPTIME_RESPONSE
+    coord = connected_coordinator
+    coord._started = True
+    coord._handle_connection_status(True)
+    await coord._refresh_task
+    assert broker.ack_qos["EnOcean/AABB0011/getAnswer/devices/#"] == 1
+    assert broker.ack_qos["EnOcean/AABB0011/stream/devices/#"] == 0
+    assert broker.ack_qos["EnOcean/AABB0011/stream/device/#"] == 0
+    assert broker.ack_qos["EnOcean/AABB0011/stream/telegram/#"] == 0
+    assert coord.available is True
+    await coord.async_unload()
+    broker.assert_clean()
+
+
+async def test_stream_suback_timeout_does_not_fail_the_refresh(
+    broker, connected_coordinator, monkeypatch
+):
+    """Telemetry SUBACKs are advisory: a slow broker must not kill the refresh."""
+    broker.response = UPTIME_RESPONSE
+    monkeypatch.setattr(
+        "custom_components.opus_greennet.coordinator.SETUP_SUBSCRIPTION_TIMEOUT", 0.05
+    )
+
+    def suback_only_qos1(hass, topic, qos, callback):
+        # QoS 1 topics (control/answers) confirm immediately; the QoS 0
+        # stream topics never confirm, like a broker stuck in retained replay.
+        if qos == 1:
+            callback()
+        return lambda: None
+
+    monkeypatch.setattr(
+        "custom_components.opus_greennet.mqtt_transport.mqtt.async_on_subscribe_done",
+        suback_only_qos1,
+    )
+    coord = connected_coordinator
+    coord._started = True
+    coord._handle_connection_status(True)
+    await asyncio.wait_for(coord._refresh_task, 5)
+    assert coord.available is True
+    assert any(topic.endswith("/get/devices") for topic, _, _ in broker.published)
     await coord.async_unload()
     broker.assert_clean()

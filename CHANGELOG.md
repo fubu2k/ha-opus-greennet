@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0b4] - 2026-10-07
+
+Fourth beta of v0.5.0, fixing a regression introduced in 0.5.0b3 that kept re-running gateways marked unavailable.
+
+### Fixed
+- 0.5.0b3 subscribed the three telemetry wildcards at QoS 0 but still waited for the broker's subscription confirmation with a hard-coded QoS 1. Home Assistant only fires the subscription-done callback for a matching topic AND QoS pair, so the wait for `stream/devices/#` never resolved and timed out after 180 seconds, failing every gateway refresh in a retry loop ("Timed out after 180s waiting for OPUS MQTT subscriptions"). SUBACK waits now always use the same QoS as their subscription, and bulk waits are grouped per QoS level.
+- Stream (telemetry) SUBACKs are now advisory: a slow or missing confirmation is logged and the refresh continues instead of failing the health probe and marking the gateway unavailable. Control and answer topics still wait strictly for their SUBACK before answer routing is (re)established.
+
+### Beta testing
+- After updating, the "Timed out after 180s" warnings must disappear and the gateway must report available again even while the broker is busy replaying the retained snapshot.
+- Re-check the QoS 0 and reconnect-debounce behaviour from 0.5.0b3: no PUBACK per replayed retained message, and a single `get/devices` snapshot per 60-second reconnect window.
+
+### Validation
+- 838 automated tests pass on Home Assistant 2026.9.4, including two new regression tests: SUBACK waits must match the subscription QoS, and a never-arriving stream SUBACK must not fail the refresh. Ruff checks pass. Physical validation on a large installation is still pending.
+
 ## [0.5.0b3] - 2026-10-07
 
 Third beta of v0.5.0, reducing the load that large retained `stream/#` snapshots (15,000+ topics, 82 devices) put on the gateway, the broker, and the MQTT client.

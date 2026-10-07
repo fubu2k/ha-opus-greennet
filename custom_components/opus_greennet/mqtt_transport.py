@@ -102,8 +102,18 @@ async def async_wait_for_subscriptions(
     hass: HomeAssistant,
     topics: list[str],
     timeout: float = SUBSCRIPTION_TIMEOUT,
+    qos: int = 1,
+    *,
+    required: bool = True,
 ) -> None:
-    """Wait for broker subscription completion before publishing a request."""
+    """Wait for broker subscription completion before publishing a request.
+
+    ``qos`` must match the QoS used for the subscription: Home Assistant only
+    fires the subscription-done callback for a matching topic AND QoS pair, so
+    waiting with QoS 1 for a QoS 0 subscription never resolves. ``required``
+    marks waits whose timeout is advisory: the caller continues without the
+    SUBACK instead of failing the whole operation.
+    """
     pending = set(topics)
     ready = asyncio.get_running_loop().create_future()
     cancellations: list[Callable[[], None]] = []
@@ -118,19 +128,22 @@ async def async_wait_for_subscriptions(
         for topic in pending.copy():
             cancellations.append(
                 mqtt.async_on_subscribe_done(
-                    hass, topic, 1, lambda topic=topic: subscription_done(topic)
+                    hass, topic, qos, lambda topic=topic: subscription_done(topic)
                 )
             )
         if pending:
             async with asyncio.timeout(timeout):
                 await ready
     except TimeoutError:
-        _LOGGER.warning(
+        message = (
             "Timed out after %.0fs waiting for OPUS MQTT subscriptions: %s",
             timeout,
             ", ".join(sorted(pending)),
         )
-        raise
+        if required:
+            _LOGGER.warning(*message)
+            raise
+        _LOGGER.debug(*message)
     finally:
         for cancel in cancellations:
             cancel()

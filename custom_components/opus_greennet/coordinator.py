@@ -253,8 +253,15 @@ class OpusGreenNetCoordinator:
         target: list[str],
         *,
         staggered: bool,
+        required: bool = True,
     ) -> None:
-        """Subscribe missing topics of one group, optionally one SUBACK at a time."""
+        """Subscribe missing topics of one group, optionally one SUBACK at a time.
+
+        SUBACK waits always use the same QoS as the subscription itself.
+        ``required=False`` treats a missing SUBACK as advisory: telemetry
+        listeners are registered with the subscribe call, so messages flow
+        even while the confirmation is still outstanding.
+        """
         for pattern, handler, qos in group:
             topic = pattern.format(base=TOPIC_BASE, eag_id=self.eag_id)
             if topic in target:
@@ -266,13 +273,28 @@ class OpusGreenNetCoordinator:
             self._subscription_topics.append(topic)
             if staggered:
                 await async_wait_for_subscriptions(
-                    self.hass, [topic], timeout=SETUP_SUBSCRIPTION_TIMEOUT
+                    self.hass,
+                    [topic],
+                    timeout=SETUP_SUBSCRIPTION_TIMEOUT,
+                    qos=qos,
+                    required=required,
                 )
                 _LOGGER.debug("OPUS subscription ready: %s", topic)
         if not staggered:
-            await async_wait_for_subscriptions(
-                self.hass, list(target), timeout=SETUP_SUBSCRIPTION_TIMEOUT
-            )
+            # Wait per QoS level: the done callback fires per topic/QoS pair.
+            by_qos: dict[int, list[str]] = {}
+            for pattern, _, qos in group:
+                topic = pattern.format(base=TOPIC_BASE, eag_id=self.eag_id)
+                if topic in target:
+                    by_qos.setdefault(qos, []).append(topic)
+            for qos, topics in by_qos.items():
+                await async_wait_for_subscriptions(
+                    self.hass,
+                    topics,
+                    timeout=SETUP_SUBSCRIPTION_TIMEOUT,
+                    qos=qos,
+                    required=required,
+                )
 
     @callback
     def _register_answer_routes(self) -> None:
@@ -425,15 +447,15 @@ class OpusGreenNetCoordinator:
         )
         self._register_answer_routes()
         if resync:
-            # The heavy stream wildcards follow one SUBACK at a time.
+            # The heavy stream wildcards follow one SUBACK at a time. Their
+            # SUBACKs are advisory: a slow confirmation must not fail the
+            # health probe or keep the gateway marked unavailable.
             await self._async_subscribe_group(
-                self._stream_subscriptions(), self._stream_topics, staggered=True
+                self._stream_subscriptions(),
+                self._stream_topics,
+                staggered=True,
+                required=False,
             )
-        await async_wait_for_subscriptions(
-            self.hass,
-            self._subscription_topics,
-            timeout=SETUP_SUBSCRIPTION_TIMEOUT,
-        )
         # A resync coincides with a retained replay; allow a wider deadline.
         uptime_response = await async_get_gateway_uptime(
             self._requests,
