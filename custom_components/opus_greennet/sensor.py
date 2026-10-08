@@ -139,9 +139,7 @@ async def async_setup_entry(
         )
 
         new_entities = [
-            entity
-            for entity in entities
-            if entity.unique_id is None or entity.unique_id not in added_unique_ids
+            entity for entity in entities if entity.unique_id not in added_unique_ids
         ]
         added_unique_ids.update(
             entity.unique_id for entity in new_entities if entity.unique_id is not None

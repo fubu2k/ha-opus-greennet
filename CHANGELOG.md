@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0b6] - 2026-10-08
+
+Sixth beta of v0.5.0, building on the stable 0.5.0b5 behaviour. Small diagnosability and maintenance improvements, no change to MQTT behaviour.
+
+### Changed
+- When setup fails, the integration now logs the underlying cause before raising `ConfigEntryNotReady`, for example `request_timeout`, `mqtt_unavailable`, `request_rejected (...)` or the exception type of a network error. Home Assistant only shows the generic "bridge did not respond" text, so a retry loop could previously not be traced to its cause. Only the translation key, a short reason and the exception type are logged, never message payloads; full details are available at debug level.
+- Minimum supported Home Assistant version raised from 2026.8 to 2026.9 (`hacs.json` and README).
+- Removed the unused constants `ENTITY_PLATFORMS`, `COVER_OPEN`, `COVER_CLOSED`, `COVER_STOP` and `TOPIC_STREAM_TELEGRAM_TO`. The coordinator now uses the existing `KEY_QUERY` constant instead of repeating the literal `"query"`.
+- Simplified the sensor discovery de-duplication: every sensor sets a unique ID, so the redundant `unique_id is None` branch was removed. Behaviour is unchanged.
+
+### Beta testing
+- Provoke a failed start (for example by stopping the MQTT broker while reloading the integration) and check that the log shows one `OPUS gateway ... is not ready, Home Assistant will retry: <cause>` line per retry.
+- No change to entities, topics, QoS or timing is expected compared to 0.5.0b5.
+
+### Validation
+- 843 automated tests pass on both Home Assistant 2026.9.0 (new minimum) and 2026.10.0, including five new tests for the setup failure logging. Ruff checks pass.
+
 ## [0.5.0b4] - 2026-10-07
 
 Fourth beta of v0.5.0, fixing a regression introduced in 0.5.0b3 that kept re-running gateways marked unavailable.

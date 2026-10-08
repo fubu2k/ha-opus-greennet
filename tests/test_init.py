@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -24,6 +25,7 @@ from custom_components.opus_greennet import (
     async_unload_entry,
 )
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
+from custom_components.opus_greennet.mqtt_transport import request_error
 
 
 @pytest.mark.asyncio
@@ -153,3 +155,41 @@ async def test_failed_platform_unload_keeps_coordinator_running() -> None:
 
     assert await async_unload_entry(hass, entry) is False
     coordinator.async_unload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_log"),
+    [
+        (request_error("request_timeout", "AABB0011"), "request_timeout"),
+        (request_error("mqtt_unavailable", "AABB0011"), "mqtt_unavailable"),
+        (
+            request_error("request_rejected", "AABB0011", "status 404"),
+            "request_rejected (status 404)",
+        ),
+        (TimeoutError(), "TimeoutError"),
+        (OSError("Network is unreachable"), "OSError: Network is unreachable"),
+    ],
+)
+async def test_failed_setup_logs_the_underlying_cause(
+    failure: Exception, expected_log: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Retry loops must show why the gateway was not ready, not only that."""
+    coordinator = MagicMock()
+    coordinator.async_setup = AsyncMock(side_effect=failure)
+    coordinator.async_unload = AsyncMock()
+    entry = SimpleNamespace(data={"eag_id": "AABB0011"})
+    with (
+        patch(
+            "custom_components.opus_greennet.OpusGreenNetCoordinator",
+            return_value=coordinator,
+        ),
+        caplog.at_level(logging.WARNING, logger="custom_components.opus_greennet"),
+        pytest.raises(ConfigEntryNotReady) as raised,
+    ):
+        await async_setup_entry(MagicMock(), entry)
+    assert raised.value.__cause__ is failure
+    assert (
+        f"OPUS gateway AABB0011 is not ready, Home Assistant will retry: {expected_log}"
+        in caplog.text
+    )

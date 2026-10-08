@@ -233,7 +233,7 @@ If you see messages when triggering EnOcean devices, the bridge is working.
    `https://github.com/kegelmeier/ha-opus-greennet`, choose **Integration**, and add it.
 3. Search for **Opus GreenNet Bridge**, install, and **restart Home Assistant**.
 
-Home Assistant 2026.8 or newer is required. To test a beta, enable pre-release
+Home Assistant 2026.9 or newer is required. To test a beta, enable pre-release
 versions for this repository in HACS before selecting the beta version.
 
 ### Manual Installation
@@ -495,7 +495,7 @@ Released under the [MIT License](LICENSE).
 [release-shield]: https://img.shields.io/github/v/release/kegelmeier/ha-opus-greennet?style=for-the-badge
 [license]: https://github.com/kegelmeier/ha-opus-greennet/blob/main/LICENSE
 [license-shield]: https://img.shields.io/github/license/kegelmeier/ha-opus-greennet?style=for-the-badge
-[ha-shield]: https://img.shields.io/badge/Home%20Assistant-2026.8%2B-41BDF5.svg?style=for-the-badge&logo=home-assistant&logoColor=white
+[ha-shield]: https://img.shields.io/badge/Home%20Assistant-2026.9%2B-41BDF5.svg?style=for-the-badge&logo=home-assistant&logoColor=white
 [hacs-repo]: https://my.home-assistant.io/redirect/hacs_repository/?owner=kegelmeier&repository=ha-opus-greennet&category=integration
 [hacs-repo-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
 [config-flow]: https://my.home-assistant.io/redirect/config_flow_start/?domain=opus_greennet

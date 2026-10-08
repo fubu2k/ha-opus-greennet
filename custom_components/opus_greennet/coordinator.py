@@ -26,6 +26,7 @@ from .const import (
     DOMAIN,
     INDEXED_STATE_CONTAINERS,
     KEY_CHANNEL,
+    KEY_QUERY,
     KEY_ROTATION_TIME,
     KEY_STOP,
     KEY_VERTICAL_MOVEMENT_TIME,
@@ -2128,7 +2129,7 @@ class OpusGreenNetCoordinator:
 
         # Control commands overtake queued status queries/refreshes so that a
         # burst of reconciliation traffic never delays a user action.
-        is_query = any(function.get("key") == "query" for function in functions)
+        is_query = any(function.get("key") == KEY_QUERY for function in functions)
         if background:
             priority = PRIORITY_BACKGROUND
         elif is_query:
@@ -2276,7 +2277,7 @@ class OpusGreenNetCoordinator:
         background: bool = False,
     ) -> None:
         """Query the current device status."""
-        functions = [{"key": "query", "value": "status"}]
+        functions = [{"key": KEY_QUERY, "value": "status"}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
         await self.async_send_command(device_id, functions, background=background)
 
