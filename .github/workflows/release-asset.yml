@@ -1,0 +1,41 @@
+name: Release asset
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the integration zip to"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-asset-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: true
+
+jobs:
+  attach-integration-zip:
+    runs-on: ubuntu-latest
+    name: Attach integration zip
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Pack integration
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          cd custom_components
+          zip -r "../opus-greennet-${RELEASE_TAG}.zip" opus_greennet
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          gh release upload "${RELEASE_TAG}" "opus-greennet-${RELEASE_TAG}.zip" \
+            --repo "${GITHUB_REPOSITORY}" --clobber

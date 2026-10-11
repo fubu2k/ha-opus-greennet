@@ -139,6 +139,14 @@ def _validate_service_device(
         )
 
 
+def _describe_setup_failure(err: Exception) -> str:
+    """Return a short, payload-free description of why gateway setup failed."""
+    if isinstance(err, HomeAssistantError) and err.translation_key:
+        reason = (err.translation_placeholders or {}).get("reason")
+        return f"{err.translation_key} ({reason})" if reason else err.translation_key
+    return f"{type(err).__name__}: {err}" if str(err) else type(err).__name__
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: OpusGreenNetConfigEntry
 ) -> bool:
@@ -150,6 +158,15 @@ async def async_setup_entry(
         await coordinator.async_setup()
     except (HomeAssistantError, OSError) as err:
         await coordinator.async_unload()
+        # The translated ConfigEntryNotReady text is deliberately generic.
+        # Record the precise cause so request_timeout, mqtt_unavailable and
+        # an unreachable gateway can be told apart in the log.
+        _LOGGER.warning(
+            "OPUS gateway %s is not ready, Home Assistant will retry: %s",
+            eag_id,
+            _describe_setup_failure(err),
+        )
+        _LOGGER.debug("Setup failure details for %s", eag_id, exc_info=err)
         raise ConfigEntryNotReady(
             translation_domain=DOMAIN,
             translation_key="gateway_unavailable",

@@ -12,7 +12,6 @@ CONF_EAG_ID: Final = "eag_id"
 # MQTT Topic patterns (EnOcean over IP specification)
 TOPIC_BASE: Final = "EnOcean"
 TOPIC_STREAM_TELEGRAM: Final = "{base}/{eag_id}/stream/telegram/{device_id}/from"
-TOPIC_STREAM_TELEGRAM_TO: Final = "{base}/{eag_id}/stream/telegram/{device_id}/to"
 TOPIC_STREAM_DEVICE: Final = "{base}/{eag_id}/stream/device/{device_id}"
 TOPIC_PUT_STATE: Final = "{base}/{eag_id}/put/devices/{device_id}/state"
 TOPIC_SUB_PUT_ANSWER_STATE: Final = "{base}/{eag_id}/putAnswer/devices/+/state"
@@ -122,16 +121,6 @@ INDEXED_STATE_CONTAINERS: Final = ("states", "transmitModes")
 KEY_SMOKE_ALARM: Final = "smokeAlarm"
 KEY_BATTERY_LOW_RWM: Final = "batteryLow"
 
-# Entity type to platform mapping
-ENTITY_PLATFORMS: Final = {
-    "light": "light",
-    "switch": "switch",
-    "cover": "cover",
-    "climate": "climate",
-    "binary_sensor": "binary_sensor",
-    "event": "event",
-}
-
 # Function keys used in EnOcean telegrams
 KEY_SWITCH: Final = "switch"
 KEY_DIMMER: Final = "dimValue"
@@ -185,9 +174,6 @@ STATE_ON: Final = "on"
 STATE_OFF: Final = "off"
 
 # Cover states
-COVER_OPEN: Final = "open"
-COVER_CLOSED: Final = "closed"
-COVER_STOP: Final = "stop"
 
 # Climate heater mode values
 HEATER_MODE_HEATING: Final = "heating"

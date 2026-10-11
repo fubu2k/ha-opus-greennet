@@ -227,7 +227,7 @@ class TestCommandBuilding:
     async def test_query_climate_status(self, coordinator):
         await coordinator.async_query_climate_status("DEV1")
         coordinator.async_send_command.assert_called_once_with(
-            "DEV1", [{"key": "query", "value": "status"}]
+            "DEV1", [{"key": "query", "value": "status"}], background=False
         )
 
 

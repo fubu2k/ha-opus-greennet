@@ -137,7 +137,9 @@ async def test_config_flow_reports_unresponsive_gateway(
 ):
     """A connected broker alone cannot validate an incorrect gateway ID."""
     mqtt_transport.reply = False
-    with patch("custom_components.opus_greennet.mqtt_transport.REQUEST_TIMEOUT", 0.01):
+    with patch(
+        "custom_components.opus_greennet.mqtt_transport.SETUP_REQUEST_TIMEOUT", 0.01
+    ):
         result = await configure_bridge(hass)
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "gateway_unavailable"}
@@ -154,7 +156,9 @@ async def test_setup_retries_and_cleans_subscriptions_for_unreachable_gateway(
     entry = result["result"]
     assert await hass.config_entries.async_unload(entry.entry_id)
     mqtt_transport.reply = False
-    with patch("custom_components.opus_greennet.mqtt_transport.REQUEST_TIMEOUT", 0.01):
+    with patch(
+        "custom_components.opus_greennet.coordinator.SETUP_REQUEST_TIMEOUT", 0.01
+    ):
         assert not await hass.config_entries.async_setup(entry.entry_id)
     assert entry.state is config_entries.ConfigEntryState.SETUP_RETRY
     assert mqtt_transport.subscriptions == []
@@ -285,6 +289,8 @@ async def test_pending_entity_command_is_cancelled_on_disconnect_or_reload(
                 await hass.async_block_till_done()
             else:
                 assert await hass.config_entries.async_reload(entry.entry_id)
+                # Phase 2 (stream subscriptions) runs in the background.
+                await hass.async_block_till_done()
             with pytest.raises(HomeAssistantError) as error:
                 await asyncio.wait_for(pending_call, 1)
             assert error.value.translation_key == error_key
