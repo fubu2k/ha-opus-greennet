@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-10-11
+
+Stable release of the cover movement and discovery improvements from v0.5.0b0, plus the reviewed gateway fixes for larger installations.
+
+### Added
+- Estimated opening/closing state for covers with a configured travel time, including partial travel, changed targets, Stop, and movement after restart (#55).
+- An integration ZIP attached to GitHub releases for manual installation.
+
+### Fixed
+- Bulk cover and switch commands no longer overwhelm the gateway with concurrent awaited requests. Control commands take priority, and each acknowledgement deadline starts after its request is published (#62).
+- Large retained MQTT snapshots no longer consume the initial setup probe's deadline. Device discovery loads in the background after the gateway responds (#66).
+- Discovery completes when a disconnect interrupts startup, including a quick reconnect inside the snapshot debounce window.
+- Repeated binary-sensor discovery avoids duplicate entity submissions while retaining removal and rediscovery support (#57).
+- Subscription acknowledgement waits use the subscription's actual QoS. Slow telemetry acknowledgements do not fail the gateway health check.
+- Setup logs distinguish request timeouts, MQTT disconnection, rejected requests, and network errors.
+
+### Changed
+- Awaited gateway requests are serialized across devices. Background status queries run after queued control commands.
+- Telemetry streams subscribe at QoS 0 to reduce retained-replay traffic; answer subscriptions remain at QoS 1. Rapid reconnects avoid repeatedly requesting complete device snapshots.
+- Moisture and HeatArea binary sensors use declarative descriptions while retaining their entity identities and state semantics (#58).
+
+### Upgrade notes
+- Home Assistant 2026.8 or newer remains supported. Restart Home Assistant after upgrading.
+- Large command batches can take longer to finish because requests are sent one at a time. Gateway acknowledgement does not prove that an actuator reached its target; cover movement and fallback positions remain estimates.
+- F6-05-01 leak sensors remain unknown until valid liquidDetected telemetry arrives. Missing data is not shown as dry, and invalid updates do not clear a known alarm.
+- Gateway outages mark entities unavailable and invalidate integration requests queued before the outage. The reported nightly gateway restart still requires manufacturer investigation.
+- AutoLock remains read-only pending manufacturer guidance.
+
+### Validation
+- 852 tests pass on Home Assistant 2026.8.2, 2026.9.4, and 2026.10.1, with Ruff and dependency checks.
+- Community testing of the contributor's transport implementation covered up to 24 covers in one call and startup with 82 devices and approximately 30,000 retained MQTT messages. The final interrupted-startup correction and preserved unknown leak state have automated regression coverage; no additional local hardware test was performed.
+
+Thanks to fubu2k for the gateway fixes, haxx-voyager and florian-hartung for the large-installation testing, and drldm for the cover observations and validation.
+
 ## [0.5.0b0] - 2026-10-03
 
 First beta of v0.5.0, building on the confirmed v0.4.0 stable release.
