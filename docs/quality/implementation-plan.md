@@ -37,6 +37,9 @@ work stops.
 
 - No direct commits to `main`, no version change, no `CHANGELOG.md` update.
 - No release, no merge, no automatic PR, no force-push.
+- One-time exception on explicit request: phases 1-5 were merged into `main`
+  by fast-forward to `367dd9a` and a `CHANGELOG.md` "Unreleased" entry was
+  added in `f400866`. This does not lift the rules for later phases.
 - No real device actions or configuration writes to hardware.
 - Unique IDs, entity IDs, topic paths, public services and device assignments stay unchanged.
 - OPUS wire values, channel zero, `notAvailable`, cover inversion, the STOP payload
@@ -48,7 +51,7 @@ work stops.
 ## Branch chain
 
 Phase 1 is based on `main` as verified at the start. Branch names are taken
-from each phase prompt; the names below for phases 6–7 are placeholders. Each following phase is
+from each phase prompt; later branches are based on `main` after the merge. Each following phase is
 based on the completed HEAD of the previous branch. No rebase, no squash, no
 deletion of earlier branches. If a branch already exists, it is compared with
 this documentation and never overwritten.
@@ -60,8 +63,8 @@ this documentation and never overwritten.
 | 3 | `fix/opus-q03-event-lifecycle` | `fix/opus-q02-state-ownership` | `16d9a45777cef8891fe8772963c8827b8a479798` | completed |
 | 4 | `fix/opus-q04-background-efficiency` | `fix/opus-q03-event-lifecycle` | `8ece6eaf7be8ce7ccdbf5c9cf54cb93449a10ea7` | completed |
 | 5 | `feat/opus-q05-strict-typing` | `fix/opus-q04-background-efficiency` | `bf2ad417559cdaee3b695274a37455476a356e6c` | completed |
-| 6 | `feat/opus-q06-…` | phase 5 | HEAD of phase 5 | open |
-| 7 | `feat/opus-q07-…` | phase 6 | HEAD of phase 6 | open |
+| 6 | – (metadata and exposure policy) | – | – | deferred (see below) |
+| 7 | `feat/opus-quality-scale-evidence` | `main` (phases 1-5 merged, CHANGELOG `f400866`) | `f4008667c0d42b202554fb0849ee3226b81b011a` | completed |
 
 A phase's HEAD SHA is never written into its own commit. It is reported in the
 chat and recorded as the base SHA in the next phase's documentation.
@@ -76,10 +79,14 @@ python -m pip check
 ruff check .
 ruff format --check .
 python -m mypy
-pytest -v --cov --cov-report=term-missing
+pytest -v --cov --cov-report=term-missing --cov-report=json:coverage.json
+python script/check_coverage.py coverage.json
+# plus three repetitions of the lifecycle and race regression suites
 ```
 
-The coverage threshold is `fail_under = 75` (`pyproject.toml`). `hassfest` only
+Since phase 7 the total coverage threshold is `fail_under = 97`
+(`pyproject.toml`, previously 75) and `script/check_coverage.py` requires more
+than 95 % for every integration module and 100 % for `config_flow.py`. `hassfest` only
 runs in CI (`home-assistant/actions/hassfest@master`) and cannot be executed
 locally. Since phase 5, `python -m mypy` (strict, configured in
 `[tool.mypy]` of `pyproject.toml`, `mypy==2.4.0` in `requirements_test.txt`)
@@ -152,6 +159,29 @@ updated in that phase.
 The proposals below keep their original working titles; their phase numbers
 are assigned by the next phase prompts.
 
+### Phase 6 – Metadata and exposure policy (deferred)
+
+- Deferred to a later point on request. The phase 6 prompt (entity metadata and
+  exposure policy) conflicts with exclusion A5 (no opt-in/exposure policies, no
+  change to entity count, enablement defaults or registry configuration). It
+  can only be scheduled once A5 is explicitly lifted for it. No phase 6 branch
+  exists.
+
+### Phase 7 – Quality scale evidence and CI (completed)
+
+- `custom_components/opus_greennet/quality_scale.yaml` with all 54 official
+  rule keys (done / todo / exempt with reasons). Self-assessment of a custom
+  integration, no official tier; `manifest.json` declares no `quality_scale`.
+- Evidence matrix rule -> implementation -> tests -> documentation in
+  `docs/quality/quality-scale-evidence.md`, checked against the YAML by
+  `tests/test_quality_scale.py` (official schema, rule keys and the applicable
+  hassfest validators).
+- Coverage 92.76 % -> above 97 % with new tests only; per-module gate
+  (`script/check_coverage.py`), `fail_under = 97`, repeated race suites in CI.
+- README: removal, known limitations and troubleshooting (broker / gateway /
+  radio actuator, ACK 200/201, retained state, estimates, missing request ID,
+  recovery). Details in `phases/phase-07.md`.
+
 ### Proposal – Extract a protocol/parsing module
 
 - Move pure functions out of `coordinator.py` into a new module (e.g. `protocol.py`):
@@ -190,17 +220,17 @@ are assigned by the next phase prompts.
   profile rules in `enocean_device.py` with unchanged values.
 - Unique IDs, entity count, translation keys and enablement defaults unchanged (A5);
   inventory tests protect this.
-- Close test gaps: `__init__.py` (72 % – service handlers `get_device_parameters`,
-  `reload_entry`, error paths of `_loaded_entry`). `light.py` rose from 85 % to
-  95 % with the phase 2 tests.
+- Test gaps of `__init__.py` were closed in phase 7 (tests only; the
+  unreachable `result is None` checks remain and are documented there).
 - Target modules: `entity.py`, `light.py`, `switch.py`, `cover.py`, `climate.py`,
   `event.py`, `sensor.py`, `binary_sensor.py`, `__init__.py` (tests only, or the
   dead `result is None` checks after agreement).
 
 ### Proposal – Documentation and quality gates
 
-- Extend the "Development" section of `README.md` with the quality commands;
-  complete docstrings and module descriptions; final report of the series.
+- The quality commands in the README, the coverage gates and the quality-scale
+  evidence were delivered in phase 7. Remaining: complete docstrings and
+  module descriptions; final report of the series.
 - The `mypy` CI step exists since phase 5.
 - Target modules: `README.md`, `docs/quality/*`, possibly `.github/workflows/tests.yml`, `pyproject.toml`.
 
