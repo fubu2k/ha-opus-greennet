@@ -335,6 +335,10 @@ class MQTTRequestManager:
             )
         finally:
             lock.release()
+            if not lock.locked() and self._locks.get(answer_topic) is lock:
+                # No owner and no waiter: drop the idle lock so the mapping
+                # does not grow with every answer topic ever used.
+                del self._locks[answer_topic]
 
     async def _async_request_locked(
         self,

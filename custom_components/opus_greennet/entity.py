@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Hashable, Mapping
+from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
@@ -21,6 +23,22 @@ from .diagnostics import log_entity_state_write
 from .enocean_device import EnOceanDevice
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def freeze_projection(value: Any) -> Hashable:
+    """Return an immutable, order-independent copy for change comparison."""
+    if isinstance(value, Mapping):
+        return tuple(
+            sorted(
+                ((str(key), freeze_projection(item)) for key, item in value.items()),
+                key=lambda pair: pair[0],
+            )
+        )
+    if isinstance(value, list | tuple):
+        return tuple(freeze_projection(item) for item in value)
+    if isinstance(value, set | frozenset):
+        return frozenset(freeze_projection(item) for item in value)
+    return value
 
 
 @callback
@@ -132,6 +150,9 @@ class OpusGreenNetEntity(Entity):
         self._gateway_device_id = gateway_device_id
         self._device = device
         self._channel_id = channel_id
+        # Immutable projection of the state last written by a coordinator
+        # dispatch. Any other write (commands, availability) clears it.
+        self._dispatched_projection: Hashable | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -173,10 +194,34 @@ class OpusGreenNetEntity(Entity):
         """Refresh availability without interpreting cached data as a new event."""
         self.async_write_ha_state()
 
+    def _visible_projection(self) -> Hashable | None:
+        """Return what Home Assistant would store, or None if not comparable."""
+        if self.hass is None or self.force_update:
+            return None
+        try:
+            calculated = self._async_calculate_state()
+            return freeze_projection((calculated.state, calculated.attributes))
+        except Exception:  # noqa: BLE001 - fail open: always write instead
+            return None
+
+    def _async_write_ha_state(self) -> None:
+        """Forget the dispatch projection whenever any path writes state."""
+        self._dispatched_projection = None
+        super()._async_write_ha_state()
+
     @callback
     def _handle_state_update(self, device: EnOceanDevice) -> None:
-        """Handle a coordinator state update."""
+        """Handle a coordinator state update.
+
+        A dispatch whose visible projection (state, availability, features and
+        attributes) equals the last dispatched write is not written again,
+        e.g. an RSSI-only update for a cover. Event entities override this
+        handler and are not affected.
+        """
         self._device = device
+        projection = self._visible_projection()
+        if projection is not None and projection == self._dispatched_projection:
+            return
         log_entity_state_write(
             _LOGGER,
             self.entity_id or self._attr_unique_id,
@@ -184,3 +229,4 @@ class OpusGreenNetEntity(Entity):
             self._channel_id,
         )
         self.async_write_ha_state()
+        self._dispatched_projection = projection

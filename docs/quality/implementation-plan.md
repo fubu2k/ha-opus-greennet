@@ -58,7 +58,7 @@ this documentation and never overwritten.
 | 1 | `feat/opus-q01-baseline` | `main` | `3e52fce31e7a2d503eef4820f4c706ebcfc751ab` | completed |
 | 2 | `fix/opus-q02-state-ownership` | `feat/opus-q01-baseline` | `ff164f9db7adde27dfa8c37ddf6c8cf350b633a0` | completed |
 | 3 | `fix/opus-q03-event-lifecycle` | `fix/opus-q02-state-ownership` | `16d9a45777cef8891fe8772963c8827b8a479798` | completed |
-| 4 | `feat/opus-q04-…` | phase 3 | HEAD of phase 3 | open |
+| 4 | `fix/opus-q04-background-efficiency` | `fix/opus-q03-event-lifecycle` | `8ece6eaf7be8ce7ccdbf5c9cf54cb93449a10ea7` | completed |
 | 5 | `feat/opus-q05-…` | phase 4 | HEAD of phase 4 | open |
 | 6 | `feat/opus-q06-…` | phase 5 | HEAD of phase 5 | open |
 | 7 | `feat/opus-q07-…` | phase 6 | HEAD of phase 6 | open |
@@ -103,19 +103,36 @@ updated in that phase.
 
 ### Open findings (not scheduled; require an explicit phase prompt)
 
-- F1 (from phase 1): `_apply_scalar_telemetry` dispatches `dbm` updates (fixed in Phase 3)
-  without resetting `last_button`/`last_button_action`, so the event entity
-  would fire the previous rocker event again. Code path proven, hardware
-  occurrence unverified. A fix needs explicit approval as a bug fix.
-  Target modules: `coordinator.py` (`_apply_scalar_telemetry`), `event.py`,
-  tests `tests/test_event_entity.py`, `tests/test_scalar_telemetry.py`.
+- F1 (from phase 1, fixed in phase 3): later dispatches (`dbm`, PUT answers,
+  metadata) replayed the previous rocker event because `last_button` /
+  `last_button_action` stayed set. Fixed by
+  `EnOceanDevice.clear_button_occurrence()` after the telegram dispatch.
 - O1 (from phase 2): an ACK with `httpStatus` 201 (SoftSmartAck, "will send
   later" per the vendor reference) is treated like 200, so the optimistic
   estimate is applied although the device may not have received the command
   yet. Changing this would change ACK semantics and is out of scope for the
   phase 2 prompt; documented only.
 
-### Phase 3 – Typing without behaviour change
+### Phase 3 – Event lifecycle (completed)
+
+- Transient button fields are cleared right after the dispatch of the
+  telegram that carried the press. Details in `phases/phase-03.md`.
+
+### Phase 4 – Background efficiency (completed)
+
+- Queued, not yet published background status checks are dropped when
+  feedback or a newer command supersedes them (`_reconcile_needed`).
+- Idle per-answer-topic locks are released from `MQTTRequestManager._locks`.
+- Dispatch-driven entity writes are skipped when the visible projection is
+  unchanged (`OpusGreenNetEntity._handle_state_update`).
+- Discovery timer churn was measured; no change (no evidenced need).
+- No change to delays (5 s / 20 s), timeouts, priorities, availability or
+  retained handling. Details and measurements in `phases/phase-04.md`.
+
+The proposals below keep their original working titles; their phase numbers
+are assigned by the next phase prompts.
+
+### Proposal – Typing without behaviour change
 
 - Starting point: `mypy` (default) reports 27 errors, `mypy --strict` 72 errors in 15 files.
 - Target modules: `mqtt_transport.py` (payload types `str | bytes | bytearray`,
@@ -133,7 +150,7 @@ updated in that phase.
 - Dynamic `getattr`/`setattr` paths are only typed or replaced by explicit access
   if behaviour and unique IDs stay identical.
 
-### Phase 4 – Extract a protocol/parsing module
+### Proposal – Extract a protocol/parsing module
 
 - Move pure functions out of `coordinator.py` into a new module (e.g. `protocol.py`):
   topic regexes, `_set_nested_property`, `_parse_value`, `_merge_device_data`,
@@ -147,7 +164,7 @@ updated in that phase.
 - Target modules: `coordinator.py`, new protocol module, `const.py` (read only),
   new tests `tests/test_protocol_contract.py`.
 
-### Phase 5 – Structure ownership and lifecycle in the coordinator
+### Proposal – Structure ownership and lifecycle in the coordinator
 
 - Move the cover movement estimate (`CoverMovement`, `_start_/_finish_/_clear_cover_movement`)
   and the reconciliation scheduler (`_schedule_/_cancel_reconciliation_queries`,
@@ -161,7 +178,7 @@ updated in that phase.
   `reconciliation.py`, tests `test_cover_movement.py`, `test_reconciliation_feedback.py`,
   `test_release_transport_safety.py`.
 
-### Phase 6 – Platform and entity consolidation
+### Proposal – Platform and entity consolidation
 
 - Move the repeated discovery listener pattern (`light`, `switch`, `cover`,
   `climate`, `event`) into shared helpers in `entity.py`. The optimistic post-ACK
@@ -178,7 +195,7 @@ updated in that phase.
   `event.py`, `sensor.py`, `binary_sensor.py`, `__init__.py` (tests only, or the
   dead `result is None` checks after agreement).
 
-### Phase 7 – Documentation and quality gates
+### Proposal – Documentation and quality gates
 
 - Extend the "Development" section of `README.md` with the quality commands;
   complete docstrings and module descriptions; final report of the series.

@@ -80,6 +80,8 @@ DEVICE_STREAM_FINALIZE_DELAY = 0.02
 TELEGRAM_FINALIZE_DELAY = 0.15
 RAW_MQTT_DEBUG_PAYLOAD_LIMIT = 500
 OUTBOUND_STATE_RECONCILIATION_DELAYS = (5, 20)
+# Internal reason for a background status check dropped before publish.
+SUPERSEDED = "superseded"
 GATEWAY_HEALTH_INTERVAL = timedelta(seconds=60)
 # Each broker/bridge reconnect re-requests the full device snapshot so
 # entities catch up without live telegrams. A flapping connection must not
@@ -166,6 +168,10 @@ class OpusGreenNetCoordinator:
         self._telegram_paths: dict[str, set[str]] = {}
         self._command_waiters: dict[str, int] = {}
         self._reconciling: set[tuple[str, int]] = set()
+        # Channels whose delayed status check is still wanted. A queued
+        # background check is published only while its channel is listed here;
+        # feedback or a newer command removes it before the request is sent.
+        self._reconcile_needed: set[tuple[str, int]] = set()
         self._control_topics: list[str] = []
         self._stream_topics: list[str] = []
         self._last_reconnect_at: float | None = None
@@ -520,6 +526,7 @@ class OpusGreenNetCoordinator:
             task.cancel()
         for device_id, channel_id in list(self._pending_reconciliation_queries):
             self._cancel_reconciliation_queries(device_id, channel_id)
+        self._reconcile_needed.clear()
         for pending in (self._pending_telegrams, self._pending_device_streams):
             for cancel in pending.values():
                 if cancel:
@@ -1274,6 +1281,15 @@ class OpusGreenNetCoordinator:
             self._pending_reconciliation_fields.pop(key, None)
             for cancel in self._pending_reconciliation_queries.pop(key, []):
                 cancel()
+        # A check already waiting in the send queue is superseded as well;
+        # it is dropped before publish unless a later timer wants it again.
+        self._reconcile_needed.difference_update(
+            {
+                key
+                for key in self._reconcile_needed
+                if key[0] == device_id and (channel_id is None or key[1] == channel_id)
+            }
+        )
 
     def _schedule_reconciliation_queries(
         self, device_id: str, channel_id: int, *, fields: set[str] | None = None
@@ -1304,7 +1320,10 @@ class OpusGreenNetCoordinator:
                     channel,
                     seconds,
                 )
-                if not self.available or (did, channel) in self._reconciling:
+                if not self.available:
+                    return
+                self._reconcile_needed.add((did, channel))
+                if (did, channel) in self._reconciling:
                     # Coalesce: one queued background query per channel is
                     # enough; never pile up behind a command burst.
                     return
@@ -1319,10 +1338,28 @@ class OpusGreenNetCoordinator:
             return
         key = (device_id, channel_id)
         self._reconciling.add(key)
+
+        def still_needed() -> bool:
+            # Evaluated once, immediately before publish. Consuming the flag
+            # lets a timer firing during the in-flight query start a new one.
+            if key not in self._reconcile_needed:
+                return False
+            self._reconcile_needed.discard(key)
+            return True
+
         try:
-            await self.async_query_device_status(device_id, channel_id, background=True)
-        except HomeAssistantError:
-            _LOGGER.debug("Could not reconcile OPUS state for %s", device_id)
+            await self.async_query_device_status(
+                device_id, channel_id, background=True, still_needed=still_needed
+            )
+        except HomeAssistantError as err:
+            if (err.translation_placeholders or {}).get("reason") == SUPERSEDED:
+                _LOGGER.debug(
+                    "Dropped superseded OPUS status check for %s channel %s",
+                    device_id,
+                    channel_id,
+                )
+            else:
+                _LOGGER.debug("Could not reconcile OPUS state for %s", device_id)
         finally:
             self._reconciling.discard(key)
 
@@ -2099,12 +2136,15 @@ class OpusGreenNetCoordinator:
         functions: list[dict[str, Any]],
         *,
         background: bool = False,
+        still_needed: Callable[[], bool] | None = None,
     ) -> None:
         """Send a command to a device using JSON state message.
 
         All requests pass the transport's global send queue (one in flight).
         ``background`` marks delayed reconciliation queries, which are only
         dispatched when no user command or interactive query is waiting.
+        ``still_needed`` (background only) is checked right before publish; a
+        superseded check is dropped without being sent.
         """
         topic = TOPIC_PUT_STATE.format(
             base=TOPIC_BASE, eag_id=self.eag_id, device_id=device_id
@@ -2130,6 +2170,8 @@ class OpusGreenNetCoordinator:
         def snapshot_feedback() -> None:
             # Run inside the request manager's endpoint lock, immediately before
             # publish. Feedback for an earlier queued command cannot confirm this one.
+            if background and still_needed is not None and not still_needed():
+                raise request_error("request_cancelled", device_id, SUPERSEDED)
             started_movements.update(self._start_cover_commands(device, functions))
             for movement in started_movements.values():
                 movement.accepted = False
@@ -2291,11 +2333,17 @@ class OpusGreenNetCoordinator:
         channel: int = 0,
         *,
         background: bool = False,
+        still_needed: Callable[[], bool] | None = None,
     ) -> None:
         """Query the current device status."""
         functions = [{"key": KEY_QUERY, "value": "status"}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
-        await self.async_send_command(device_id, functions, background=background)
+        if still_needed is None:
+            await self.async_send_command(device_id, functions, background=background)
+        else:
+            await self.async_send_command(
+                device_id, functions, background=background, still_needed=still_needed
+            )
 
     # ──────────────────────────────────────────────────────────────────────
     # Climate commands
