@@ -92,6 +92,15 @@ class EnOceanChannel:
     last_button_action: str | None = None
 
 
+@dataclass(frozen=True, eq=False)
+class ChannelStateSnapshot:
+    """Channel identity and revision captured before a command is awaited."""
+
+    channel_id: int
+    channel: EnOceanChannel | None
+    revision: int
+
+
 @dataclass
 class EnOceanDevice:
     """Represents an EnOcean device from the gateway."""
@@ -255,6 +264,76 @@ class EnOceanDevice:
         if channel_id not in self.channels:
             self.channels[channel_id] = EnOceanChannel(channel_id=channel_id)
         return self.channels[channel_id]
+
+    # Command estimates ------------------------------------------------------
+    #
+    # An accepted command acknowledgement is not device feedback. After the
+    # acknowledgement the commanded value is assumed, but only if the channel
+    # received no newer update while the command was awaited: the same channel
+    # object must still be in place and its ``state_revision`` must be
+    # unchanged. Feedback, discovery state and the coordinator's cover travel
+    # estimate all advance the revision, so they always win over an estimate.
+    # Estimates deliberately do not advance the revision themselves.
+
+    def snapshot_channel_state(self, channel_id: int) -> ChannelStateSnapshot:
+        """Capture a channel before awaiting a command acknowledgement."""
+        channel = self.channels.get(channel_id)
+        return ChannelStateSnapshot(
+            channel_id=channel_id,
+            channel=channel,
+            revision=channel.state_revision if channel is not None else 0,
+        )
+
+    def channel_state_unchanged(self, snapshot: ChannelStateSnapshot) -> bool:
+        """Return whether no newer channel update arrived since the snapshot."""
+        channel = self.channels.get(snapshot.channel_id)
+        return channel is snapshot.channel and (
+            channel is None or channel.state_revision == snapshot.revision
+        )
+
+    def _estimate_channel(
+        self, snapshot: ChannelStateSnapshot
+    ) -> EnOceanChannel | None:
+        if not self.channel_state_unchanged(snapshot):
+            return None
+        return self.get_or_create_channel(snapshot.channel_id)
+
+    def apply_switch_estimate(
+        self, snapshot: ChannelStateSnapshot, is_on: bool
+    ) -> bool:
+        """Assume an acknowledged switch command; return whether it applied."""
+        if (channel := self._estimate_channel(snapshot)) is None:
+            return False
+        channel.is_on = is_on
+        return True
+
+    def apply_dim_estimate(
+        self, snapshot: ChannelStateSnapshot, dim_value: int
+    ) -> bool:
+        """Assume an acknowledged ``dimValue`` (0-100); return whether it applied."""
+        if (channel := self._estimate_channel(snapshot)) is None:
+            return False
+        channel.brightness = dim_value
+        channel.is_on = dim_value > 0
+        return True
+
+    def apply_cover_position_estimate(
+        self, snapshot: ChannelStateSnapshot, position: int
+    ) -> bool:
+        """Assume an acknowledged OPUS position (0 = open); return whether applied."""
+        if (channel := self._estimate_channel(snapshot)) is None:
+            return False
+        channel.position = position
+        return True
+
+    def apply_cover_tilt_estimate(
+        self, snapshot: ChannelStateSnapshot, angle: int
+    ) -> bool:
+        """Assume an acknowledged tilt angle; return whether it applied."""
+        if (channel := self._estimate_channel(snapshot)) is None:
+            return False
+        channel.angle = angle
+        return True
 
     @staticmethod
     def _parse_number(

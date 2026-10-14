@@ -47,7 +47,8 @@ work stops.
 
 ## Branch chain
 
-Phase 1 is based on `main` as verified at the start. Each following phase is
+Phase 1 is based on `main` as verified at the start. Branch names are taken
+from each phase prompt; the names below for phases 4–7 are placeholders. Each following phase is
 based on the completed HEAD of the previous branch. No rebase, no squash, no
 deletion of earlier branches. If a branch already exists, it is compared with
 this documentation and never overwritten.
@@ -55,8 +56,8 @@ this documentation and never overwritten.
 | Phase | Branch | Predecessor | Base SHA | Status |
 |-------|--------|-------------|----------|--------|
 | 1 | `feat/opus-q01-baseline` | `main` | `3e52fce31e7a2d503eef4820f4c706ebcfc751ab` | completed |
-| 2 | `feat/opus-q02-…` (name given by the phase prompt) | `feat/opus-q01-baseline` | final HEAD of phase 1 | open |
-| 3 | `feat/opus-q03-…` | phase 2 | HEAD of phase 2 | open |
+| 2 | `fix/opus-q02-state-ownership` | `feat/opus-q01-baseline` | `ff164f9db7adde27dfa8c37ddf6c8cf350b633a0` | completed |
+| 3 | name given by the phase prompt | `fix/opus-q02-state-ownership` | final HEAD of phase 2 | open |
 | 4 | `feat/opus-q04-…` | phase 3 | HEAD of phase 3 | open |
 | 5 | `feat/opus-q05-…` | phase 4 | HEAD of phase 4 | open |
 | 6 | `feat/opus-q06-…` | phase 5 | HEAD of phase 5 | open |
@@ -82,28 +83,37 @@ runs in CI (`home-assistant/actions/hassfest@master`) and cannot be executed
 locally. `mypy` is **not** a project gate; in phase 1 it was run for information
 only, in a local environment outside the repository.
 
-## Phase overview (proposal from phase 1, checked against the actual code)
+## Phase overview
 
-The contents of phases 2–7 are proposals derived from the phase 1 analysis.
-The explicit prompt for each phase is authoritative; if it differs, the prompt
-wins and this plan is updated in that phase.
+Phase 2 was defined by its phase prompt (state ownership) and differs from the
+phase 1 proposal (event contract). The contents of phases 3–7 remain
+proposals derived from the phase 1 analysis. The explicit prompt for each
+phase is authoritative; if it differs, the prompt wins and this plan is
+updated in that phase.
 
-### Phase 2 – Event contract and proven event fix
+### Phase 2 – State ownership (completed)
 
-- Finding F1 (code path proven, hardware occurrence unproven): `_apply_scalar_telemetry`
-  sets `device.dbm` directly for `dbm`, without calling `update_from_telegram`,
-  and then dispatches `SIGNAL_DEVICE_STATE_UPDATE`. The transient fields
-  `last_button`/`last_button_action` of the previous rocker telegram stay set,
-  so `OpusGreenNetEvent._handle_state_update` would fire the same event again.
-  Reproduced locally with a script outside the repository (see `phase-01.md`).
-- Other dispatch paths without a reset: `_dispatch_cover_estimate` (covers only)
-  and `_handle_put_answer_state` (commands only). Not reachable for rockers in
-  the current code, but to be recorded in the contract.
-- Target modules: `event.py`, `coordinator.py` (`_apply_scalar_telemetry`, possibly
-  `_handle_put_answer_state`, `_dispatch_cover_estimate`), `enocean_device.py`
-  (reset helper), tests `tests/test_event_entity.py`, `tests/test_scalar_telemetry.py`.
-- Requires explicit approval as a bug fix in the phase prompt. Not related to
-  A4: this concerns transient event fields, not freshness or retain evaluation.
+- Optimistic post-ACK state rules moved from the light, switch and cover
+  entities into the domain layer (`EnOceanDevice.snapshot_channel_state`,
+  `channel_state_unchanged`, `apply_switch_estimate`, `apply_dim_estimate`,
+  `apply_cover_position_estimate`, `apply_cover_tilt_estimate`,
+  `ChannelStateSnapshot`). Climate and lock had no state mutation.
+- No change to ACK, availability, reconciliation, cover travel estimate,
+  dispatch or wire payloads; no new query or timer. Details in `phases/phase-02.md`.
+
+### Open findings (not scheduled; require an explicit phase prompt)
+
+- F1 (from phase 1): `_apply_scalar_telemetry` dispatches `dbm` updates
+  without resetting `last_button`/`last_button_action`, so the event entity
+  would fire the previous rocker event again. Code path proven, hardware
+  occurrence unverified. A fix needs explicit approval as a bug fix.
+  Target modules: `coordinator.py` (`_apply_scalar_telemetry`), `event.py`,
+  tests `tests/test_event_entity.py`, `tests/test_scalar_telemetry.py`.
+- O1 (from phase 2): an ACK with `httpStatus` 201 (SoftSmartAck, "will send
+  later" per the vendor reference) is treated like 200, so the optimistic
+  estimate is applied although the device may not have received the command
+  yet. Changing this would change ACK semantics and is out of scope for the
+  phase 2 prompt; documented only.
 
 ### Phase 3 – Typing without behaviour change
 
@@ -154,11 +164,16 @@ wins and this plan is updated in that phase.
 ### Phase 6 – Platform and entity consolidation
 
 - Move the repeated discovery listener pattern (`light`, `switch`, `cover`,
-  `climate`, `event`) and the optimistic post-ACK updates into shared helpers in `entity.py`.
+  `climate`, `event`) into shared helpers in `entity.py`. The optimistic post-ACK
+  rules already live in the domain layer since phase 2.
+- Candidate: the HeatArea "on" wire value (`"on"` for D1-4B-06, `"heating"`
+  otherwise) is chosen in `climate.py`; it could move next to the other
+  profile rules in `enocean_device.py` with unchanged values.
 - Unique IDs, entity count, translation keys and enablement defaults unchanged (A5);
   inventory tests protect this.
 - Close test gaps: `__init__.py` (72 % – service handlers `get_device_parameters`,
-  `reload_entry`, error paths of `_loaded_entry`), `light.py` (85 %).
+  `reload_entry`, error paths of `_loaded_entry`). `light.py` rose from 85 % to
+  95 % with the phase 2 tests.
 - Target modules: `entity.py`, `light.py`, `switch.py`, `cover.py`, `climate.py`,
   `event.py`, `sensor.py`, `binary_sensor.py`, `__init__.py` (tests only, or the
   dead `result is None` checks after agreement).

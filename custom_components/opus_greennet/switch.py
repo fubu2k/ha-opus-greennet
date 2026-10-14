@@ -112,20 +112,14 @@ class OpusGreenNetSwitch(OpusGreenNetEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
-        snapshot = self._channel_state_snapshot()
+        snapshot = self._device.snapshot_channel_state(self._channel_id)
         await self._coordinator.async_turn_on(self._device.device_id, self._channel_id)
-        if not self._channel_state_matches(snapshot):
-            return
-        channel = self._device.get_or_create_channel(self._channel_id)
-        channel.is_on = True
-        self.async_write_ha_state()
+        if self._device.apply_switch_estimate(snapshot, True):
+            self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
-        snapshot = self._channel_state_snapshot()
+        snapshot = self._device.snapshot_channel_state(self._channel_id)
         await self._coordinator.async_turn_off(self._device.device_id, self._channel_id)
-        if not self._channel_state_matches(snapshot):
-            return
-        channel = self._device.get_or_create_channel(self._channel_id)
-        channel.is_on = False
-        self.async_write_ha_state()
+        if self._device.apply_switch_estimate(snapshot, False):
+            self.async_write_ha_state()
