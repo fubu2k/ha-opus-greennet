@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.light import (
+from homeassistant.components.light import LightEntity
+from homeassistant.components.light.const import (
     ATTR_BRIGHTNESS,
     ColorMode,
-    LightEntity,
 )
-from homeassistant.components.light import (
+from homeassistant.components.light.const import (
     DOMAIN as LIGHT_DOMAIN,
 )
 from homeassistant.core import HomeAssistant, callback

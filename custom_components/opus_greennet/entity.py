@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Hashable, Mapping
-from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import DeviceInfo, Entity
+from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_registry import EntityRegistry
 
 from .const import DOMAIN
@@ -25,7 +25,7 @@ from .enocean_device import EnOceanDevice
 _LOGGER = logging.getLogger(__name__)
 
 
-def freeze_projection(value: Any) -> Hashable:
+def freeze_projection(value: object) -> Hashable:
     """Return an immutable, order-independent copy for change comparison."""
     if isinstance(value, Mapping):
         return tuple(
@@ -38,7 +38,9 @@ def freeze_projection(value: Any) -> Hashable:
         return tuple(freeze_projection(item) for item in value)
     if isinstance(value, set | frozenset):
         return frozenset(freeze_projection(item) for item in value)
-    return value
+    # An unknown unhashable value is replaced by a fresh object that never
+    # compares equal, so the entity writes (fail-open).
+    return value if isinstance(value, Hashable) else object()
 
 
 @callback

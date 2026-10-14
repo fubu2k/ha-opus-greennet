@@ -63,6 +63,10 @@ jobs:
           ruff check .
           ruff format --check .
 
+      - name: Check strict typing
+        # Configuration: [tool.mypy] in pyproject.toml (strict, all modules).
+        run: python -m mypy
+
       - name: Run tests
         run: pytest -v --cov --cov-report=term-missing
 

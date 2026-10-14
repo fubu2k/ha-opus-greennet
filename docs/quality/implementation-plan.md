@@ -48,7 +48,7 @@ work stops.
 ## Branch chain
 
 Phase 1 is based on `main` as verified at the start. Branch names are taken
-from each phase prompt; the names below for phases 4–7 are placeholders. Each following phase is
+from each phase prompt; the names below for phases 6–7 are placeholders. Each following phase is
 based on the completed HEAD of the previous branch. No rebase, no squash, no
 deletion of earlier branches. If a branch already exists, it is compared with
 this documentation and never overwritten.
@@ -59,7 +59,7 @@ this documentation and never overwritten.
 | 2 | `fix/opus-q02-state-ownership` | `feat/opus-q01-baseline` | `ff164f9db7adde27dfa8c37ddf6c8cf350b633a0` | completed |
 | 3 | `fix/opus-q03-event-lifecycle` | `fix/opus-q02-state-ownership` | `16d9a45777cef8891fe8772963c8827b8a479798` | completed |
 | 4 | `fix/opus-q04-background-efficiency` | `fix/opus-q03-event-lifecycle` | `8ece6eaf7be8ce7ccdbf5c9cf54cb93449a10ea7` | completed |
-| 5 | `feat/opus-q05-…` | phase 4 | HEAD of phase 4 | open |
+| 5 | `feat/opus-q05-strict-typing` | `fix/opus-q04-background-efficiency` | `bf2ad417559cdaee3b695274a37455476a356e6c` | completed |
 | 6 | `feat/opus-q06-…` | phase 5 | HEAD of phase 5 | open |
 | 7 | `feat/opus-q07-…` | phase 6 | HEAD of phase 6 | open |
 
@@ -75,13 +75,15 @@ python -m pip install --upgrade -r requirements_test.txt "homeassistant==<latest
 python -m pip check
 ruff check .
 ruff format --check .
+python -m mypy
 pytest -v --cov --cov-report=term-missing
 ```
 
 The coverage threshold is `fail_under = 75` (`pyproject.toml`). `hassfest` only
 runs in CI (`home-assistant/actions/hassfest@master`) and cannot be executed
-locally. `mypy` is **not** a project gate; in phase 1 it was run for information
-only, in a local environment outside the repository.
+locally. Since phase 5, `python -m mypy` (strict, configured in
+`[tool.mypy]` of `pyproject.toml`, `mypy==2.4.0` in `requirements_test.txt`)
+is a CI gate; in phases 1-4 it was run for information only.
 
 ## Phase overview
 
@@ -129,26 +131,26 @@ updated in that phase.
 - No change to delays (5 s / 20 s), timeouts, priorities, availability or
   retained handling. Details and measurements in `phases/phase-04.md`.
 
+### Phase 5 – Strict typing (completed)
+
+- All 18 integration modules pass `mypy --strict` with `warn_unreachable`
+  (base `bf2ad41`: 74 strict errors in 15 files). No `cast`, no
+  `type: ignore`, no `ignore_errors`; remaining `Any` only in Home Assistant
+  signatures, listed with reasons in `phases/phase-05.md`.
+- New `wire.py` separates raw OPUS wire data (`JsonObject`, `WireFunction`)
+  from the domain model and validates containers and fields at the MQTT/JSON
+  boundaries; `response_status()` centralises the unchanged 200/201 status
+  contract.
+- Dynamic `setattr`/`getattr` on channel fields replaced by explicit access;
+  typed `OpusGreenNetConfigEntry` used consistently; `probatio` imported
+  directly (runtime-identical since HA 2026.9).
+- `mypy==2.4.0` added as a test dependency and as a CI step. Typing-motivated
+  edge-case notes and the differential check against the base are in
+  `phases/phase-05.md`. This consumes the former "Typing without behaviour
+  change" proposal.
+
 The proposals below keep their original working titles; their phase numbers
 are assigned by the next phase prompts.
-
-### Proposal – Typing without behaviour change
-
-- Starting point: `mypy` (default) reports 27 errors, `mypy --strict` 72 errors in 15 files.
-- Target modules: `mqtt_transport.py` (payload types `str | bytes | bytearray`,
-  lambda inference), `enocean_device.py` (`heat_area_type`, `default_channel_id: int | None`),
-  `coordinator.py` (unparameterised `Callable`, `dict`, `list`; `CALLBACK_TYPE`
-  for timer handles; `started` annotation; delay tuple type), `entity.py`/`event.py`
-  (`entity_name: str | None`), `lock.py` (`LockEntityFeature(0)` instead of `0`;
-  same value), `binary_sensor.py`.
-- Optional mypy configuration in `pyproject.toml`. Whether `mypy` becomes a test
-  dependency or a CI step must be decided in the phase prompt (rule "no additional
-  dependencies without a concrete need").
-- Known limitation: the `voluptuous.Schema` vs. `probatio.Schema` mismatch in
-  HA 2026.10 (`__init__.py`, `config_flow.py`) is a stub-level type conflict;
-  it is not resolved through runtime changes.
-- Dynamic `getattr`/`setattr` paths are only typed or replaced by explicit access
-  if behaviour and unique IDs stay identical.
 
 ### Proposal – Extract a protocol/parsing module
 
@@ -199,7 +201,7 @@ are assigned by the next phase prompts.
 
 - Extend the "Development" section of `README.md` with the quality commands;
   complete docstrings and module descriptions; final report of the series.
-- Optional, only after an explicit decision: a CI step for `mypy`.
+- The `mypy` CI step exists since phase 5.
 - Target modules: `README.md`, `docs/quality/*`, possibly `.github/workflows/tests.yml`, `pyproject.toml`.
 
 ## Already solved (do not re-implement)

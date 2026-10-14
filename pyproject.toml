@@ -23,3 +23,9 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.14"
+files = ["custom_components/opus_greennet"]
+strict = true
+warn_unreachable = true
