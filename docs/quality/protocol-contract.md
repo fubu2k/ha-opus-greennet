@@ -1,250 +1,241 @@
-# OPUS-/EnOcean-MQTT-Protokollvertrag (Ist-Stand)
+# OPUS/EnOcean MQTT Protocol Contract (current behaviour)
 
-Stand: Basis `3e52fce31e7a2d503eef4820f4c706ebcfc751ab` (`main`), erfasst in Phase 1.
-Dieses Dokument beschreibt das **tatsächliche** Verhalten des Codes. Es ist der
-Maßstab für alle Folgephasen: Was hier steht, bleibt unverändert, außer eine
-Phase erlaubt ausdrücklich eine belegte Fehlerkorrektur.
+Baseline: `3e52fce31e7a2d503eef4820f4c706ebcfc751ab` (`main`), recorded in phase 1.
+This document describes the **actual** behaviour of the code. It is the
+reference for all following phases: everything listed here stays unchanged
+unless a phase explicitly permits a proven bug fix.
 
-Quelle des Herstellerprotokolls: `opus_mqtt_services_reference.md`. Wo der Code
-über die Referenz hinausgeht (Gateway-Aliasschlüssel, Mosquitto-Bridge-Topic),
-ist das vermerkt.
+Vendor protocol source: `opus_mqtt_services_reference.md`. Where the code goes
+beyond that reference (gateway alias keys, Mosquitto bridge topic), this is noted.
 
-Legende Verifikation: **[Code]** am Quelltext gelesen, **[Test]** durch
-vorhandene Tests abgesichert, **[Ref]** laut Herstellerreferenz, **[unbelegt]**
-weder durch Hardware noch durch Referenz belegt.
+Verification legend: **[Code]** read from source, **[Test]** covered by existing
+tests, **[Ref]** per vendor reference, **[unverified]** supported neither by
+hardware observation nor by the reference.
 
 ## 1. Topics
 
-Basis: `EnOcean/<EAG_ID>/…` (`TOPIC_BASE = "EnOcean"`). `<EAG_ID>` sind 8
-Hex-Zeichen, im Config Flow in Großbuchstaben normalisiert.
+Base: `EnOcean/<EAG_ID>/…` (`TOPIC_BASE = "EnOcean"`). `<EAG_ID>` is 8 hex
+characters, normalised to upper case by the config flow.
 
-### 1.1 Abonnements des Coordinators
+### 1.1 Coordinator subscriptions
 
-| Gruppe | Topic-Filter | QoS | Handler | Hinweis |
-|--------|--------------|-----|---------|---------|
-| Control (Setup-Phase 1) | `opus_greennet/<EAG_ID>/bridge/status` | 1 | `_handle_bridge_status` | Mosquitto-Bridge-Benachrichtigung, kein OPUS-Topic **[Code]** |
-| Control | `EnOcean/<EAG_ID>/getAnswer/config/system/uptime` | 1 | `_handle_system_uptime` | zugleich Antwort-Route des Request-Managers |
-| Control | `EnOcean/<EAG_ID>/getAnswer/config/system/info` | 1 | `_handle_system_info` | optional, nicht jede Firmware antwortet |
-| Control | `EnOcean/<EAG_ID>/putAnswer/devices/+/state` | 1 | `_handle_put_answer_state` | zugleich Antwort-Route |
-| Stream (Setup-Phase 2, einzeln nacheinander mit SUBACK) | `EnOcean/<EAG_ID>/getAnswer/devices/#` | 1 | `_handle_get_answer_devices` | Discovery-Antworten |
-| Stream | `EnOcean/<EAG_ID>/stream/devices/#` | 0 | `_handle_device_property_message` | Startup-Snapshot, flach |
-| Stream | `EnOcean/<EAG_ID>/stream/device/#` | 0 | `_handle_device_stream_message` | Live-Deltas |
-| Stream | `EnOcean/<EAG_ID>/stream/telegram/#` | 0 | `_handle_telegram_property_message` | Funktelegramme |
+| Group | Topic filter | QoS | Handler | Note |
+|-------|--------------|-----|---------|------|
+| Control (setup phase 1) | `opus_greennet/<EAG_ID>/bridge/status` | 1 | `_handle_bridge_status` | Mosquitto bridge notification, not an OPUS topic **[Code]** |
+| Control | `EnOcean/<EAG_ID>/getAnswer/config/system/uptime` | 1 | `_handle_system_uptime` | also a request manager answer route |
+| Control | `EnOcean/<EAG_ID>/getAnswer/config/system/info` | 1 | `_handle_system_info` | optional; not every firmware answers |
+| Control | `EnOcean/<EAG_ID>/putAnswer/devices/+/state` | 1 | `_handle_put_answer_state` | also an answer route |
+| Stream (setup phase 2, one at a time with SUBACK) | `EnOcean/<EAG_ID>/getAnswer/devices/#` | 1 | `_handle_get_answer_devices` | discovery answers |
+| Stream | `EnOcean/<EAG_ID>/stream/devices/#` | 0 | `_handle_device_property_message` | startup snapshot, flattened |
+| Stream | `EnOcean/<EAG_ID>/stream/device/#` | 0 | `_handle_device_stream_message` | live deltas |
+| Stream | `EnOcean/<EAG_ID>/stream/telegram/#` | 0 | `_handle_telegram_property_message` | radio telegrams |
 
-Die SUBACKs der Stream-Gruppe sind nur beratend (`required=False`). Ein
-fehlender SUBACK lässt den Health-Probe nicht scheitern. **[Code][Test]**
+SUBACKs of the stream group are advisory only (`required=False`); a missing
+SUBACK does not fail the health probe. **[Code][Test]**
 
-Temporäre Abonnements (QoS 1) legt der `MQTTRequestManager` nur für
-Antwort-Topics an, die nicht über eine registrierte Route abgedeckt sind
-(Profil, Konfiguration, Parameter). Registrierte Routen: Uptime-Antwort und
-`putAnswer/devices/+/state`. **[Code]**
+Temporary subscriptions (QoS 1) are created by `MQTTRequestManager` only for
+answer topics not covered by a registered route (profile, configuration,
+parameters). Registered routes: the uptime answer and `putAnswer/devices/+/state`. **[Code]**
 
-### 1.2 Publizierte Topics
+### 1.2 Published topics
 
-| Topic | Payload | QoS / Retain | Auslöser |
-|-------|---------|--------------|----------|
-| `…/get/config/system/uptime` | `""` | 1 / false | Setup, Health-Tick, Reconnect, Config Flow |
-| `…/get/devices` | `""` | 1 / false | nur bei Resync |
-| `…/get/config/system/info` | `""` | 1 / false | nur bei Resync, Antwort wird nicht abgewartet |
-| `…/put/devices/<DEV>/state` | `{"state": {"functions": [...]}}` | 1 / false | Befehle und Statusabfragen |
-| `…/get/devices/<DEV>/profile` | `""` | 1 / false | `async_get_device_profile` (derzeit kein Aufrufer im Integrationscode) |
-| `…/get/devices/<DEV>/configuration` | `""` | 1 / false | Service `get_device_configuration` |
-| `…/put/devices/<DEV>/configuration` | `json.dumps(config)` | 1 / false | Service `set_device_configuration` |
-| `…/get/devices/<DEV>/parameters` | `""` | 1 / false | Service `get_device_parameters` |
+| Topic | Payload | QoS / retain | Trigger |
+|-------|---------|--------------|---------|
+| `…/get/config/system/uptime` | `""` | 1 / false | setup, health tick, reconnect, config flow |
+| `…/get/devices` | `""` | 1 / false | resync only |
+| `…/get/config/system/info` | `""` | 1 / false | resync only, answer not awaited |
+| `…/put/devices/<DEV>/state` | `{"state": {"functions": [...]}}` | 1 / false | commands and status queries |
+| `…/get/devices/<DEV>/profile` | `""` | 1 / false | `async_get_device_profile` (currently no caller in the integration code) |
+| `…/get/devices/<DEV>/configuration` | `""` | 1 / false | service `get_device_configuration` |
+| `…/put/devices/<DEV>/configuration` | `json.dumps(config)` | 1 / false | service `set_device_configuration` |
+| `…/get/devices/<DEV>/parameters` | `""` | 1 / false | service `get_device_parameters` |
 
-Ungenutzte Konstanten in `const.py`: `TOPIC_STREAM_TELEGRAM`,
-`TOPIC_STREAM_DEVICE`, `TOPIC_GET_/PUT_(ANSWER_)LINK_TABLES`,
-`TOPIC_SUB_TELEGRAM_FROM`, `TOPIC_SUB_TELEGRAM_TO`, `TOPIC_SUB_DEVICE`,
-`TOPIC_SUB_DEVICES`, `TOPIC_SUB_GET_ANSWER`. **[Code]**
+Unused constants in `const.py`: `TOPIC_STREAM_TELEGRAM`, `TOPIC_STREAM_DEVICE`,
+`TOPIC_GET_/PUT_(ANSWER_)LINK_TABLES`, `TOPIC_SUB_TELEGRAM_FROM`,
+`TOPIC_SUB_TELEGRAM_TO`, `TOPIC_SUB_DEVICE`, `TOPIC_SUB_DEVICES`,
+`TOPIC_SUB_GET_ANSWER`. **[Code]**
 
-## 2. Antworten und Status
+## 2. Answers and status
 
-- `decode_response`: Payload muss ein nicht leeres JSON-Objekt sein. Ist
-  `header` vorhanden oder `require_status=True`, muss `header.httpStatus`
-  ganzzahlig sein (kein `bool`, kein nicht ganzzahliger `float`) und den Wert
-  **200 oder 201** haben. 201 steht laut Referenz für SoftSmartAck. **[Code][Test][Ref]**
-- Uptime: `systemUptimeResponse.uptime` muss `str`, `int` oder `float` sein
-  (kein `bool`), endlich und ≥ 0. Gespeichert wird `str(value)`. **[Code][Test]**
-- Bridge-Status: nur die Payloads `"0"` und `"1"` werden ausgewertet, alle
-  anderen ignoriert. **[Code][Test]**
-- `getAnswer/devices`: akzeptiert eine Liste, `{"devices": [...]}`, ein
-  einzelnes Objekt und Einträge der Form `{"device": {...}}`. Unterpfade mit
-  mehr als einer Ebene unter `getAnswer/devices/` (Profil, Konfiguration)
-  werden ignoriert. **[Code][Test]**
+- `decode_response`: the payload must be a non-empty JSON object. If `header`
+  is present or `require_status=True`, `header.httpStatus` must be an integer
+  (no `bool`, no non-integral `float`) equal to **200 or 201** (201 = SoftSmartAck
+  per reference). **[Code][Test][Ref]**
+- Uptime: `systemUptimeResponse.uptime` must be `str`, `int` or `float` (no `bool`),
+  finite and ≥ 0; stored as `str(value)`. **[Code][Test]**
+- Bridge status: only payloads `"0"` and `"1"` are evaluated; anything else is ignored. **[Code][Test]**
+- `getAnswer/devices`: accepts a list, `{"devices": [...]}`, a single object and
+  entries shaped `{"device": {...}}`. Sub-paths more than one level below
+  `getAnswer/devices/` (profile, configuration) are ignored. **[Code][Test]**
 
-## 3. Befehls-Payloads (Wire-Werte, unveränderlich)
+## 3. Command payloads (wire values, immutable)
 
-Format: `json.dumps({"state": {"functions": functions}})`, Werte immer als String.
+Format: `json.dumps({"state": {"functions": functions}})`; values are always strings.
 
-| Aktion | functions | Quelle |
+| Action | functions | Source |
 |--------|-----------|--------|
-| Schalter an/aus | `[{"key": "switch", "value": "on"/"off"}]` | `async_turn_on/off` |
-| Dimmer an ohne Helligkeit | `[{"key": "dimValue", "value": "100"}]` | Referenz 5.3 |
-| Dimmer aus | `[{"key": "dimValue", "value": "0"}]` | Referenz 5.3 |
-| Dimmer Helligkeit | `[{"key": "dimValue", "value": str(max(1, round(brightness_to_value((1, 100), b))))}]`; HA-Helligkeit 0 → aus | `light.py` |
-| Cover öffnen / schließen | `position` `"0"` / `"100"` | OPUS 0 = offen, 100 = geschlossen |
-| Cover Position | `position` `str(100 - ha_position)` | **Cover-Inversion** |
-| Cover Tilt | `angle` `str(ha_tilt)` (nicht invertiert) | `cover.py` |
-| Cover STOP | `[{"key": "stop", "value": "true"}]` | **STOP-Payload**, nie `position: "stop"` **[Ref][Test]** |
-| Statusabfrage | `[{"key": "query", "value": "status"}]` | Abgleich, Klima-Abfrage |
-| HeatArea Sollwert | `[{"key": "temperatureSetpoint", "value": str(temperature)}]` | ohne Kanal-Selektor |
-| HeatArea aus | `[{"key": "heaterMode", "value": "off"}]` | |
-| HeatArea an | D1-4B-06: `"on"`; D1-4B-05 und D1-4B-07: `"heating"` | **proprietäre HeatArea-Profile** |
+| Switch on/off | `[{"key": "switch", "value": "on"/"off"}]` | `async_turn_on/off` |
+| Dimmer on without brightness | `[{"key": "dimValue", "value": "100"}]` | reference 5.3 |
+| Dimmer off | `[{"key": "dimValue", "value": "0"}]` | reference 5.3 |
+| Dimmer brightness | `[{"key": "dimValue", "value": str(max(1, round(brightness_to_value((1, 100), b))))}]`; HA brightness 0 → off | `light.py` |
+| Cover open / close | `position` `"0"` / `"100"` | OPUS 0 = open, 100 = closed |
+| Cover position | `position` `str(100 - ha_position)` | **cover inversion** |
+| Cover tilt | `angle` `str(ha_tilt)` (not inverted) | `cover.py` |
+| Cover STOP | `[{"key": "stop", "value": "true"}]` | **STOP payload**, never `position: "stop"` **[Ref][Test]** |
+| Status query | `[{"key": "query", "value": "status"}]` | reconciliation, climate query |
+| HeatArea setpoint | `[{"key": "temperatureSetpoint", "value": str(temperature)}]` | no channel selector |
+| HeatArea off | `[{"key": "heaterMode", "value": "off"}]` | |
+| HeatArea on | D1-4B-06: `"on"`; D1-4B-05 and D1-4B-07: `"heating"` | **proprietary HeatArea profiles** |
 
-### 3.1 Kanal-Selektor (Kanal null)
+### 3.1 Channel selector (channel zero)
 
-`_with_channel_if_needed` stellt `{"key": "channel", "value": str(channel)}`
-voran, wenn `channel > 0` **oder** `channel_count > 1` gilt. Bei
-Mehrkanalgeräten wird damit auch **Kanal 0 explizit gesendet**. Einkanalgeräte
-erhalten keinen Selektor. Klima-Befehle senden nie einen Selektor. **[Code][Test]**
+`_with_channel_if_needed` prepends `{"key": "channel", "value": str(channel)}`
+when `channel > 0` **or** `channel_count > 1`. Multi-channel devices therefore
+**send channel 0 explicitly**; single-channel devices get no selector. Climate
+commands never send a selector. **[Code][Test]**
 
-Eingehend gilt: Fehlt der Selektor, ist der Default-Kanal 0. Ist ein Selektor
-fehlerhaft (negativ, keine ganze Zahl, `bool`), wird **nicht** auf Kanal 0
-ausgewichen. Funktionen ohne eigenen gültigen Kanal werden dann verworfen
-(`_parse_channel_id`). **[Code][Test]**
+Inbound: without a selector the default channel is 0. A malformed selector
+(negative, non-integral, `bool`) does **not** fall back to channel 0; functions
+without their own valid channel are then dropped (`_parse_channel_id`). **[Code][Test]**
 
-## 4. Eingehende Werte (Validierung in `EnOceanDevice.update_from_telegram`)
+## 4. Inbound values (validation in `EnOceanDevice.update_from_telegram`)
 
-| Schlüssel | Gültige Werte | Bei `notAvailable` | Bei ungültigem Wert |
-|-----------|---------------|--------------------|---------------------|
-| `switch`, `localControl` | `on` / `off` | ignoriert | ignoriert |
-| `dimValue` | ganzzahlig 0–100; setzt `is_on = value > 0` | ignoriert | ignoriert |
-| `position`, `angle` | ganzzahlig 0–100 | ignoriert | ignoriert |
-| `verticalMovementTime` | ≥ 0 | ignoriert | ignoriert |
-| `rotationTime` | `noRotation` → 0; Zahl ≥ 0 | ignoriert | ignoriert |
-| `energy`, `power` | endliche Zahl | ignoriert | ignoriert |
-| `liquidDetected`, `windowOpen`, `summerMode` | bool oder `true`/`false` | ignoriert | ignoriert |
-| `smokeAlarm`, RWM-`alarm` | `on`/`off`, `alarm`/`idle`, bool | – | **setzt `None`** |
-| `batteryLow` | `low`/`ok`, bool | – | **setzt `None`** |
-| `batteryLevel` | 0–100, optionales `%`-Suffix | **setzt `None`** | ignoriert |
-| `motionDetector`, SMS-`motionDetected` | `detected`/`noMotion`, bool | – | **setzt `None`** |
-| `illuminance`, SMS-`illumination`, `supplyVoltage` | ≥ 0 | **setzt `None`** | ignoriert |
-| `handleState`, Griff-`handle` | `open`/`closed`/`tilted`, `tilt` → `tilted` | – | **setzt `None`** |
-| `lock` | `locked`/`unlocked` | – | **setzt `None`** |
-| `unlockRequest`, AutoLock-`unlock` | `requested`/`notRequested`, bool | – | **setzt `None`** |
-| `mechanicsFault`, AutoLock-`mechanics` | `error`/`ok`, bool | – | **setzt `None`** |
-| `temperature`, `temperatureSetpoint` | 0–40 | **setzt `None`** | ignoriert |
-| `humidity` | 0–100 | **setzt `None`** | ignoriert |
-| `feedTemperature` | 0–80 | **setzt `None`** | ignoriert |
-| `energyConsumption` | 0–10 | **setzt `None`** | ignoriert |
-| `heaterMode` | `heating`, `on`, `off`, `autoOff`, `configIncomplete`, `error` | ignoriert | ignoriert |
-| `thermalMode` | `heating` / `cooling` | ignoriert | ignoriert |
-| `powerState` | `active` / `inactive` | ignoriert | ignoriert |
-| `temperatureOrigin` | `external` / `internal` | ignoriert | ignoriert |
-| `actuatorDeactivated` | `info` / `reset` | ignoriert | ignoriert |
-| `actuatorLowBattery` | `warning` / `reset` | ignoriert | ignoriert |
-| `actuatorNotResponding` | `warning` / `error` / `reset` | ignoriert | ignoriert |
-| `missingTemperature` | `info` / `warning` / `error` / `reset` | ignoriert | ignoriert |
-| `circuitInUse` | `error` / `reset` | ignoriert | ignoriert |
-| `buttonA0`, `buttonAI`, `buttonB0`, `buttonBI`, `multipleButtons` | `pressed` / `released` | – | ignoriert |
+| Key | Valid values | On `notAvailable` | On invalid value |
+|-----|--------------|-------------------|------------------|
+| `switch`, `localControl` | `on` / `off` | ignored | ignored |
+| `dimValue` | integer 0–100; sets `is_on = value > 0` | ignored | ignored |
+| `position`, `angle` | integer 0–100 | ignored | ignored |
+| `verticalMovementTime` | ≥ 0 | ignored | ignored |
+| `rotationTime` | `noRotation` → 0; number ≥ 0 | ignored | ignored |
+| `energy`, `power` | finite number | ignored | ignored |
+| `liquidDetected`, `windowOpen`, `summerMode` | bool or `true`/`false` | ignored | ignored |
+| `smokeAlarm`, RWM `alarm` | `on`/`off`, `alarm`/`idle`, bool | – | **sets `None`** |
+| `batteryLow` | `low`/`ok`, bool | – | **sets `None`** |
+| `batteryLevel` | 0–100, optional `%` suffix | **sets `None`** | ignored |
+| `motionDetector`, SMS `motionDetected` | `detected`/`noMotion`, bool | – | **sets `None`** |
+| `illuminance`, SMS `illumination`, `supplyVoltage` | ≥ 0 | **sets `None`** | ignored |
+| `handleState`, handle `handle` | `open`/`closed`/`tilted`, `tilt` → `tilted` | – | **sets `None`** |
+| `lock` | `locked`/`unlocked` | – | **sets `None`** |
+| `unlockRequest`, AutoLock `unlock` | `requested`/`notRequested`, bool | – | **sets `None`** |
+| `mechanicsFault`, AutoLock `mechanics` | `error`/`ok`, bool | – | **sets `None`** |
+| `temperature`, `temperatureSetpoint` | 0–40 | **sets `None`** | ignored |
+| `humidity` | 0–100 | **sets `None`** | ignored |
+| `feedTemperature` | 0–80 | **sets `None`** | ignored |
+| `energyConsumption` | 0–10 | **sets `None`** | ignored |
+| `heaterMode` | `heating`, `on`, `off`, `autoOff`, `configIncomplete`, `error` | ignored | ignored |
+| `thermalMode` | `heating` / `cooling` | ignored | ignored |
+| `powerState` | `active` / `inactive` | ignored | ignored |
+| `temperatureOrigin` | `external` / `internal` | ignored | ignored |
+| `actuatorDeactivated` | `info` / `reset` | ignored | ignored |
+| `actuatorLowBattery` | `warning` / `reset` | ignored | ignored |
+| `actuatorNotResponding` | `warning` / `error` / `reset` | ignored | ignored |
+| `missingTemperature` | `info` / `warning` / `error` / `reset` | ignored | ignored |
+| `circuitInUse` | `error` / `reset` | ignored | ignored |
+| `buttonA0`, `buttonAI`, `buttonB0`, `buttonBI`, `multipleButtons` | `pressed` / `released` | – | ignored |
 
-Profilgebundene Aliasse (IQ-DOT 1.21.30): `alarm` nur für F6-05-02,
-`motionDetected`/`illumination` nur für A5-07-01/03, `handle` nur für
-Griffprofile, `unlock`/`mechanics` nur für D2-06-40. **[Code][Test]**
+Profile-bound aliases (IQ-DOT 1.21.30): `alarm` only for F6-05-02,
+`motionDetected`/`illumination` only for A5-07-01/03, `handle` only for handle
+profiles, `unlock`/`mechanics` only for D2-06-40. **[Code][Test]**
 
-Schneller Pfad (`stream/device/<DEV>/batteryLevel|dbm`): ohne Debounce.
-`dbm` als Ganzzahl, `notAvailable` → `None`. Ungültige Werte werden verworfen.
-Ein älterer gepufferter Skalarwert wird verworfen, damit er den neueren nicht
-überschreibt. **[Code][Test]**
+Fast path (`stream/device/<DEV>/batteryLevel|dbm`): no debounce; `dbm` as an
+integer, `notAvailable` → `None`; invalid values are dropped; an older buffered
+scalar is discarded so it cannot overwrite the newer one. **[Code][Test]**
 
-RWM (F6-05-02): Wertslots in `transmitModes` ohne Schlüssel werden als
-`smokeAlarm` (Index 0) und `batteryLow` (Index 1) aufgelöst. **[Code][Test]**
+RWM (F6-05-02): value-only slots in `transmitModes` are resolved as `smokeAlarm`
+(index 0) and `batteryLow` (index 1). **[Code][Test]**
 
-## 5. Telegramme (`stream/telegram`)
+## 5. Telegrams (`stream/telegram`)
 
-- Flach: `…/telegram/<DEV>/from/functions/<i>/key|value`, ebenso `to/…`, oder
-  flach mit `direction`-Feld.
-- Vollständiges JSON: `…/telegram/<DEV>`, `…/from`, `…/to`. Optional unter
-  `telegram` gekapselt, `state` wird eingeflacht.
-- Ein Rahmen endet nach 0,15 s Ruhe, bei Richtungswechsel oder bei einem
-  wiederholten Pfad mit bereits vollständigem Paar (schnelles Drücken und
-  Loslassen bleibt erhalten).
-- `from` mit `direction = "to"` wird verworfen.
-- `to` (ausgehend) wird verworfen, solange ein lokaler Befehl auf seine ACK
-  wartet (`_command_waiters`). Sonst wird es optimistisch angewendet
-  (bridge-native bzw. HomeKit-Befehle), nur mit `KNOWN_STATE_KEYS`,
-  `channel` und `stop`, und danach wird der Abgleich geplant.
-- Unbekanntes Gerät mit Telegramm: Ein Platzhaltergerät wird angelegt. Ein
-  Discovery-Signal geht nur, wenn ein `entity_type` bestimmbar ist. **[Code][Test]**
+- Flattened: `…/telegram/<DEV>/from/functions/<i>/key|value`, likewise `to/…`,
+  or flat with a `direction` field.
+- Complete JSON: `…/telegram/<DEV>`, `…/from`, `…/to`; optionally wrapped in
+  `telegram`; `state` is flattened.
+- A frame ends after 0.15 s of silence, on a direction change, or when a path
+  repeats while a complete pair already exists (fast press/release is preserved).
+- `from` with `direction = "to"` is discarded.
+- `to` (outbound) is discarded while a local command awaits its ACK
+  (`_command_waiters`); otherwise it is applied optimistically (bridge-native or
+  HomeKit commands), restricted to `KNOWN_STATE_KEYS`, `channel` and `stop`, and
+  reconciliation is scheduled afterwards.
+- Unknown device with a telegram: a placeholder device is created; a discovery
+  signal is only sent if an `entity_type` can be determined. **[Code][Test]**
 
-## 6. Retain-Verhalten (bestehende Logik, eingefroren nach A4)
+## 6. Retain behaviour (existing logic, frozen by A4)
 
-| Eingang | Retained-Nachricht |
-|---------|--------------------|
-| `stream/devices/#` | verarbeitet (Snapshot, Discovery); Debug-Rohlog unterdrückt |
-| `stream/device/#` | verarbeitet; Debug-Rohlog unterdrückt; Latenzlog nur live |
-| `stream/telegram/#` | **verworfen** (keine Events, kein Zustand) |
-| `getAnswer/devices/#` | **verworfen** |
-| `putAnswer/devices/+/state` | an Request-Manager geroutet (der retained ignoriert), kein Zustand |
-| Request-Antworten allgemein | `handle_response` ignoriert retained |
-| Uptime-Antwort | geroutet; `gateway_uptime` wird aus der Payload aktualisiert (nur Anzeige) |
-| System-Info, Bridge-Status | ohne Retain-Prüfung ausgewertet |
+| Input | Retained message |
+|-------|------------------|
+| `stream/devices/#` | processed (snapshot, discovery); raw debug log suppressed |
+| `stream/device/#` | processed; raw debug log suppressed; latency log only for live messages |
+| `stream/telegram/#` | **discarded** (no events, no state) |
+| `getAnswer/devices/#` | **discarded** |
+| `putAnswer/devices/+/state` | routed to the request manager (which ignores retained), no state |
+| Request answers in general | `handle_response` ignores retained |
+| Uptime answer | routed; `gateway_uptime` is updated from the payload (display only) |
+| System info, bridge status | evaluated without a retain check |
 
-Weitere bestehende Freshness-Regel: Bei Rediscovery eines bekannten Geräts wird
-der Snapshot-Zustand nur angewendet, wenn das letzte Live-Update nicht neuer
-ist als `_resync_requested_at`. Andernfalls werden nur `rotationTime` bzw.
-`channel` übernommen. Button-Keys aus `stream/devices` gelten nie als
-Ereignis. **[Code][Test]**
+Additional existing freshness rule: on rediscovery of a known device, the
+snapshot state is only applied if the last live update is not newer than
+`_resync_requested_at`; otherwise only `rotationTime`/`channel` are applied.
+Button keys from `stream/devices` are never treated as occurrences. **[Code][Test]**
 
-## 7. Verfügbarkeit, Health und Zeiten (eingefroren nach A1–A3)
+## 7. Availability, health and timing (frozen by A1–A3)
 
-- `coordinator.available` siehe `implementation-plan.md` (A2). Alle Entities
-  übernehmen diesen Wert.
-- Health-Tick alle 60 s, nur wenn MQTT verbunden ist und die Bridge nicht als
-  getrennt gemeldet ist. `resync = not _gateway_available`.
-- Reconnect (MQTT oder Bridge): Refresh. Ein voller Snapshot wird höchstens
-  einmal je 60 s angefordert, außerdem immer, solange Phase 2 unvollständig ist.
-- Disconnect oder Bridge-down: Verfügbarkeit `False`, offene Requests werden
-  abgebrochen, Hintergrundarbeit wird verworfen (Telegramm- und Delta-Puffer,
-  Abgleich-Timer, Cover-Schätzungen, Tasks).
-- Health-Probe-Fehler (`HomeAssistantError`, `TimeoutError`): Verfügbarkeit
-  `False`, offene Requests mit `gateway_unavailable` abgebrochen.
-- Ein Befehls-Timeout führt zu `request_timeout`, nur für diese Aktion. Kein
-  Retry, keine Änderung der Verfügbarkeit.
-- Debounce-Zeiten: Discovery 2 s nach der letzten Nachricht, Delta-Finalisierung
-  0,02 s, Telegramm-Finalisierung 0,15 s.
-- Abgleich nach Befehl: 5 s und 20 s. Cover mit Bewegungsschätzung: Restlaufzeit
-  plus 5 s Gnadenfrist, dann +10 s und +20 s.
+- `coordinator.available` see `implementation-plan.md` (A2); every entity mirrors it.
+- Health tick every 60 s, only while MQTT is connected and the bridge is not
+  reported as disconnected; `resync = not _gateway_available`.
+- Reconnect (MQTT or bridge): refresh; a full snapshot is requested at most once
+  per 60 s, and always while setup phase 2 is incomplete.
+- Disconnect / bridge down: availability `False`, pending requests cancelled,
+  background work discarded (telegram and delta buffers, reconciliation timers,
+  cover estimates, tasks).
+- Health probe failure (`HomeAssistantError`, `TimeoutError`): availability
+  `False`, pending requests cancelled with `gateway_unavailable`.
+- A command timeout raises `request_timeout` for that action only; no retry,
+  no availability change.
+- Debounce times: discovery 2 s after the last message, delta finalisation 0.02 s,
+  telegram finalisation 0.15 s.
+- Reconciliation after a command: 5 s and 20 s; covers with a movement estimate:
+  remaining travel incl. 5 s grace, then +10 s and +20 s.
 
-## 8. Entity-Inventar und Identitäten (eingefroren nach A5)
+## 8. Entity inventory and identities (frozen by A5)
 
-Gerätekennung: `(opus_greennet, "<EAG>_<DEV>")`, Gateway: `(opus_greennet, "<EAG>")`.
+Device identifier: `(opus_greennet, "<EAG>_<DEV>")`; gateway: `(opus_greennet, "<EAG>")`.
 
-| Plattform | Bedingung | Unique ID | Default |
-|-----------|-----------|-----------|---------|
-| light | `entity_type == "light"`, je Kanal | `<EAG>_<DEV>`, bei `channel_count > 1`: `<EAG>_<DEV>_ch<n>` | aktiv |
-| switch | `entity_type == "switch"`, je Kanal | wie light | aktiv |
-| cover | `entity_type == "cover"`, je Kanal | wie light | aktiv |
-| climate | `entity_type == "climate"` | `<EAG>_<DEV>` | aktiv |
-| event | `entity_type == "event"` (F6-02-xx, F6-03-xx) | `<EAG>_<DEV>` | aktiv |
-| lock | D2-06-40 | `<EAG>_<DEV>_autolock` (read-only) | aktiv |
-| sensor | HeatArea: `humidity`; D1-4B-05: `feed_temperature`; D1-4B-07: `energy_consumption`; SMS: `illuminance`, `supply_voltage`, `battery_level`; Griff: `handle_state`; D2-06-40: `unlock_request` | `<EAG>_<DEV>_<suffix>` | aktiv |
-| sensor | **jedes** entdeckte Gerät: `signal_strength` | `<EAG>_<DEV>_signal_strength` | **deaktiviert** |
-| binary_sensor | SMS: `motion`; Griff: `handle_open`, `handle_tilt`, `handle_closed`; D2-06-40: `mechanics_fault`; RWM: `smoke_alarm`, `battery_low`; Beschreibungen: `liquid_detected` (F6-05-01), `window_open`, `actuator_not_responding`, `missing_temperature` (HeatArea), `actuator_low_battery`, `actuator_deactivated` (D1-4B-05), `circuit_in_use` (D1-4B-06) | `<EAG>_<DEV>_<key>` | aktiv |
+| Platform | Condition | Unique ID | Default |
+|----------|-----------|-----------|---------|
+| light | `entity_type == "light"`, per channel | `<EAG>_<DEV>`, with `channel_count > 1`: `<EAG>_<DEV>_ch<n>` | enabled |
+| switch | `entity_type == "switch"`, per channel | as light | enabled |
+| cover | `entity_type == "cover"`, per channel | as light | enabled |
+| climate | `entity_type == "climate"` | `<EAG>_<DEV>` | enabled |
+| event | `entity_type == "event"` (F6-02-xx, F6-03-xx) | `<EAG>_<DEV>` | enabled |
+| lock | D2-06-40 | `<EAG>_<DEV>_autolock` (read-only) | enabled |
+| sensor | HeatArea: `humidity`; D1-4B-05: `feed_temperature`; D1-4B-07: `energy_consumption`; SMS: `illuminance`, `supply_voltage`, `battery_level`; handle: `handle_state`; D2-06-40: `unlock_request` | `<EAG>_<DEV>_<suffix>` | enabled |
+| sensor | **every** discovered device: `signal_strength` | `<EAG>_<DEV>_signal_strength` | **disabled** |
+| binary_sensor | SMS: `motion`; handle: `handle_open`, `handle_tilt`, `handle_closed`; D2-06-40: `mechanics_fault`; RWM: `smoke_alarm`, `battery_low`; descriptions: `liquid_detected` (F6-05-01), `window_open`, `actuator_not_responding`, `missing_temperature` (HeatArea), `actuator_low_battery`, `actuator_deactivated` (D1-4B-05), `circuit_in_use` (D1-4B-06) | `<EAG>_<DEV>_<key>` | enabled |
 
-Registry-Migrationen (bestehend, unverändert): Legacy-Mehrkanal
-`<EAG>_<DEV>` → `<EAG>_<DEV>_ch0` (light, switch), Fork-Suffixe
-`_illumination` → `_illuminance` und `_window_handle_lock` → `_autolock`.
+Registry migrations (existing, unchanged): legacy multi-channel
+`<EAG>_<DEV>` → `<EAG>_<DEV>_ch0` (light, switch); fork suffixes
+`_illumination` → `_illuminance` and `_window_handle_lock` → `_autolock`.
 
-## 9. Services (öffentlich, unverändert)
+## 9. Services (public, unchanged)
 
-`opus_greennet.get_device_configuration` (nur mit Response),
+`opus_greennet.get_device_configuration` (response only),
 `opus_greennet.set_device_configuration`, `opus_greennet.get_device_parameters`
-(nur mit Response), `opus_greennet.reload_entry`. Alle sind Admin-Services
-mit optionalem `config_entry_id`.
+(response only), `opus_greennet.reload_entry`. All are admin services with an
+optional `config_entry_id`.
 
-## 10. Dispatcher-Signale (intern)
+## 10. Dispatcher signals (internal)
 
-`opus_greennet_device_discovered_<EAG>` (Payload: Gerät),
-`opus_greennet_device_state_update_<EAG>_<DEV>` (Payload: Gerät),
-`opus_greennet_availability_update_<EAG>` (ohne Payload),
-`opus_greennet_device_removed_<EAG>` (Payload: `device_id`).
+`opus_greennet_device_discovered_<EAG>` (payload: device),
+`opus_greennet_device_state_update_<EAG>_<DEV>` (payload: device),
+`opus_greennet_availability_update_<EAG>` (no payload),
+`opus_greennet_device_removed_<EAG>` (payload: `device_id`).
 
-## 11. Nicht verifizierbar in dieser Umgebung
+## 11. Not verifiable in this environment
 
-- Reales Gateway-Verhalten (Firmware-Varianten, Retain-Flags, QoS, Reihenfolge
-  und Timing der Topics) ist **[unbelegt]**. Alle Aussagen oben stammen aus Code,
-  Tests und Herstellerreferenz, nicht aus Hardwarebeobachtung.
-- Ob das Gateway für Wippen `stream/device/<DEV>/dbm` publiziert (Relevanz von
-  Befund F1), ist **[unbelegt]**.
-- Ob der Mosquitto-Bridge-Status retained gesendet wird, ist **[unbelegt]**.
+- Real gateway behaviour (firmware variants, retain flags, QoS, ordering and
+  timing of topics) is **[unverified]**; every statement above comes from code,
+  tests and the vendor reference, not from hardware observation.
+- Whether the gateway publishes `stream/device/<DEV>/dbm` for rockers (relevance
+  of finding F1) is **[unverified]**.
+- Whether the Mosquitto bridge status is published as retained is **[unverified]**.

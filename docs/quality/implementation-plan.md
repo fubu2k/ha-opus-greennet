@@ -1,74 +1,73 @@
-# Qualitätsreihe OPUS GreenNet – Implementierungsplan
+# OPUS GreenNet Quality Series – Implementation Plan
 
-Dieses Dokument verankert die sequenzielle Qualitätsreihe für
-`fubu2k/ha-opus-greennet` dauerhaft im Repository. Es wird in jeder Phase
-fortgeschrieben. Details je Phase stehen in `docs/quality/phases/phase-NN.md`,
-der Protokollvertrag in `docs/quality/protocol-contract.md`.
+This document anchors the sequential quality series for
+`fubu2k/ha-opus-greennet` in the repository. It is updated in every phase.
+Per-phase details live in `docs/quality/phases/phase-NN.md`; the protocol
+contract lives in `docs/quality/protocol-contract.md`.
 
-## Ziel
+## Goal
 
-Codequalität, Wartbarkeit, Testbarkeit, Typisierung und Dokumentation der
-bestehenden OPUS-/EnOcean-MQTT-Integration verbessern. Das funktionale
-Verhalten bleibt erhalten, soweit eine Phase nicht ausdrücklich eine
-nachgewiesene Fehlerkorrektur erlaubt.
+Improve code quality, maintainability, testability, typing and documentation
+of the existing OPUS/EnOcean MQTT integration. Functional behaviour is
+preserved unless a phase explicitly permits a proven bug fix.
 
-## Repository-Ziel
+## Repository target
 
-- Ziel-Repository: `fubu2k/ha-opus-greennet` (Remote `origin`, Standard-Branch `main`).
-- Verweise auf `kegelmeier/ha-opus-greennet` in `CLAUDE.md`, `README.md` und
-  `manifest.json` sind historische Upstream-Verweise. Sie ändern das Ziel nicht
-  und werden in dieser Reihe nicht umgeschrieben (Dokumentations-URLs und
-  `codeowners` gehören zu den Metadaten, nicht zum Scope).
+- Target repository: `fubu2k/ha-opus-greennet` (remote `origin`, default branch `main`).
+- References to `kegelmeier/ha-opus-greennet` in `CLAUDE.md`, `README.md` and
+  `manifest.json` are historical upstream references. They do not change the
+  target and are not rewritten in this series (documentation URLs and
+  `codeowners` are metadata, not in scope).
 
-## Verbindliche Ausschlüsse (A1–A5)
+## Binding exclusions (A1–A5)
 
-Diese Themen werden weder als Nebenarbeit noch als Voraussetzung oder als
-spätere Phase umgesetzt. Erfordert ein Ziel zwingend eine ausgeschlossene
-Änderung, wird das dokumentiert und die Arbeit angehalten.
+These topics are not implemented as side work, as a prerequisite or as a later
+phase. If a goal strictly requires an excluded change, this is documented and
+work stops.
 
-| ID | Ausschluss | Eingefrorene Ist-Werte (Basis `3e52fce`) |
-|----|------------|-------------------------------------------|
-| A1 | Kein häufigeres Statuspolling: keine neuen Poller, keine kürzeren Intervalle, keine zusätzlichen Abgleichstermine | `GATEWAY_HEALTH_INTERVAL = 60 s`, `RECONNECT_RESYNC_DEBOUNCE_SECONDS = 60`, `OUTBOUND_STATE_RECONCILIATION_DELAYS = (5, 20)`, `COVER_RECONCILIATION_DELAYS = (10.0, 20.0)` nach Bewegungsende, `COVER_MOVEMENT_GRACE_SECONDS = 5.0` |
-| A2 | Keine Änderung der Uptime-, Health- oder Availability-Semantik; Bridge-Uptime wird nicht zur Bestätigung von Gerätezuständen genutzt | `available = not _unloaded and _gateway_available and _bridge_connected is not False and mqtt.is_connected()`; ein Befehls-Timeout ändert die Verfügbarkeit nicht |
-| A3 | Keine Topic-Quarantäne, Drain-Phase, Topic-Sperre oder zusätzliche Abkühlzeit nach Timeout | `REQUEST_TIMEOUT = 10 s`, `SUBSCRIPTION_TIMEOUT = 30 s`, `SETUP_REQUEST_TIMEOUT = 30 s`, `SETUP_SUBSCRIPTION_TIMEOUT = 180 s`, `MIN_SEND_INTERVAL = 0.0` |
-| A4 | Keine neue Replay-/Freshness-Härtung (Timestamp-/Sequenzbewertung, Replay-Generationen, Priorisierung von Live- gegenüber retained Daten); bestehende Logik wird weder entfernt noch umgebaut | siehe Liste „Bestehende Retain-/Freshness-Logik“ in `phase-01.md` |
-| A5 | Keine Opt-in-/Exposure-Policies gegen Entity-Bloat; keine Änderung an Entity-Anzahl, Auswahloptionen, Aktivierungsdefaults oder Registry-Konfiguration | Signalstärke-Sensor standardmäßig deaktiviert, alle übrigen aktiviert; Entity-Inventar siehe `protocol-contract.md` |
+| ID | Exclusion | Frozen current values (base `3e52fce`) |
+|----|-----------|----------------------------------------|
+| A1 | No more frequent status polling: no new pollers, shorter intervals or additional reconciliation slots | `GATEWAY_HEALTH_INTERVAL = 60 s`, `RECONNECT_RESYNC_DEBOUNCE_SECONDS = 60`, `OUTBOUND_STATE_RECONCILIATION_DELAYS = (5, 20)`, `COVER_RECONCILIATION_DELAYS = (10.0, 20.0)` after movement end, `COVER_MOVEMENT_GRACE_SECONDS = 5.0` |
+| A2 | No change to uptime, health or availability semantics; bridge uptime is never used to confirm device state | `available = not _unloaded and _gateway_available and _bridge_connected is not False and mqtt.is_connected()`; a command timeout does not change availability |
+| A3 | No topic quarantine, drain phase, topic lock or additional cool-down after a timeout | `REQUEST_TIMEOUT = 10 s`, `SUBSCRIPTION_TIMEOUT = 30 s`, `SETUP_REQUEST_TIMEOUT = 30 s`, `SETUP_SUBSCRIPTION_TIMEOUT = 180 s`, `MIN_SEND_INTERVAL = 0.0` |
+| A4 | No new replay/freshness hardening (timestamp/sequence evaluation, replay generations, prioritising live over retained data); existing logic is neither removed nor restructured | see "Existing retain/freshness logic" in `protocol-contract.md` §6 |
+| A5 | No opt-in/exposure policies against entity bloat; no change to entity count, selection options, enablement defaults or registry configuration | signal strength sensor disabled by default, all others enabled; entity inventory in `protocol-contract.md` §8 |
 
-## Repository-Regeln (Kurzfassung)
+## Repository rules (summary)
 
-- Keine direkten Commits auf `main`, keine Versionsänderung, kein `CHANGELOG.md`-Update.
-- Kein Release, kein Merge, kein automatischer PR, kein force-push.
-- Keine echten Geräteaktionen oder Konfigurationswrites an Hardware.
-- Unique IDs, Entity IDs, Topic-Pfade, öffentliche Services und Gerätezuordnungen bleiben unverändert.
-- OPUS-Wire-Werte, Kanal null, `notAvailable`, Cover-Inversion, STOP-Payload und
-  proprietäre HeatArea-Profile bleiben erhalten (siehe `protocol-contract.md`).
-- Keine automatischen Write-Retries nach Timeout.
-- Keine pauschale Umstellung auf `DataUpdateCoordinator`.
-- Keine zusätzlichen Abhängigkeiten ohne konkreten Bedarf.
+- No direct commits to `main`, no version change, no `CHANGELOG.md` update.
+- No release, no merge, no automatic PR, no force-push.
+- No real device actions or configuration writes to hardware.
+- Unique IDs, entity IDs, topic paths, public services and device assignments stay unchanged.
+- OPUS wire values, channel zero, `notAvailable`, cover inversion, the STOP payload
+  and the proprietary HeatArea profiles are preserved (see `protocol-contract.md`).
+- No automatic write retries after a timeout.
+- No blanket migration to `DataUpdateCoordinator`.
+- No additional dependencies without a concrete need.
 
-## Branch-Kette
+## Branch chain
 
-Phase 1 basiert auf dem zu Beginn geprüften `main`. Jede Folgephase basiert auf
-dem abgeschlossenen HEAD des Vorgängerbranches. Kein Rebase, kein Squash, kein
-Löschen vorheriger Branches. Existiert ein Branch bereits, wird er mit dieser
-Dokumentation abgeglichen und nicht überschrieben.
+Phase 1 is based on `main` as verified at the start. Each following phase is
+based on the completed HEAD of the previous branch. No rebase, no squash, no
+deletion of earlier branches. If a branch already exists, it is compared with
+this documentation and never overwritten.
 
-| Phase | Branch | Vorgänger | Basis-SHA | Status |
-|-------|--------|-----------|-----------|--------|
-| 1 | `feat/opus-q01-baseline` | `main` | `3e52fce31e7a2d503eef4820f4c706ebcfc751ab` | abgeschlossen (lokal committet) |
-| 2 | `feat/opus-q02-…` (Name folgt mit dem Phasen-Prompt) | `feat/opus-q01-baseline` | HEAD von Phase 1 (im Chat ausgegeben) | offen |
-| 3 | `feat/opus-q03-…` | Phase 2 | HEAD von Phase 2 | offen |
-| 4 | `feat/opus-q04-…` | Phase 3 | HEAD von Phase 3 | offen |
-| 5 | `feat/opus-q05-…` | Phase 4 | HEAD von Phase 4 | offen |
-| 6 | `feat/opus-q06-…` | Phase 5 | HEAD von Phase 5 | offen |
-| 7 | `feat/opus-q07-…` | Phase 6 | HEAD von Phase 6 | offen |
+| Phase | Branch | Predecessor | Base SHA | Status |
+|-------|--------|-------------|----------|--------|
+| 1 | `feat/opus-q01-baseline` | `main` | `3e52fce31e7a2d503eef4820f4c706ebcfc751ab` | completed |
+| 2 | `feat/opus-q02-…` (name given by the phase prompt) | `feat/opus-q01-baseline` | final HEAD of phase 1 | open |
+| 3 | `feat/opus-q03-…` | phase 2 | HEAD of phase 2 | open |
+| 4 | `feat/opus-q04-…` | phase 3 | HEAD of phase 3 | open |
+| 5 | `feat/opus-q05-…` | phase 4 | HEAD of phase 4 | open |
+| 6 | `feat/opus-q06-…` | phase 5 | HEAD of phase 5 | open |
+| 7 | `feat/opus-q07-…` | phase 6 | HEAD of phase 6 | open |
 
-Die HEAD-SHA einer Phase steht nicht im eigenen Commit. Sie wird im Chat
-ausgegeben und in der Dokumentation der Folgephase als Basis-SHA eingetragen.
+A phase's HEAD SHA is never written into its own commit. It is reported in the
+chat and recorded as the base SHA in the next phase's documentation.
 
-## Qualitätsbefehle (CI-konform)
+## Quality commands (CI equivalent)
 
-Aus `.github/workflows/tests.yml` übernommen:
+Taken from `.github/workflows/tests.yml`:
 
 ```bash
 python -m pip install --upgrade -r requirements_test.txt "homeassistant==<latest stable>"
@@ -78,119 +77,115 @@ ruff format --check .
 pytest -v --cov --cov-report=term-missing
 ```
 
-Die Coverage-Schwelle ist `fail_under = 75` (`pyproject.toml`). `hassfest` läuft
-nur in CI (`home-assistant/actions/hassfest@master`) und ist lokal nicht
-ausführbar. `mypy` ist **kein** Projekt-Gate. In Phase 1 lief es nur
-informativ in einer lokalen Umgebung außerhalb des Repositorys.
+The coverage threshold is `fail_under = 75` (`pyproject.toml`). `hassfest` only
+runs in CI (`home-assistant/actions/hassfest@master`) and cannot be executed
+locally. `mypy` is **not** a project gate; in phase 1 it was run for information
+only, in a local environment outside the repository.
 
-## Phasenübersicht (Vorschlag aus Phase 1, an realem Code geprüft)
+## Phase overview (proposal from phase 1, checked against the actual code)
 
-Die Inhalte der Phasen 2–7 sind Vorschläge auf Basis der Analyse in Phase 1.
-Maßgeblich ist jeweils der ausdrückliche Prompt zur Phase. Weicht er ab, gilt
-der Prompt, und dieser Plan wird in jener Phase angepasst.
+The contents of phases 2–7 are proposals derived from the phase 1 analysis.
+The explicit prompt for each phase is authoritative; if it differs, the prompt
+wins and this plan is updated in that phase.
 
-### Phase 2 – Event-Vertrag und belegte Event-Korrektur
+### Phase 2 – Event contract and proven event fix
 
-- Befund F1 (Codepfad belegt, Hardware-Auftreten unbelegt): `_apply_scalar_telemetry`
-  setzt bei `dbm` `device.dbm` direkt, ohne `update_from_telegram` aufzurufen,
-  und dispatcht danach `SIGNAL_DEVICE_STATE_UPDATE`. Die transienten Felder
-  `last_button`/`last_button_action` des vorherigen Wippentelegramms bleiben
-  dabei gesetzt, und `OpusGreenNetEvent._handle_state_update` würde dasselbe
-  Event erneut auslösen. Lokal mit einem Skript außerhalb des Repositorys
-  reproduziert (siehe `phase-01.md`).
-- Weitere Dispatch-Pfade ohne Rücksetzung: `_dispatch_cover_estimate` (nur Cover)
-  und `_handle_put_answer_state` (nur bei Befehlen). Für Wippen sind sie nach
-  heutigem Code nicht erreichbar, sollen aber im Vertrag festgehalten werden.
-- Zielmodule: `event.py`, `coordinator.py` (`_apply_scalar_telemetry`, ggf.
+- Finding F1 (code path proven, hardware occurrence unproven): `_apply_scalar_telemetry`
+  sets `device.dbm` directly for `dbm`, without calling `update_from_telegram`,
+  and then dispatches `SIGNAL_DEVICE_STATE_UPDATE`. The transient fields
+  `last_button`/`last_button_action` of the previous rocker telegram stay set,
+  so `OpusGreenNetEvent._handle_state_update` would fire the same event again.
+  Reproduced locally with a script outside the repository (see `phase-01.md`).
+- Other dispatch paths without a reset: `_dispatch_cover_estimate` (covers only)
+  and `_handle_put_answer_state` (commands only). Not reachable for rockers in
+  the current code, but to be recorded in the contract.
+- Target modules: `event.py`, `coordinator.py` (`_apply_scalar_telemetry`, possibly
   `_handle_put_answer_state`, `_dispatch_cover_estimate`), `enocean_device.py`
-  (Reset-Helfer), Tests `tests/test_event_entity.py`, `tests/test_scalar_telemetry.py`.
-- Erfordert eine ausdrückliche Freigabe als Fehlerkorrektur im Phasen-Prompt.
-  Abgrenzung zu A4: Es geht um transiente Event-Felder, nicht um Freshness
-  oder Retain-Bewertung.
+  (reset helper), tests `tests/test_event_entity.py`, `tests/test_scalar_telemetry.py`.
+- Requires explicit approval as a bug fix in the phase prompt. Not related to
+  A4: this concerns transient event fields, not freshness or retain evaluation.
 
-### Phase 3 – Typisierung ohne Verhaltensänderung
+### Phase 3 – Typing without behaviour change
 
-- Ausgangslage: `mypy` (Standard) meldet 27 Fehler, `mypy --strict` 72 Fehler in 15 Dateien.
-- Zielmodule: `mqtt_transport.py` (Payload-Typen `str | bytes | bytearray`,
-  Lambda-Inferenz), `enocean_device.py` (`heat_area_type`, `default_channel_id: int | None`),
-  `coordinator.py` (unparametrisierte `Callable`, `dict`, `list`; `CALLBACK_TYPE`
-  für Timer-Handles; `started`-Annotation; Delay-Tupeltyp), `entity.py`/`event.py`
-  (`entity_name: str | None`), `lock.py` (`LockEntityFeature(0)` statt `0`;
-  Wert bleibt gleich), `binary_sensor.py`.
-- Optionale mypy-Konfiguration in `pyproject.toml`; ob `mypy` eine
-  Test-Abhängigkeit oder ein CI-Schritt wird, ist im Phasen-Prompt zu
-  entscheiden (Regel „keine zusätzlichen Abhängigkeiten ohne konkreten Bedarf“).
-- Bekannte Grenze: Die Abweichung `voluptuous.Schema` gegenüber `probatio.Schema`
-  in HA 2026.10 (`__init__.py`, `config_flow.py`) ist ein Typkonflikt der
-  HA-Stubs. Sie wird nicht durch Laufzeitänderungen gelöst.
-- Die dynamischen `getattr`/`setattr`-Pfade werden nur typisiert oder durch
-  explizite Zugriffe ersetzt, wenn Verhalten und Unique IDs gleich bleiben.
+- Starting point: `mypy` (default) reports 27 errors, `mypy --strict` 72 errors in 15 files.
+- Target modules: `mqtt_transport.py` (payload types `str | bytes | bytearray`,
+  lambda inference), `enocean_device.py` (`heat_area_type`, `default_channel_id: int | None`),
+  `coordinator.py` (unparameterised `Callable`, `dict`, `list`; `CALLBACK_TYPE`
+  for timer handles; `started` annotation; delay tuple type), `entity.py`/`event.py`
+  (`entity_name: str | None`), `lock.py` (`LockEntityFeature(0)` instead of `0`;
+  same value), `binary_sensor.py`.
+- Optional mypy configuration in `pyproject.toml`. Whether `mypy` becomes a test
+  dependency or a CI step must be decided in the phase prompt (rule "no additional
+  dependencies without a concrete need").
+- Known limitation: the `voluptuous.Schema` vs. `probatio.Schema` mismatch in
+  HA 2026.10 (`__init__.py`, `config_flow.py`) is a stub-level type conflict;
+  it is not resolved through runtime changes.
+- Dynamic `getattr`/`setattr` paths are only typed or replaced by explicit access
+  if behaviour and unique IDs stay identical.
 
-### Phase 4 – Protokoll-/Parsing-Modul extrahieren
+### Phase 4 – Extract a protocol/parsing module
 
-- Reine Funktionen aus `coordinator.py` in ein neues Modul (z. B. `protocol.py`)
-  verschieben: Topic-Regexe, `_set_nested_property`, `_parse_value`,
-  `_merge_device_data`, `_device_state_functions`, `_indexed_changed_functions`,
+- Move pure functions out of `coordinator.py` into a new module (e.g. `protocol.py`):
+  topic regexes, `_set_nested_property`, `_parse_value`, `_merge_device_data`,
+  `_device_state_functions`, `_indexed_changed_functions`,
   `_configuration_state_functions`, `_rwm_transmit_modes`,
   `_channel_from_functions`, `_confirmed_fields_by_channel`,
-  `_command_fields_by_channel`, Payload-Builder für `state.functions`.
-- Kompatibilitäts-Wrapper als Staticmethods, damit bestehende Tests unverändert bleiben.
-- Golden-/Vertragstests gegen `protocol-contract.md` (Kanal null, STOP, Inversion,
-  HeatArea-Modi, `notAvailable`).
-- Zielmodule: `coordinator.py`, neues Protokollmodul, `const.py` (nur lesend),
-  neue Tests `tests/test_protocol_contract.py`.
+  `_command_fields_by_channel`, payload builder for `state.functions`.
+- Keep compatibility wrappers as static methods so existing tests stay unchanged.
+- Golden/contract tests against `protocol-contract.md` (channel zero, STOP,
+  inversion, HeatArea modes, `notAvailable`).
+- Target modules: `coordinator.py`, new protocol module, `const.py` (read only),
+  new tests `tests/test_protocol_contract.py`.
 
-### Phase 5 – Ownership und Lebenszyklus im Coordinator strukturieren
+### Phase 5 – Structure ownership and lifecycle in the coordinator
 
-- Cover-Bewegungsschätzung (`CoverMovement`, `_start_/_finish_/_clear_cover_movement`)
-  und den Abgleichsplaner (`_schedule_/_cancel_reconciliation_queries`,
-  `_pending_reconciliation_*`, `_reconciling`) in klar abgegrenzte Helfer mit
-  eindeutiger Ownership überführen. Zeitwerte und Häufigkeit bleiben
-  unverändert (A1). Die Literal-Tests `[5, 20]` bleiben unverändert.
-- Doppelte Aufräumlogik zwischen `_cancel_background_work` und `async_unload` konsolidieren.
-- Lifecycle-Regressionstests: keine verwaisten Timer, Tasks oder Futures nach
-  Disconnect, Bridge-down, Forget und Unload.
-- Zielmodule: `coordinator.py`, ggf. neue Module `cover_movement.py` und
-  `reconciliation.py`, Tests `test_cover_movement.py`, `test_reconciliation_feedback.py`,
+- Move the cover movement estimate (`CoverMovement`, `_start_/_finish_/_clear_cover_movement`)
+  and the reconciliation scheduler (`_schedule_/_cancel_reconciliation_queries`,
+  `_pending_reconciliation_*`, `_reconciling`) into clearly separated helpers with
+  explicit ownership. Timing values and frequency stay unchanged (A1); the literal
+  `[5, 20]` tests stay unchanged.
+- Consolidate the duplicated cleanup in `_cancel_background_work` and `async_unload`.
+- Lifecycle regression tests: no orphaned timers, tasks or futures after disconnect,
+  bridge down, forget and unload.
+- Target modules: `coordinator.py`, possibly new `cover_movement.py` and
+  `reconciliation.py`, tests `test_cover_movement.py`, `test_reconciliation_feedback.py`,
   `test_release_transport_safety.py`.
 
-### Phase 6 – Plattform- und Entity-Konsolidierung
+### Phase 6 – Platform and entity consolidation
 
-- Wiederholtes Discovery-Listener-Muster (`light`, `switch`, `cover`, `climate`,
-  `event`) und optimistische Nach-ACK-Updates in gemeinsame Helfer in `entity.py`
-  überführen.
-- Unique IDs, Entity-Anzahl, Übersetzungsschlüssel und Aktivierungsdefaults
-  unverändert (A5). Inventar-Tests sichern das ab.
-- Testlücken schließen: `__init__.py` (72 % – Service-Handler
-  `get_device_parameters`, `reload_entry`, Fehlerpfade von `_loaded_entry`),
-  `light.py` (85 %).
-- Zielmodule: `entity.py`, `light.py`, `switch.py`, `cover.py`, `climate.py`,
-  `event.py`, `sensor.py`, `binary_sensor.py`, `__init__.py` (nur Tests oder
-  totes `result is None`-Prüfen nach Abstimmung).
+- Move the repeated discovery listener pattern (`light`, `switch`, `cover`,
+  `climate`, `event`) and the optimistic post-ACK updates into shared helpers in `entity.py`.
+- Unique IDs, entity count, translation keys and enablement defaults unchanged (A5);
+  inventory tests protect this.
+- Close test gaps: `__init__.py` (72 % – service handlers `get_device_parameters`,
+  `reload_entry`, error paths of `_loaded_entry`), `light.py` (85 %).
+- Target modules: `entity.py`, `light.py`, `switch.py`, `cover.py`, `climate.py`,
+  `event.py`, `sensor.py`, `binary_sensor.py`, `__init__.py` (tests only, or the
+  dead `result is None` checks after agreement).
 
-### Phase 7 – Dokumentation und Qualitäts-Gates
+### Phase 7 – Documentation and quality gates
 
-- Abschnitt „Development“ in `README.md` um Qualitätsbefehle ergänzen; Docstrings
-  und Modulbeschreibungen vervollständigen; Abschlussbericht der Reihe.
-- Optional, nur nach ausdrücklicher Entscheidung: CI-Schritt für `mypy`.
-- Zielmodule: `README.md`, `docs/quality/*`, ggf. `.github/workflows/tests.yml`, `pyproject.toml`.
+- Extend the "Development" section of `README.md` with the quality commands;
+  complete docstrings and module descriptions; final report of the series.
+- Optional, only after an explicit decision: a CI step for `mypy`.
+- Target modules: `README.md`, `docs/quality/*`, possibly `.github/workflows/tests.yml`, `pyproject.toml`.
 
-## Bereits gelöste Punkte (nicht erneut implementieren)
+## Already solved (do not re-implement)
 
-Am Code der Basis `3e52fce` und an vorhandenen Tests bestätigt:
+Confirmed against the code at base `3e52fce` and existing tests:
 
-- Retained `getAnswer/devices`-Antworten erzeugen weder Discovery noch Zustand
+- Retained `getAnswer/devices` answers create neither discovery nor state
   (`_handle_get_answer_devices`, `tests/test_retained_device_answers.py`).
-- Retained Telegramme lösen weder Events noch Zustände aus (`_handle_telegram_property_message`).
-- Button-Keys aus `stream/devices` gelten nicht als neues Ereignis (`_apply_known_device_state_property`).
-- Verfügbarkeitswechsel lösen kein altes Wippen-Event erneut aus
+- Retained telegrams trigger neither events nor state (`_handle_telegram_property_message`).
+- Button keys from `stream/devices` are not treated as new occurrences (`_apply_known_device_state_property`).
+- Availability changes do not replay an old rocker event
   (`test_availability_changes_do_not_replay_last_rocker_event`).
-- Rediscovery setzt transiente Button-Felder zurück (`update_from_telegram({"functions": []})`).
-- Befehls-Timeout ändert die Gateway-Verfügbarkeit nicht und wird nicht automatisch wiederholt.
-- Globale Sendewarteschlange mit Priorität (Befehl > Abfrage > Hintergrund), genau ein Request gleichzeitig.
-- STOP als eigene Funktion `{"key": "stop", "value": "true"}` mit Kanal-Selektor (`tests/test_cover_stop.py`).
-- Feedback nur pro Kanal und Feld; Feedback eines früheren Befehls bestätigt keinen späteren
-  (`tests/test_reconciliation_feedback.py`).
-- Idempotente Binary-Sensor-Discovery und deklarative Beschreibungen
+- Rediscovery resets the transient button fields (`update_from_telegram({"functions": []})`).
+- A command timeout does not change gateway availability and is not retried automatically.
+- Global send queue with priorities (command > query > background), exactly one request in flight.
+- STOP as a dedicated function `{"key": "stop", "value": "true"}` with channel selector (`tests/test_cover_stop.py`).
+- Feedback is matched per channel and field; feedback for an earlier command cannot
+  confirm a later one (`tests/test_reconciliation_feedback.py`).
+- Idempotent binary sensor discovery and declarative descriptions
   (`tests/test_binary_sensor_discovery.py`, `tests/test_binary_sensor_descriptions.py`).
-- Child-Removal ohne MQTT-Writes, mit Isolation der Requests (`tests/test_device_removal.py`).
+- Child device removal without MQTT writes and with request isolation (`tests/test_device_removal.py`).
