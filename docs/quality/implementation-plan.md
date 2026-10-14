@@ -57,7 +57,7 @@ this documentation and never overwritten.
 |-------|--------|-------------|----------|--------|
 | 1 | `feat/opus-q01-baseline` | `main` | `3e52fce31e7a2d503eef4820f4c706ebcfc751ab` | completed |
 | 2 | `fix/opus-q02-state-ownership` | `feat/opus-q01-baseline` | `ff164f9db7adde27dfa8c37ddf6c8cf350b633a0` | completed |
-| 3 | name given by the phase prompt | `fix/opus-q02-state-ownership` | final HEAD of phase 2 | open |
+| 3 | `fix/opus-q03-event-lifecycle` | `fix/opus-q02-state-ownership` | `16d9a45777cef8891fe8772963c8827b8a479798` | completed |
 | 4 | `feat/opus-q04-…` | phase 3 | HEAD of phase 3 | open |
 | 5 | `feat/opus-q05-…` | phase 4 | HEAD of phase 4 | open |
 | 6 | `feat/opus-q06-…` | phase 5 | HEAD of phase 5 | open |
@@ -103,7 +103,7 @@ updated in that phase.
 
 ### Open findings (not scheduled; require an explicit phase prompt)
 
-- F1 (from phase 1): `_apply_scalar_telemetry` dispatches `dbm` updates
+- F1 (from phase 1): `_apply_scalar_telemetry` dispatches `dbm` updates (fixed in Phase 3)
   without resetting `last_button`/`last_button_action`, so the event entity
   would fire the previous rocker event again. Code path proven, hardware
   occurrence unverified. A fix needs explicit approval as a bug fix.

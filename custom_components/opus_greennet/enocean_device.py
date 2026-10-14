@@ -422,6 +422,16 @@ class EnOceanDevice:
             return value.strip().removesuffix("%").strip()
         return value
 
+    def clear_button_occurrence(self) -> None:
+        """Forget the transient button press carried by the last telegram.
+
+        Button fields describe a single telegram occurrence. They must not be
+        observed again by later dispatches (RSSI, metadata, PUT answers, ...).
+        """
+        for channel in self.channels.values():
+            channel.last_button = None
+            channel.last_button_action = None
+
     def update_from_telegram(self, telegram: dict[str, Any]) -> None:
         """Update device state from a telegram message."""
         functions = telegram.get("functions", [])
@@ -432,9 +442,7 @@ class EnOceanDevice:
         functions = [func for func in functions if isinstance(func, dict)]
 
         # Button fields describe only this telegram, including metadata-only updates.
-        for channel in self.channels.values():
-            channel.last_button = None
-            channel.last_button_action = None
+        self.clear_button_occurrence()
 
         # Determine default channel from telegram-level channel function.
         default_channel_id = DEFAULT_CHANNEL

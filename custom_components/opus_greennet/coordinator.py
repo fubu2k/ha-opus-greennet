@@ -2077,6 +2077,9 @@ class OpusGreenNetCoordinator:
             device, update_source, signal, received_at, finalized_at
         )
         async_dispatcher_send(self.hass, signal, device)
+        # Event entities consume button fields synchronously during the dispatch
+        # above. Clear them so later dispatches cannot replay the same press.
+        device.clear_button_occurrence()
 
         if is_outbound_command:
             for channel_id, fields in self._command_fields_by_channel(
