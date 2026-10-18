@@ -610,6 +610,7 @@ The stable v0.6.0 release has 922 tests validated on Home Assistant 2026.9.4.
 The v0.7.0b0 motion-detector beta adds 20 cases, for 942 tests on HA 2026.9.4.
 Motion starts unknown until a valid telegram arrives after restart.
 The v0.7.0b1 quality beta requires HA 2026.10.1 or newer, including for manual installation.
+Its combined suite contains 1,315 tests, with strict typing and per-module coverage gates.
 Users on older HA versions should keep stable v0.6.0 or upgrade HA first.
 CI resolves the latest stable Home Assistant release from PyPI on each run and
 tests that exact version, recorded in the workflow summary. It runs on pull
