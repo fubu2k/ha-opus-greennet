@@ -107,7 +107,7 @@ BINARY_SENSOR_DESCRIPTIONS = (
         key="contact",
         translation_key="contact",
         applies_to=lambda device: device.is_contact_sensor,
-        value_fn=lambda device: channel_boolean(device, "contact"),
+        value_fn=lambda device: channel_boolean(device, lambda c: c.contact),
         device_class=BinarySensorDeviceClass.OPENING,
     ),
 )

@@ -39,6 +39,7 @@ PARALLEL_UPDATES = 0
 
 # Numeric channel readings exposed by OpusGreenNetMeasurementSensor.
 MEASUREMENT_READINGS: Final[dict[str, Callable[[EnOceanChannel], float | None]]] = {
+    "temperature": lambda channel: channel.temperature,
     "illuminance": lambda channel: channel.illuminance,
     "supply_voltage": lambda channel: channel.supply_voltage,
     "battery_level": lambda channel: channel.battery_level,
