@@ -2,6 +2,69 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-10-18
+
+Stable release of the sensor and contact support tested in v0.6.0b1, with the retained device-answer fix. Integration behavior is unchanged from that beta.
+
+### Added
+- Temperature, humidity and battery sensors for A5-04-03 devices, including Jaeger Direkt sensors (#64, #65). Temperature supports -20 to +60 °C; existing HeatArea limits remain unchanged.
+- Contact binary sensors for D5-00-01 window contacts (#70, #71), with English and German entity names. Missing or unrecognized contact values remain unknown.
+
+### Fixed
+- Ignore retained device-answer responses that could restore stale sensor readings or overwrite a wet leak alarm (#62, #73). Retained device-stream discovery remains supported. Leak sensors remain unknown until valid telemetry arrives.
+
+### Validation and known limitations
+- 922 automated tests pass on Home Assistant 2026.9.4.
+- Community validation on October 15 with HA 2026.9.2, OPUS-GW v1.21.31 and about 80 devices confirmed restart and integration reload without OPUS errors, unchanged entity IDs/counts, no duplicates, and restored temperature/humidity and contact readings.
+- A physical leak-sensor trigger produced on then off following its telegrams; sensors without gateway state remained unknown after restart and reload.
+- That installation still takes about two minutes to restore entity availability after startup/reload. HeatArea compatibility, negative temperatures and explicit broker reconnect remain unverified on hardware.
+
+Thanks to @florian-hartung for the implementation, gateway examples and beta testing.
+
+Hardware feedback: https://github.com/kegelmeier/ha-opus-greennet/issues/62#issuecomment-6201868511
+
+## [0.6.0b1] - 2026-10-13
+
+Second v0.6.0 beta, retaining A5-04-03 temperature/humidity/battery and D5-00-01 contact support from v0.6.0b0.
+
+### Fixed
+- Ignore retained MQTT device-answer responses that could restore stale sensor state (#73, follow-up to #62). Regression tests reproduced old dry leak-sensor state overwriting wet state, changing unknown to dry, or surviving a fresh response with no state. Retained device-stream snapshots remain supported.
+
+### Beta feedback and testing
+- Community testing on v0.6.0b0 confirmed three A5-04-03 sensors with live readings and stable entity IDs, and ten D5-00-01 contacts with stable IDs and one observed open/close cycle. No startup errors were reported on an installation with about 80 devices.
+- Enable pre-releases in HACS, install **v0.6.0b1**, and restart Home Assistant. Check leak-sensor startup state, integration reload, broker reconnect, and continued live updates. Missing readings should remain unknown; a known alarm must not be cleared by an old retained answer.
+- Please continue checking contact open/close behavior, temperature/humidity against the gateway, repeated restart/reload, and HeatArea compatibility. Negative temperatures remain unverified on hardware.
+- Report results on #62, #64, or #70 with Home Assistant version and gateway firmware. No production broker messages were injected during automated validation.
+
+### Validation
+- 922 tests pass on Home Assistant 2026.9.4 for the combined beta. Ruff lint and formatting checks pass.
+- The isolated fix passed 865 tests on Home Assistant 2026.9.4 and 2026.10.1, plus GitHub integration metadata checks. All 13 new regression cases fail on the original beta and pass with the fix.
+
+Thanks to @florian-hartung for the hardware feedback and the retained-answer observation.
+
+## [0.6.0b0] - 2026-10-12
+
+Beta for the device-support requests #64 and #70, built on v0.5.0 with its gateway queue and startup fixes. The feature PRs and issues remain open for review and installation feedback.
+
+### Added
+- Temperature, humidity and battery-level sensors for A5-04-03 devices (PR #65 / #64), including the reported Jaeger Direkt sensors.
+- A5-04-03 temperature readings from -20 to +60 °C, matching the [EnOcean Alliance profile](https://www.enocean-alliance.org/products/eeps/). Existing HeatArea temperature limits remain 0 to 40 °C.
+- A Contact binary sensor for D5-00-01 single input contacts (#70), including window contacts. Reported `open` is `on`, reported `closed` is `off`, and missing or unrecognized values are `unknown`. No battery reading is invented when none is supplied.
+- English and German names for the new temperature and contact entities. Heartbeat/trigger messages do not create an entity.
+
+### Beta testing
+- Enable pre-release versions for this repository in HACS, install **v0.6.0b0**, and restart Home Assistant. Home Assistant 2026.8 or newer is supported.
+- For A5-04-03: confirm temperature (°C), humidity (%) and battery (%) entities; compare them with the gateway; check incoming telegrams and battery updates. Negative temperatures have automated coverage but have not been verified on hardware.
+- For D5-00-01: open and close each contact and confirm the entity follows the physical state. Check initial state after restart. Missing data must remain unknown, and gateway outages must show unavailable.
+- Restart or reload the integration and check for duplicate entities or changed entity IDs. Verify existing HeatArea devices, dashboards and automations still work.
+- Post results on [PR #65](https://github.com/kegelmeier/ha-opus-greennet/pull/65), [issue #64](https://github.com/kegelmeier/ha-opus-greennet/issues/64), or [issue #70](https://github.com/kegelmeier/ha-opus-greennet/issues/70). Include Home Assistant version, gateway firmware, device profile and redacted logs if something differs.
+
+### Validation
+- 909 tests pass on Home Assistant 2026.8.2 and 2026.10.1. Ruff, dependency compatibility, coverage and integration metadata checks pass.
+- The A5-04-03 contributor reports testing three Jaeger Direkt devices on OPUS-GW v1.21.31. The contact implementation uses the gateway snapshots and live values reported in #70. The combined candidate has automated validation; no additional local hardware test was performed.
+
+Thanks to florian-hartung for the A5-04-03 implementation, contact request, gateway examples and device testing.
+
 ## [0.5.0] - 2026-10-11
 
 Stable release of the cover movement and discovery improvements from v0.5.0b0, plus the reviewed gateway fixes for larger installations.
