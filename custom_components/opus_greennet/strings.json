@@ -271,5 +271,18 @@
       },
       "name": "Set device configuration"
     }
+  },
+  "issues": {
+    "duplicate_beta_entity": {
+      "title": "Duplicate entity {removed_entity_id} was removed",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Update references to {removed_entity_id}",
+            "description": "While adopting the upstream unique IDs, the integration found two registry entries for the same device and gateway. It kept your existing entity {preserved_entity_id} with its entity ID, name and settings, and removed the duplicate entity {removed_entity_id}.\n\nAutomations, scripts, scenes and dashboards that still use {removed_entity_id} no longer work. Replace that entity ID with {preserved_entity_id}, then select Submit to dismiss this message. Nothing is sent to the gateway or the device."
+          }
+        }
+      }
+    }
   }
 }

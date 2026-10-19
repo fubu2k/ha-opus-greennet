@@ -34,6 +34,7 @@ from homeassistant.helpers.typing import ConfigType
 from .api import OpusApiError, OpusAuthError, OpusGatewayClient
 from .const import CONF_EAG_ID, DEFAULT_PORT, DEFAULT_USERNAME, DOMAIN
 from .coordinator import GatewayMismatchError, OpusGreenNetCoordinator
+from .entity import async_delete_config_entry_issues
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -231,6 +232,13 @@ async def async_unload_entry(
 
     await entry.runtime_data.coordinator.async_unload()
     return True
+
+
+async def async_remove_entry(
+    hass: HomeAssistant, entry: OpusGreenNetConfigEntry
+) -> None:
+    """Remove repair issues that only concerned the removed config entry."""
+    async_delete_config_entry_issues(hass, entry.entry_id)
 
 
 async def async_remove_config_entry_device(

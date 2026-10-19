@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Hashable, Mapping
+from typing import Final
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
@@ -23,6 +25,11 @@ from .diagnostics import log_entity_state_write
 from .enocean_device import EnOceanDevice
 
 _LOGGER = logging.getLogger(__name__)
+
+# Repair issue raised once when the migration removes a duplicate beta entity.
+ISSUE_DUPLICATE_BETA_ENTITY: Final = "duplicate_beta_entity"
+# Issue data key linking an issue to the config entry that raised it.
+ISSUE_DATA_CONFIG_ENTRY_ID: Final = "config_entry_id"
 
 
 def freeze_projection(value: object) -> Hashable:
@@ -87,7 +94,53 @@ def migrate_legacy_entity_suffix(
             current_id,
             legacy_id,
         )
+        async_create_duplicate_beta_entity_issue(
+            hass, config_entry_id, current_id, legacy_id
+        )
     registry.async_update_entity(legacy_id, new_unique_id=current_unique_id)
+
+
+@callback
+def async_create_duplicate_beta_entity_issue(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    removed_entity_id: str,
+    preserved_entity_id: str,
+) -> None:
+    """Ask the user to update references to a removed duplicate beta entity.
+
+    The removal happens exactly once, so the issue is persistent: it survives
+    restarts until the user confirms it in Repairs or removes the config entry.
+    The integration cannot detect whether references were updated, hence the
+    confirmation flow. Creating it sends nothing to the gateway or a device.
+    """
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        f"{ISSUE_DUPLICATE_BETA_ENTITY}_{removed_entity_id}",
+        data={ISSUE_DATA_CONFIG_ENTRY_ID: config_entry_id},
+        is_fixable=True,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_DUPLICATE_BETA_ENTITY,
+        translation_placeholders={
+            "removed_entity_id": removed_entity_id,
+            "preserved_entity_id": preserved_entity_id,
+        },
+    )
+
+
+@callback
+def async_delete_config_entry_issues(hass: HomeAssistant, config_entry_id: str) -> None:
+    """Delete the repair issues raised for one config entry."""
+    registry = ir.async_get(hass)
+    for (domain, issue_id), issue in list(registry.issues.items()):
+        if (
+            domain == DOMAIN
+            and issue.data is not None
+            and issue.data.get(ISSUE_DATA_CONFIG_ENTRY_ID) == config_entry_id
+        ):
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
 @callback

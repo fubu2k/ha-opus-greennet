@@ -135,23 +135,29 @@ rules:
   entity-device-class: done
   entity-disabled-by-default:
     status: done
-    comment: The per-device signal strength sensor is disabled by default.
+    comment: >-
+      The per-device signal strength sensor and the D2-06-40 handle unlock
+      request and mechanics fault diagnostics are disabled for new registry
+      entries; existing user enablement is preserved.
   entity-translations: done
   exception-translations: done
   icon-translations:
-    status: todo
-    comment: No icons.json; entities rely on device-class default icons.
+    status: done
+    comment: >-
+      icons.json with state icons for the handle position, handle closed,
+      unlock request and mechanics fault entities plus service icons; all other
+      entities keep their device-class icons. No Python icon properties.
   reconfiguration-flow:
     status: done
     comment: >-
       The reconfigure flow changes host, port and credentials and rejects an
       address that answers as a different gateway.
   repair-issues:
-    status: todo
+    status: done
     comment: >-
-      No repair issues yet. Candidate: the one-time removal of a duplicate beta
-      entity during unique-ID migration, which currently only logs a warning.
-      Transient gateway or radio outages are intentionally not issues.
+      Persistent, fixable repair after the one-time removal of a duplicate beta
+      entity during unique-ID migration. Transient gateway or radio outages and
+      quiet sensors are intentionally not issues.
   stale-devices:
     status: done
     comment: >-

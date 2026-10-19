@@ -271,5 +271,18 @@
       },
       "name": "Gerätekonfiguration setzen"
     }
+  },
+  "issues": {
+    "duplicate_beta_entity": {
+      "title": "Doppelte Entität {removed_entity_id} wurde entfernt",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Verweise auf {removed_entity_id} aktualisieren",
+            "description": "Bei der Übernahme der Upstream-Unique-IDs hat die Integration zwei Registry-Einträge für dasselbe Gerät und Gateway gefunden. Deine bestehende Entität {preserved_entity_id} wurde mit Entitäts-ID, Name und Einstellungen beibehalten, die doppelte Entität {removed_entity_id} wurde entfernt.\n\nAutomationen, Skripte, Szenen und Dashboards, die noch {removed_entity_id} verwenden, funktionieren nicht mehr. Ersetze diese Entitäts-ID durch {preserved_entity_id} und wähle anschließend Absenden, um diesen Hinweis zu schließen. Dabei wird nichts an das Gateway oder das Gerät gesendet."
+          }
+        }
+      }
+    }
   }
 }

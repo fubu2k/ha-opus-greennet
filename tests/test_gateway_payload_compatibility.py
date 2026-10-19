@@ -10,7 +10,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
+from custom_components.opus_greennet.const import DOMAIN
 from custom_components.opus_greennet.coordinator import OpusGreenNetCoordinator
 from tests.fake_gateway import FakeGateway, device_object, telegram
 from tests.ha_helpers import setup_bridge, wait_for_entity, wait_until
@@ -150,8 +152,21 @@ async def test_hoppe_original_keys_reach_position_entities(
         "unlock": "notRequested",
         "mechanics": "ok",
     }
-    gateway.devices = [device_object("HANDLE", eep, states=_states(states))]
     entry = await setup_bridge(hass, gateway)
+    if eep == "D2-06-40":
+        # Unlock request and mechanics fault are disabled for NEW registry
+        # entries. Simulate an existing installation in which the user keeps
+        # them enabled, so their pushed states remain observable here.
+        registry = er.async_get(hass)
+        for domain, suffix in (
+            ("sensor", "unlock_request"),
+            ("binary_sensor", "mechanics_fault"),
+        ):
+            registry.async_get_or_create(
+                domain, DOMAIN, f"AABB0011_HANDLE_{suffix}", config_entry=entry
+            )
+    gateway.devices = [device_object("HANDLE", eep, states=_states(states))]
+    await gateway.push(gateway.devices_document())
     position = await wait_for_entity(hass, "sensor", "AABB0011_HANDLE_handle_state")
     tilt = await wait_for_entity(hass, "binary_sensor", "AABB0011_HANDLE_handle_tilt")
     assert hass.states.get(position).state == "closed"

@@ -19,7 +19,7 @@ Rule -> implementation -> tests -> documentation for every rule in
   official rule keys, the applicable official validators (`config-flow`,
   `runtime-data`, `strict-typing`, `test-before-setup`, `unique-config-entry`,
   `discovery`) and checks that this table matches the YAML.
-- Summary: 43 done, 6 exempt, 5 todo. All open items stay visible as `todo`.
+- Summary: 45 done, 6 exempt, 3 todo. All open items stay visible as `todo`.
   Because bronze, silver and gold each contain open or exempt items that an
   official review would have to accept, no tier is claimed.
 
@@ -83,12 +83,12 @@ Rule -> implementation -> tests -> documentation for every rule in
 | `dynamic-devices` | done | `SIGNAL_DEVICE_DISCOVERED` dispatcher listeners in every platform; new devices from stream resyncs, the periodic device list and late lookups | `test_coordinator_devices.py::test_device_list_creates_devices_and_dispatches_discovery`; `test_coordinator_stream.py::test_unknown_device_is_looked_up_once`, `::test_periodic_device_list_refresh_updates_metadata_only`; `test_entities.py::test_sensor_setup_adds_new_types_after_profile_discovery` | README Removing or replacing a device |
 | `entity-category` | done | `EntityCategory.DIAGNOSTIC` for signal strength and actuator status binary sensors | `test_binary_sensor_descriptions.py::test_description_inventory_matches_stable`; `test_entities.py::test_sensor_values_and_metadata` | – |
 | `entity-device-class` | done | Device classes on sensors, binary sensors and covers | `test_entities.py::test_sensor_values_and_metadata`, `::test_moisture_sensor_values_and_metadata`; `test_binary_sensor_descriptions.py` | – |
-| `entity-disabled-by-default` | done | Signal strength sensor `entity_registry_enabled_default = False` | `test_entities.py::test_sensor_values_and_metadata` | – |
+| `entity-disabled-by-default` | done | Signal strength sensor; D2-06-40 unlock request and mechanics fault (diagnostic, new registry entries only) | `test_entities.py::test_sensor_values_and_metadata`; `test_handle_diagnostics.py`; `test_sensor_metadata.py` | – |
 | `entity-translations` | done | `translation_key` on every named entity; `strings.json`, `translations/en.json`, `translations/de.json` | TR (all tests) | – |
 | `exception-translations` | done | `translation_domain`/`translation_key` on raised Home Assistant errors | TR `test_raised_exception_keys_are_translated`; `test_service_actions.py::test_rejected_read_surfaces_translated_error` | – |
-| `icon-translations` | todo | No `icons.json` | – | – |
+| `icon-translations` | done | `icons.json` (handle position, handle closed, unlock request, mechanics fault, service icons) | `test_icon_translations.py` | – |
 | `reconfiguration-flow` | done | `config_flow.py` `async_step_reconfigure` (address and credentials, identity check) | `test_config_flow.py::test_reconfigure_changes_the_connection`, `::test_reconfigure_rejects_a_different_gateway`; QS `test_reauth_and_reconfigure_flows_verify_the_gateway_identity` | README Configuration |
-| `repair-issues` | todo | No repair issues yet; candidate in `quality_scale.yaml` comment | – | `phases/phase-07.md` |
+| `repair-issues` | done | `entity.py` `async_create_duplicate_beta_entity_issue` (persistent, fixable confirm flow); removed with the entry (`async_remove_entry`) | `test_repair_issues.py` | – |
 | `stale-devices` | done | `async_remove_config_entry_device`; no automatic removal (gateway cannot confirm a device is gone) | `test_device_removal.py`; QS `test_stale_devices_and_diagnostics_entry_points` | README Removing or replacing a device |
 
 ## Platinum

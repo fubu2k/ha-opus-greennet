@@ -45,6 +45,11 @@ MEASUREMENT_READINGS: Final[dict[str, Callable[[EnOceanChannel], float | None]]]
     "battery_level": lambda channel: channel.battery_level,
 }
 
+# Battery levels are shown as whole percent for every OPUS device with a
+# battery level. Display only: the reported state and history are unchanged,
+# and a user-chosen display precision in the entity settings takes precedence.
+MEASUREMENT_DISPLAY_PRECISION: Final[dict[str, int]] = {"battery_level": 0}
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -106,14 +111,22 @@ async def async_setup_entry(
                     "illumination",
                     "illuminance",
                 )
-            for suffix, device_class, unit in (
-                ("illuminance", SensorDeviceClass.ILLUMINANCE, LIGHT_LUX),
+            # The SMS supply voltage is device telemetry, so it is a diagnostic
+            # entity. It stays enabled; existing entries keep their settings.
+            for suffix, device_class, unit, category in (
+                ("illuminance", SensorDeviceClass.ILLUMINANCE, LIGHT_LUX, None),
                 (
                     "supply_voltage",
                     SensorDeviceClass.VOLTAGE,
                     UnitOfElectricPotential.VOLT,
+                    EntityCategory.DIAGNOSTIC,
                 ),
-                ("battery_level", SensorDeviceClass.BATTERY, UnitOfRatio.PERCENTAGE),
+                (
+                    "battery_level",
+                    SensorDeviceClass.BATTERY,
+                    UnitOfRatio.PERCENTAGE,
+                    None,
+                ),
             ):
                 entities.append(
                     OpusGreenNetMeasurementSensor(
@@ -124,6 +137,7 @@ async def async_setup_entry(
                         suffix,
                         device_class,
                         unit,
+                        entity_category=category,
                     )
                 )
 
@@ -379,12 +393,17 @@ class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
         suffix: str,
         device_class: SensorDeviceClass,
         unit: str,
+        *,
+        entity_category: EntityCategory | None = None,
     ) -> None:
         super().__init__(coordinator, eag_id, gateway_device_id, device, suffix, suffix)
         # Typed accessor instead of getattr(); an unknown suffix fails at setup.
         self._read_value = MEASUREMENT_READINGS[suffix]
         self._attr_device_class = device_class
         self._attr_native_unit_of_measurement = unit
+        self._attr_entity_category = entity_category
+        if (precision := MEASUREMENT_DISPLAY_PRECISION.get(suffix)) is not None:
+            self._attr_suggested_display_precision = precision
 
     @property
     def native_value(self) -> float | None:
@@ -394,7 +413,15 @@ class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
 
 
 class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
-    """Handle position or the independent reported unlock request."""
+    """Handle position or the independent reported unlock request.
+
+    The unlock request (Entsperranfrage) serves troubleshooting rather than
+    everyday operation, so it is a diagnostic entity that is disabled by
+    default. The default only applies when Home Assistant creates a new
+    registry entry; existing entries keep their enablement, ID and
+    customisations. Hiding this push-based entity sends no request to the
+    device and is not a proven battery saving.
+    """
 
     def __init__(
         self,
@@ -412,6 +439,8 @@ class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
         elif suffix == "unlock_request":
             self._attr_device_class = SensorDeviceClass.ENUM
             self._attr_options = ["requested", "not_requested"]
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+            self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> str | None:
