@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.7.0b2] - 2026-10-19
 
-Quality series (phases 1-10) plus the device support of upstream v0.7.0b1 (kegelmeier/ha-opus-greennet), integrated into this fork's architecture. Existing entity IDs, unique IDs, device assignments, topics, services and wire payloads are unchanged.
+Quality series (phases 1-11) plus the device support of upstream v0.7.0b1 (kegelmeier/ha-opus-greennet), integrated into this fork's architecture. Existing entity IDs, unique IDs, device assignments, topics, services and wire payloads are unchanged.
 
 ### Breaking requirement
 - **Home Assistant 2026.10.1 or newer is required**, including for manual installation (HACS metadata and test dependencies enforce it). The integration uses `probatio` and Home Assistant APIs that are not available in 2026.9.4.
@@ -23,6 +23,7 @@ Quality series (phases 1-10) plus the device support of upstream v0.7.0b1 (kegel
 - Frontend icons for integration service actions.
 - A persistent Home Assistant Repairs warning when the existing migration removes a duplicate beta entity. The warning identifies the removed and preserved entity IDs so users can update affected dashboards and
   automations. Confirming the repair dismisses it; removing the config entry removes only that entry's repair issues.
+- Device diagnostics list `deferred_commands`: values the gateway accepted for deferred delivery (status 201) that no device report or outbound telegram has matched yet.
 - README use cases and examples for rocker control, handle-based heating automation, optional mechanics-fault diagnostics, smoke alarms and dashboards.
   
 ### Fixed
@@ -41,7 +42,9 @@ Quality series (phases 1-10) plus the device support of upstream v0.7.0b1 (kegel
 - Optimistic post-acknowledgement state updates for lights, switches and covers are centralized in the device model instead of mutating channel fields in individual entities. Existing revision guards,
   feedback precedence and estimate semantics are preserved.
 - MQTT/JSON boundary handling uses explicit typed containers and field-level validation. Existing valid string and numeric representations, channel zero, `notAvailable` and proprietary HeatArea profiles remain supported.
-- Successful gateway responses with status 200 or 201 use a shared status parser without changing their existing acknowledgement semantics.
+- Successful gateway responses with status 200 or 201 use a shared status parser.
+- A command acknowledged with status 201 (SoftSmartAck, deferred delivery) is no longer treated like 200. Lights, switches and covers keep their last reported state instead of showing the commanded value, a cover starts no movement estimate, and no follow-up status query is sent, because the telegram has not reached the device yet. When the gateway later transmits the telegram, the value is shown and the usual two status checks follow once. The action itself still succeeds. Status 200 behaves as before.
+- A warning or error reported by one device, such as a HeatArea's `actuatorNotResponding`, `missingTemperature`, `circuitInUse` or `heaterMode: error`, remains on that device's entities and never changes gateway availability. This existing behavior is now covered by tests.
 - Device diagnostics label updates applied from retained messages as `<source> (retained)`; the receipt age refers to the last live update.
 
 ### Compatibility and upgrade notes
@@ -57,6 +60,7 @@ Quality series (phases 1-10) plus the device support of upstream v0.7.0b1 (kegel
 - Gateway health checks, reconnect behavior, request serialization, timeouts, command priorities and existing reconciliation delays remain unchanged. No new periodic polling, retry loop or automatic
   device-level query is introduced.
 - Gateway acknowledgement does not prove physical actuation. Cover movement and fallback positions remain estimates.
+- After status 201 an entity can briefly keep showing its previous state until the device reports or the gateway transmits the queued telegram. Status 201 sends fewer MQTT requests than before (no follow-up status queries until delivery). Whether the gateway still delivers a queued telegram after a newer command for the same function is not documented; check the device before repeating such a command.
 - AutoLock control remains disabled pending manufacturer guidance. Handle position, unlock requests and reported lock state remain independent.
 
 ### Development and quality assurance
@@ -69,6 +73,7 @@ Quality series (phases 1-10) plus the device support of upstream v0.7.0b1 (kegel
 - Lifecycle and race-regression suites run three additional times in CI.
 - Expanded regression coverage for service actions, config-flow error recovery, translations, diagnostics, transport and platform edge cases, upstream device profiles, discovery, icons and repair issues.
 - Added field-freshness regression tests for retained replays versus live fields per channel, including reconnect, bridge outage, device removal and unload; they also run in the repeated race suites.
+- Added ACK 201 and device-health regression tests (deferred delivery per entity type and channel, Stop, cover travel, delivery confirmation, retained values, rejection, timeout and HeatArea subsystem errors); they also run in the repeated race suites.
 - Added a fixed Home Assistant 2026.10.2 reference job on Ubuntu 24.04, alongside the existing latest-stable compatibility job.
 - Reference CI records the Python version, resolved dependencies, JUnit results, coverage and MQTT publication counts as build artifacts.
 - Added a reference Hassfest build from home-assistant/core commit `8d7fd8b68677c2585be36ec86043308f403875b8` (2026.10.2), while retaining
