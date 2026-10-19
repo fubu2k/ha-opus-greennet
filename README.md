@@ -21,6 +21,7 @@ A custom Home Assistant integration for the Opus GreenNet Bridge, enabling contr
 ## Features
 
 - **Auto-discovery**: Automatically discovers EnOcean devices connected to your Opus GreenNet Bridge
+- **Gateway discovery**: Offers bridged OPUS gateways found on your MQTT broker for one-click setup, after the same fresh check as manual setup
 - **Immediate telemetry**: Flat battery-level and signal-strength updates bypass the multipart state debounce
 - **Real-time updates**: Receives state changes via MQTT push notifications, including device deltas, local-control telegrams, and bridge-originated command telegrams
 - **Connection recovery**: Checks that the gateway responds, marks entities unavailable during outages, and refreshes discovery and state after reconnection
@@ -94,6 +95,14 @@ the handle; their values arrive only through the handle's own reports. Hiding
 them is not a proven battery saving. An unrecognised mechanics value stays
 unknown and is never shown as "no fault".
 
+Handle entities use state icons: closed, open and tilted windows for the
+position sensor and the Closed binary sensor, a lock with a clock for a pending
+unlock request (not an unlocked lock), and an alert symbol only for a reported
+mechanics fault. Unknown or unavailable values show neutral icons (a question
+mark or a plain cog) and never a closed window, a lock or a healthy state.
+The Open and Tilted binary sensors keep Home Assistant's window icons. Icons
+you selected yourself for an entity take precedence and are not changed.
+
 ## Removing or replacing a device
 
 Use **Settings → Devices & services → Opus GreenNet Bridge → Devices**, open the
@@ -129,7 +138,11 @@ the existing Home Assistant entity IDs, custom names, and settings. If both the
 fork and beta entries exist for the same device and gateway, the older fork
 entity is preserved and the duplicate beta entry is removed. References to the
 removed beta entity must be updated manually; the integration logs both entity
-IDs. Entries belonging to another gateway or device are left untouched.
+IDs and shows a repair under **Settings → System → Repairs** naming the removed
+and the preserved entity. After updating your automations, scripts and
+dashboards, open the repair and select **Submit** to dismiss it. The repair
+survives restarts until you confirm it or delete the integration entry.
+Entries belonging to another gateway or device are left untouched.
 
 ### Gateway payload compatibility
 
@@ -299,6 +312,31 @@ MQTT broker alone is insufficient. If setup fails, check the identifier, gateway
 power, bridge credentials, and the directional topic rules above. Existing
 entries automatically retry when the gateway is unavailable during startup.
 
+### Automatic gateway discovery
+
+Once the MQTT bridge forwards `EnOcean/<EAG-ID>/stream/#` (see
+[MQTT Bridge Setup](#mqtt-bridge-setup-required)), Home Assistant offers each
+gateway under **Settings → Devices & services → Discovered** as
+**Opus GreenNet Bridge** with its EAG identifier. Select **Add** and confirm.
+
+- Discovery listens only to `EnOcean/+/stream/devices/+/friendlyId`, the
+  retained device-model name that the gateway publishes for each paired device.
+  It does not subscribe to the large retained snapshot.
+- Receiving the message publishes nothing and queries no device. A retained
+  message only names a candidate; it is not taken as proof that the gateway is
+  online. Confirming runs the same single uptime check as manual setup, and the
+  entry is created only if that specific gateway answers.
+- Every device announces the same gateway, so each gateway is offered once.
+  Configured, disabled and ignored gateways are not offered again. To have an
+  ignored gateway offered again, stop ignoring it on the integration page.
+- While an offer is open, adding the same identifier manually reports that a
+  configuration flow is already in progress. Use the offer, or ignore it first.
+- The identifier must appear in upper case in the topics, as the integration
+  subscribes in upper case. Other topics are ignored.
+- Requirements: MQTT discovery enabled in the MQTT integration (default), the
+  bridge configuration above, and at least one paired device. Unbridged
+  gateways cannot be discovered; manual setup is always available.
+
 ## Availability and command behavior
 
 The integration uses push updates, with a fresh MQTT uptime health check approximately
@@ -342,9 +380,12 @@ zone does not by itself prove that it is currently heating.
 - Cover positions during movement are estimates based on the reported travel
   time. The final position comes from the device report or status query.
 - The HOPPE AutoLock entity is read-only; lock and unlock actions are rejected.
-- The gateway is not discovered automatically; the EAG identifier is entered
-  manually. There is no options or reconfigure flow; a different gateway is a
-  new integration entry.
+- Gateway discovery depends on the bridged, retained `friendlyId` device-model
+  topics. A gateway without paired devices, a bridge that does not forward
+  `stream/#`, or a firmware that publishes no `friendlyId` is not discovered;
+  enter the EAG identifier manually. Discovery has not yet been observed on
+  real hardware. There is no options or reconfigure flow; a different gateway
+  is a new integration entry.
 - Quiet or batteryless devices are never removed automatically, because the
   gateway cannot confirm that a device is gone (see
   [Removing or replacing a device](#removing-or-replacing-a-device)).
@@ -368,6 +409,231 @@ The `device_id` is the EURID of the target device (fictional example: `AABB1122`
 gateway when more than one Opus GreenNet config entry is loaded. The two read
 actions return their response data directly in Home Assistant.
 
+## Use cases
+
+The integration reacts to reports the EnOcean devices send on their own. None
+of the following use cases needs polling, and battery-powered devices are never
+woken up by Home Assistant to serve them.
+
+- **Wall rockers as Home Assistant controls.** Use an EnOcean rocker to switch
+  Home Assistant lights, scenes or media. Each press and release is an event
+  entity; retained telegrams after a restart or reconnect never fire events.
+- **Window handles for heating and shading.** React to HOPPE handle positions,
+  for example to switch a HeatArea off while a window is open or tilted, or
+  feed the Open and Tilted binary sensors into a cover automation. The handle
+  reports its position, not a measurement of the window sash.
+- **Safety alarms.** Forward OPUS RWM smoke alarms, leak sensors and low
+  batteries to your phone or switch on lights for an escape route.
+- **Heating supervision.** Watch HeatArea warnings such as an actuator that does
+  not respond or a missing temperature, which are diagnostic binary sensors.
+- **Troubleshooting a handle.** Temporarily enable the unlock-request and
+  mechanics-fault diagnostics of a D2-06-40 handle to see what it reports.
+- **Controlling actuators.** Switch, dim, move covers and set HeatArea
+  temperatures from dashboards, voice assistants and automations.
+
+Battery-friendly behaviour in your own automations:
+
+- Trigger on state changes of the entities. Do not schedule
+  `opus_greennet.get_device_configuration`, `opus_greennet.get_device_parameters`
+  or `opus_greennet.set_device_configuration`: they access the device through
+  the ReCom API and are meant for manual administration.
+- Each accepted command causes up to two status checks (after 5 and 20
+  seconds) unless the device reports first. Use `for:` delays instead of
+  sending commands on every short change.
+- `opus_greennet.reload_entry` re-reads the device list from the gateway; it
+  is a recovery tool, not a refresh to run periodically.
+
+## Examples
+
+All entity IDs below are placeholders. Replace them with the IDs shown under
+**Settings → Devices & services → Opus GreenNet Bridge → Entities** for your
+installation. The examples use only existing entities and actions.
+
+### Rocker control
+
+Rocker events are named `<button>_<action>`, for example `buttonAI_pressed` or
+`buttonA0_released`; the attributes `button` and `action` carry the same
+information. The event entity's state is the time of the last event. When the
+integration reloads or reconnects, Home Assistant restores the last event, so
+the condition below ignores restored states instead of repeating an old press.
+
+```yaml
+alias: "Hallway rocker: lights"
+description: "Rocker A: I switches on, 0 switches off"
+mode: queued
+triggers:
+  - trigger: state
+    entity_id: event.hallway_rocker  # placeholder
+conditions:
+  # A restored or re-added state is not a new press.
+  - condition: template
+    value_template: >-
+      {{ trigger.from_state is not none
+         and trigger.from_state.state != 'unavailable'
+         and trigger.to_state is not none
+         and trigger.to_state.state not in ['unavailable', 'unknown'] }}
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.to_state.attributes.event_type == 'buttonAI_pressed' }}
+        sequence:
+          - action: light.turn_on
+            target:
+              entity_id: light.hallway  # placeholder
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.to_state.attributes.event_type == 'buttonA0_pressed' }}
+        sequence:
+          - action: light.turn_off
+            target:
+              entity_id: light.hallway  # placeholder
+```
+
+After `light.turn_on` the light shows the expected state as soon as the gateway
+accepts the command; the device report or the status checks confirm or correct
+it. The OPUS motion detector uses `buttonAI`/`buttonA0` for motion, which the
+integration already exposes as a Motion binary sensor; use that sensor instead
+of its rocker events.
+
+### Handle state
+
+Switch a heating zone off while a window is open or tilted, and back on when it
+has been closed for a minute. Unknown or unavailable handle values match none
+of the triggers, so missing data never switches the heating.
+
+```yaml
+alias: "Bedroom window: heating"
+mode: restart
+triggers:
+  - trigger: state
+    entity_id: sensor.bedroom_window_handle_position  # placeholder
+    to:
+      - open
+      - tilted
+    for: "00:02:00"
+    id: opened
+  - trigger: state
+    entity_id: sensor.bedroom_window_handle_position  # placeholder
+    to: closed
+    for: "00:01:00"
+    id: closed
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: opened
+        sequence:
+          - action: climate.turn_off
+            target:
+              entity_id: climate.bedroom  # placeholder
+      - conditions:
+          - condition: trigger
+            id: closed
+          - condition: state
+            entity_id: climate.bedroom  # placeholder
+            state: "off"
+        sequence:
+          - action: climate.turn_on
+            target:
+              entity_id: climate.bedroom  # placeholder
+```
+
+The sensor states are `open`, `closed` and `tilted`; the UI shows translated
+labels. `climate.turn_on` restores the profile's own "on" mode (heating or
+on). Each switch is one radio command plus at most two status checks, which is
+why the delays above avoid reacting to short handle movements. A closed handle
+does not imply that a D2-06-40 handle is locked; use the read-only AutoLock
+entity for the lock state.
+
+The unlock-request and mechanics-fault diagnostics of a D2-06-40 handle are
+disabled by default. To use the following example, enable
+`binary_sensor.bedroom_window_mechanics_fault` first (see
+[HOPPE window handles](#hoppe-window-handles)). Enabling it sends nothing to
+the handle.
+
+```yaml
+alias: "Bedroom window: mechanics fault"
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.bedroom_window_mechanics_fault  # placeholder
+    to: "on"
+    for: "00:05:00"
+actions:
+  - action: persistent_notification.create
+    data:
+      title: "Window handle"
+      message: "The bedroom window handle reports a mechanics fault."
+```
+
+### Alarm
+
+Forward a smoke alarm to a phone and switch on the hallway light. Only the
+state `on` is an alarm. `off` means the detector reported no alarm; `unknown`
+means no valid report was received yet and is never treated as "no alarm".
+A gateway or broker outage shows as `unavailable`; the second trigger warns
+about a longer outage instead of silently missing alarms.
+
+```yaml
+alias: "Smoke alarm"
+mode: single
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.kitchen_smoke_detector_smoke_alarm  # placeholder
+    to: "on"
+    id: alarm
+  - trigger: state
+    entity_id: binary_sensor.kitchen_smoke_detector_smoke_alarm  # placeholder
+    to: unavailable
+    for: "00:15:00"
+    id: unavailable
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: alarm
+        sequence:
+          - action: notify.mobile_app_my_phone  # placeholder
+            data:
+              title: "Smoke alarm"
+              message: "The kitchen smoke detector reports smoke."
+          - action: light.turn_on
+            target:
+              entity_id: light.hallway  # placeholder
+      - conditions:
+          - condition: trigger
+            id: unavailable
+        sequence:
+          - action: notify.mobile_app_my_phone  # placeholder
+            data:
+              title: "Smoke detector unreachable"
+              message: >-
+                The OPUS gateway or the MQTT connection has been unavailable
+                for 15 minutes. Check the gateway and the MQTT bridge.
+```
+
+The same pattern works for leak sensors (`binary_sensor.<name>_water_leak`,
+`on` = water detected) and for the detector's `battery_low` binary sensor. A
+quiet detector stays available: battery-powered detectors report changes
+rather than a heartbeat, so the integration cannot detect a removed or dead
+detector.
+
+### Dashboard
+
+An entities card for one window shows the state icons described above:
+
+```yaml
+type: entities
+title: Bedroom window
+entities:
+  - entity: sensor.bedroom_window_handle_position  # placeholder
+  - entity: binary_sensor.bedroom_window_handle_open  # placeholder
+  - entity: binary_sensor.bedroom_window_handle_tilted  # placeholder
+  - entity: lock.bedroom_window_autolock  # placeholder, D2-06-40 only
+```
+
 ## MQTT Topic Structure
 
 The integration follows the EnOcean over IP MQTT specification:
@@ -378,6 +644,7 @@ EnOcean/{EAG-Identifier}/stream/telegram/{Device-Identifier}/to    # Gateway →
 EnOcean/{EAG-Identifier}/put/devices/{Device-Identifier}/state     # Commands
 EnOcean/{EAG-Identifier}/get/devices                               # Device discovery
 EnOcean/{EAG-Identifier}/getAnswer/devices/{Device-Identifier}     # Discovery response
+EnOcean/{EAG-Identifier}/stream/devices/{Device-Identifier}/friendlyId  # Gateway discovery
 ```
 
 ## Telegram Payload Format
@@ -459,6 +726,23 @@ If an action times out after 10 seconds, the gateway may still execute it, and
 a late reply cannot be matched to the request. Check the physical state before
 repeating the command. The integration does not retry automatically.
 
+### Repairs
+
+The integration raises one kind of repair: after it removed a duplicate beta
+entity during a unique-ID migration (see
+[Upgrading from community test versions](#upgrading-from-community-test-versions)).
+Broker, bridge or radio outages and quiet sensors never create repairs; they
+show as unavailable entities and in the log.
+
+### Gateway not discovered
+
+- Check that the MQTT bridge forwards `EnOcean/<EAG-ID>/stream/#` and that
+  topics such as `EnOcean/<EAG-ID>/stream/devices/<DEVICE>/friendlyId` exist on
+  your broker (for example with MQTT Explorer).
+- Check that discovery is enabled in the MQTT integration options.
+- Check whether the gateway is already set up, disabled or ignored.
+- Add the gateway manually with its EAG identifier.
+
 ### Recovery
 
 - If the gateway does not answer at startup, Home Assistant retries the setup
@@ -530,7 +814,8 @@ the lag is inside Home Assistant or this integration.
 custom_components/opus_greennet/
 ├── __init__.py           # Integration setup and service registration
 ├── manifest.json         # Integration metadata and version
-├── config_flow.py        # UI configuration
+├── config_flow.py        # UI configuration and MQTT gateway discovery
+├── discovery.py          # Validation of discovered gateway candidates
 ├── const.py              # Constants, EEP mappings, and MQTT topics
 ├── coordinator.py        # MQTT communication, discovery, and commands
 ├── mqtt_transport.py     # Confirmed subscriptions, requests, and gateway probing
@@ -547,6 +832,7 @@ custom_components/opus_greennet/
 ├── binary_sensor_descriptions.py # Moisture and HeatArea sensor definitions
 ├── event.py              # Event entity platform (rocker switches)
 ├── services.yaml         # HA service definitions
+├── icons.json            # State-dependent entity icons and service icons
 ├── strings.json          # UI, service, and exception translation source
 └── translations/
     ├── en.json           # English translations
@@ -593,13 +879,17 @@ tests/
 ├── test_ha_lifecycle.py         # Real Home Assistant lifecycle and config flows
 ├── test_config_flow.py          # Config flow validation tests
 ├── test_config_flow_recovery.py # Recovery after every config flow error
+├── test_discovery.py            # MQTT gateway discovery, duplicates and races
+├── test_icon_translations.py    # icons.json states, fallbacks and semantics
+├── test_repair_issues.py        # Duplicate-entity repair lifecycle
 ├── test_translations.py         # Translation, exception key and service consistency
 ├── test_quality_scale.py        # quality_scale.yaml schema and rule evidence
 ├── test_reference_baseline.py   # Fixed reference release, core commit and CI evidence
 ├── test_traffic_baseline.py     # MQTT publish baseline per endpoint and trigger
 └── test_coverage_gate.py        # Per-module coverage gate
 script/
-└── check_coverage.py            # Per-module coverage gate used by CI
+├── check_coverage.py            # Per-module coverage gate used by CI
+└── check_icons.py               # icons.json against the pinned MDI catalogue
 ```
 
 ### Testing
@@ -611,6 +901,9 @@ ruff format --check .
 python -m mypy
 pytest -v --cov --cov-report=json:coverage.json
 python script/check_coverage.py coverage.json
+# Optional, needs a home-assistant/core checkout at the reference commit:
+python script/check_icons.py <core>/pylint/plugins/pylint_home_assistant/generated/mdi_icons.py \
+  custom_components/opus_greennet/icons.json
 ```
 
 Use Python 3.14 for development. Tests cover device properties, telegram parsing,

@@ -1,0 +1,50 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "handle_closed": {
+        "default": "mdi:help-circle-outline",
+        "state": {
+          "off": "mdi:window-open",
+          "on": "mdi:window-closed"
+        }
+      },
+      "mechanics_fault": {
+        "default": "mdi:cog-outline",
+        "state": {
+          "on": "mdi:alert-circle"
+        }
+      }
+    },
+    "sensor": {
+      "handle_state": {
+        "default": "mdi:help-circle-outline",
+        "state": {
+          "closed": "mdi:window-closed",
+          "open": "mdi:window-open",
+          "tilted": "mdi:window-open-variant"
+        }
+      },
+      "unlock_request": {
+        "default": "mdi:lock-question",
+        "state": {
+          "not_requested": "mdi:lock-outline",
+          "requested": "mdi:lock-clock"
+        }
+      }
+    }
+  },
+  "services": {
+    "get_device_configuration": {
+      "service": "mdi:file-download-outline"
+    },
+    "get_device_parameters": {
+      "service": "mdi:tune-variant"
+    },
+    "reload_entry": {
+      "service": "mdi:reload"
+    },
+    "set_device_configuration": {
+      "service": "mdi:file-upload-outline"
+    }
+  }
+}

@@ -19,11 +19,14 @@ Rule -> implementation -> tests -> documentation for every rule in
   official rule keys, the applicable official validators (`config-flow`,
   `runtime-data`, `strict-typing`, `test-before-setup`, `unique-config-entry`,
   `discovery`) and checks that this table matches the YAML.
-- Summary: 40 done, 9 exempt, 5 todo. All open items stay visible as `todo`.
-  Because bronze, silver and gold each contain open or exempt items that an
-  official review would have to accept, no tier is claimed.
+- Summary: 45 done, 9 exempt, 0 todo (phase 9 closed `discovery`,
+  `docs-examples`, `docs-use-cases`, `icon-translations` and `repair-issues`).
+  Exemptions still need acceptance by an official review, and discovery has not
+  been observed on hardware, so no tier is claimed.
 
-`QS` = `tests/test_quality_scale.py`, `TR` = `tests/test_translations.py`.
+`QS` = `tests/test_quality_scale.py`, `TR` = `tests/test_translations.py`,
+`DI` = `tests/test_discovery.py`, `IC` = `tests/test_icon_translations.py`,
+`RI` = `tests/test_repair_issues.py`.
 
 ## Bronze
 
@@ -71,24 +74,24 @@ Rule -> implementation -> tests -> documentation for every rule in
 |------|--------|----------------|-------|---------------|
 | `devices` | done | Gateway device in `__init__.py`, EnOcean devices via `device_info` with `via_device_id` (`entity.py`) | `test_init.py::test_setup_creates_gateway_registry_device`; `test_binary_sensor_discovery.py::test_gateway_discovery_and_tracking_are_isolated` | – |
 | `diagnostics` | done | `diagnostics.py` (config entry and device diagnostics, `TO_REDACT`, identifier redaction in text) | `test_diagnostics.py`, `test_diagnostics_edge_cases.py`; QS `test_stale_devices_and_diagnostics_entry_points` | README Troubleshooting |
-| `discovery` | todo | Not implemented (no manifest `mqtt` key, no `async_step_mqtt`) | QS `test_discovery_todo_matches_the_code` | README Known limitations |
-| `discovery-update-info` | exempt | No network address stored; communication only through the HA broker | – | – |
+| `discovery` | done | `manifest.json` `mqtt: ["EnOcean/+/stream/devices/+/friendlyId"]`; `discovery.py` (`normalize_eag_id`, `eag_id_from_discovery`); `config_flow.py` `async_step_mqtt` + `async_step_discovery_confirm` (shared unique ID, abort before side effects for known/ignored gateways, existing fresh probe on confirm) | DI (validation, duplicates, multiple gateways, ignored/disabled/invalid messages, setup races, error recovery, no publish before confirm); QS `test_discovery_status_matches_the_code` | README Automatic gateway discovery, Gateway not discovered, Known limitations |
+| `discovery-update-info` | exempt | No network address stored; discovery announces only the EAG identifier, which is the unique ID | DI `test_configured_gateway_aborts_without_side_effects` (no entry update) | – |
 | `docs-data-update` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Availability and command behavior |
-| `docs-examples` | todo | – | – | – |
+| `docs-examples` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Examples (rocker control, handle state, alarm, dashboard) |
 | `docs-known-limitations` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Known limitations |
 | `docs-supported-devices` | done | `const.py` `EEP_MAPPINGS` | TR `test_every_created_entity_has_a_translated_name` (all EEPs) | README Supported Device Types |
 | `docs-supported-functions` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Features, Supported Device Types, Services |
 | `docs-troubleshooting` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Troubleshooting |
-| `docs-use-cases` | todo | – | – | – |
+| `docs-use-cases` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Use cases |
 | `dynamic-devices` | done | `SIGNAL_DEVICE_DISCOVERED` dispatcher listeners in every platform | `test_coordinator_parsing.py::test_live_device_discovery_runs_after_initial_timer_completed`; `test_entities.py::test_sensor_setup_adds_new_types_after_profile_discovery`; `test_platform_edge_cases.py::test_lock_setup_adds_already_discovered_handles` | README Removing or replacing a device |
 | `entity-category` | done | `EntityCategory.DIAGNOSTIC` for signal strength, actuator status binary sensors and the D2-06-40 `unlock_request`/`mechanics_fault` handle diagnostics | `test_binary_sensor_descriptions.py::test_description_inventory_matches_stable`; `test_entities.py::test_sensor_values_and_metadata`; `test_handle_diagnostics.py` | `phases/phase-06.md` |
 | `entity-device-class` | done | Device classes on sensors, binary sensors and covers | `test_entities.py::test_sensor_values_and_metadata`, `::test_moisture_sensor_values_and_metadata`; `test_binary_sensor_descriptions.py` | – |
 | `entity-disabled-by-default` | done | `entity_registry_enabled_default = False` for the signal strength sensor and the D2-06-40 `unlock_request`/`mechanics_fault` diagnostics (new registry entries only) | `test_entities.py::test_sensor_values_and_metadata`; `test_handle_diagnostics.py::test_new_handle_registers_disabled_diagnostics`, `::test_existing_diagnostic_entries_keep_user_settings` | README HOPPE window handles; `phases/phase-06.md` |
 | `entity-translations` | done | `translation_key` on every named entity; `strings.json`, `translations/en.json`, `translations/de.json` | TR (all tests) | – |
 | `exception-translations` | done | `translation_domain`/`translation_key` on raised Home Assistant errors | TR `test_raised_exception_keys_are_translated`; `test_service_actions.py::test_rejected_read_surfaces_translated_error` | – |
-| `icon-translations` | todo | No `icons.json` | – | – |
+| `icon-translations` | done | `icons.json`: `sensor.handle_state`, `sensor.unlock_request`, `binary_sensor.handle_closed`, `binary_sensor.mechanics_fault` (state icons with neutral defaults) and four service icons; every other entity keeps its domain/device-class icon; no Python icon property | IC (states, fallbacks, unchanged classes, HA icon loader, no MQTT); CI `script/check_icons.py` against the MDI catalogue of core `8d7fd8b`; hassfest at `8d7fd8b` (schema) | README HOPPE window handles; `phases/phase-09.md` |
 | `reconfiguration-flow` | exempt | The only field (EAG identifier) is the config entry unique ID | QS `test_reconfiguration_exemption_matches_the_code` | README Known limitations |
-| `repair-issues` | todo | No repair issues yet; candidate in `quality_scale.yaml` comment | – | `phases/phase-07.md` |
+| `repair-issues` | done | `entity.py` `async_create_duplicate_beta_entity_issue` (persistent, fixable, confirm flow of the repairs integration) after the one-time duplicate removal; `__init__.py` `async_remove_entry` deletes the entry's issues | RI (creation, no issue without removal or on outages, restart persistence, confirmation, entry removal) | README Repairs, Upgrading from community test versions |
 | `stale-devices` | done | `async_remove_config_entry_device`; no automatic removal (gateway cannot confirm a device is gone) | `test_device_removal.py`; QS `test_stale_devices_and_diagnostics_entry_points` | README Removing or replacing a device |
 
 ## Platinum

@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{eag_id}",
     "step": {
       "user": {
         "title": "Opus GreenNet Bridge",
@@ -10,6 +11,10 @@
         "data_description": {
           "eag_id": "Die achtstellige Bridge-Kennung, die in den MQTT-Topics verwendet wird, z. B. A1B2C3D4 (fiktiv)."
         }
+      },
+      "discovery_confirm": {
+        "title": "Opus GreenNet Bridge",
+        "description": "Gateway {eag_id} einrichten? Es wurde in Gerätedaten auf deinem MQTT-Broker gefunden. Vor dem Anlegen des Eintrags wird geprüft, ob dieses Gateway antwortet. Dabei wird kein EnOcean-Gerät abgefragt."
       }
     },
     "error": {
@@ -20,7 +25,8 @@
     },
     "abort": {
       "already_configured": "Diese Bridge ist bereits konfiguriert",
-      "mqtt_not_configured": "Richte die MQTT-Integration ein und verbinde sie, bevor du diese Bridge hinzufügst"
+      "mqtt_not_configured": "Richte die MQTT-Integration ein und verbinde sie, bevor du diese Bridge hinzufügst",
+      "invalid_discovery_info": "Die MQTT-Nachricht kennzeichnet kein OPUS-Gateway"
     }
   },
   "entity": {
@@ -172,6 +178,19 @@
     },
     "autolock_read_only": {
       "message": "Die AutoLock-Steuerung über MQTT ist bis zur Klärung durch den Hersteller deaktiviert. Es wird nur der gemeldete Schlosszustand angezeigt."
+    }
+  },
+  "issues": {
+    "duplicate_beta_entity": {
+      "title": "Doppelte Entität {removed_entity_id} wurde entfernt",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Verweise auf {removed_entity_id} aktualisieren",
+            "description": "Bei der Übernahme der Upstream-Unique-IDs hat die Integration zwei Registry-Einträge für dasselbe Gerät und Gateway gefunden. Deine bestehende Entität {preserved_entity_id} wurde mit Entitäts-ID, Name und Einstellungen beibehalten, die doppelte Entität {removed_entity_id} wurde entfernt.\n\nAutomationen, Skripte, Szenen und Dashboards, die noch {removed_entity_id} verwenden, funktionieren nicht mehr. Ersetze diese Entitäts-ID durch {preserved_entity_id} und wähle anschließend Absenden, um diesen Hinweis zu schließen. Dabei wird nichts an das Gateway oder das Gerät gesendet."
+          }
+        }
+      }
     }
   },
   "services": {

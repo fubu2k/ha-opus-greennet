@@ -38,6 +38,7 @@ checked; the EEP alone is never used to infer a power source.
 | System info | `get/config/system/info` | gateway | resync | 1 per resync, answer not awaited | reference, code, mock test [`test_traffic_baseline.py`] |
 | Device inventory | `get/devices` | cache | resync | at most 1 per 60 s reconnect window (always while setup phase 2 is incomplete) | reference, code, mock test [`test_traffic_baseline.py`] |
 | Stream subscriptions | `stream/device(s)/#`, `stream/telegram/#` | none (subscribe, no publish) | setup, resync | no publish | code, mock test |
+| Gateway discovery (phase 9) | `EnOcean/+/stream/devices/+/friendlyId`, subscribed by the Home Assistant MQTT integration from `manifest.json` | none (subscribe, no publish) | HA start, broker reconnect | no publish on receipt; one uptime probe only after user confirmation (same as manual setup) | code, mock test [`test_discovery.py`] |
 
 Firmware effects of `get/devices` (pure cache read or internal refresh) are
 **unknown**; the reference lists it under "from gateway cache".
