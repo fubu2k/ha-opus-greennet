@@ -39,6 +39,7 @@ PARALLEL_UPDATES = 0
 
 # Numeric channel readings exposed by OpusGreenNetMeasurementSensor.
 MEASUREMENT_READINGS: Final[dict[str, Callable[[EnOceanChannel], float | None]]] = {
+    "temperature": lambda channel: channel.temperature,
     "illuminance": lambda channel: channel.illuminance,
     "supply_voltage": lambda channel: channel.supply_voltage,
     "battery_level": lambda channel: channel.battery_level,
@@ -125,6 +126,38 @@ async def async_setup_entry(
                         unit,
                     )
                 )
+
+        if device.is_temperature_humidity_sensor:
+            entities.append(
+                OpusGreenNetMeasurementSensor(
+                    coordinator,
+                    eag_id,
+                    gateway_device_id,
+                    device,
+                    "temperature",
+                    SensorDeviceClass.TEMPERATURE,
+                    UnitOfTemperature.CELSIUS,
+                )
+            )
+            entities.append(
+                OpusGreenNetHumiditySensor(
+                    coordinator=coordinator,
+                    eag_id=eag_id,
+                    gateway_device_id=gateway_device_id,
+                    device=device,
+                )
+            )
+            entities.append(
+                OpusGreenNetMeasurementSensor(
+                    coordinator,
+                    eag_id,
+                    gateway_device_id,
+                    device,
+                    "battery_level",
+                    SensorDeviceClass.BATTERY,
+                    UnitOfRatio.PERCENTAGE,
+                )
+            )
 
         if device.is_window_handle:
             entities.append(
