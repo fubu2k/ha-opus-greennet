@@ -2944,6 +2944,10 @@ class OpusGreenNetCoordinator:
         """Get a device by ID."""
         return self.devices.get(device_id)
 
+    def late_answer_diagnostics(self, owner: str) -> dict[str, int]:
+        """Return late-answer counters of a device or the gateway (diagnostics)."""
+        return self._requests.late_answer_diagnostics(owner)
+
     def get_devices_by_type(self, entity_type: str) -> list[EnOceanDevice]:
         """Get all devices of a specific entity type."""
         return [

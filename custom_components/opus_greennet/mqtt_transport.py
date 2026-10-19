@@ -6,9 +6,11 @@ import asyncio
 import heapq
 import itertools
 import logging
+from collections import deque
 from collections.abc import Callable
 from functools import partial
 from math import isfinite
+from time import monotonic
 
 from homeassistant.components import mqtt
 from homeassistant.components.mqtt import ReceiveMessage
@@ -45,6 +47,14 @@ MIN_SEND_INTERVAL = 0.0
 PRIORITY_COMMAND = 0
 PRIORITY_QUERY = 10
 PRIORITY_BACKGROUND = 20
+
+# Late-answer diagnostics (phase 12, option M6). OPUS answers carry no request
+# ID, so a request that ended without its answer (timeout or cancellation
+# after publish) leaves an answer that may still arrive and be taken by the
+# next request on the same answer topic. Such requests are remembered for this
+# long. The window only bounds the diagnostic flag; it never delays, retries,
+# drops or re-routes anything (guardrails A1 and A3).
+LATE_ANSWER_DIAGNOSTIC_WINDOW = 120.0
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -228,6 +238,12 @@ class MQTTRequestManager:
     Answer subscriptions are prepared before entering the global queue, so
     SUBACK latency never blocks the in-flight slot, and the acknowledgement
     deadline starts only after the request was physically published.
+
+    Late-answer diagnostics (phase 12, option M6) only observe: a request that
+    was published but ended without an answer is remembered for its answer
+    topic, an answer that no request takes settles the oldest such entry, and
+    an answer taken while an entry is still open is counted as possibly late
+    for the request's owner. Nothing is delayed, retried, dropped or re-routed.
     """
 
     def __init__(self, hass: HomeAssistant) -> None:
@@ -245,6 +261,11 @@ class MQTTRequestManager:
         # creating one broker subscription per request.
         self._route_patterns: list[str] = []
         self._routes: dict[str, Callable[[ReceiveMessage], None]] = {}
+        # Late-answer diagnostics: per answer topic, (monotonic time, owner)
+        # of published requests that ended without an answer, oldest first;
+        # per owner, the number of answers taken while one was still open.
+        self._unanswered: dict[str, deque[tuple[float, str]]] = {}
+        self._possibly_late: dict[str, int] = {}
 
     @property
     def queue_depth(self) -> int:
@@ -265,8 +286,69 @@ class MQTTRequestManager:
     @callback
     def async_route(self, msg: ReceiveMessage) -> None:
         """Feed a message from a persistent subscription to its pending request."""
-        if handler := self._routes.get(getattr(msg, "topic", "")):
+        topic = getattr(msg, "topic", "")
+        if handler := self._routes.get(topic):
             handler(msg)
+        elif not getattr(msg, "retain", False):
+            # No request owns the topic: this answer belongs to none of ours.
+            self._record_unowned_answer(topic)
+
+    def _open_unanswered(self, answer_topic: str) -> deque[tuple[float, str]] | None:
+        """Return the unexpired unanswered requests of a topic, if any."""
+        entries = self._unanswered.get(answer_topic)
+        if entries is None:
+            return None
+        expired_before = monotonic() - LATE_ANSWER_DIAGNOSTIC_WINDOW
+        while entries and entries[0][0] < expired_before:
+            entries.popleft()
+        if not entries:
+            del self._unanswered[answer_topic]
+            return None
+        return entries
+
+    @callback
+    def _record_unanswered(self, answer_topic: str, owner: str) -> None:
+        """Remember a published request that ended without its answer."""
+        self._unanswered.setdefault(answer_topic, deque()).append((monotonic(), owner))
+        _LOGGER.debug(
+            "OPUS request for %s ended without an answer; a late answer may "
+            "still arrive and be taken by the next request to the same endpoint",
+            owner,
+        )
+
+    @callback
+    def _record_unowned_answer(self, answer_topic: str) -> None:
+        """An answer no request took settles the oldest unanswered request."""
+        if (entries := self._open_unanswered(answer_topic)) is not None:
+            entries.popleft()
+            if not entries:
+                del self._unanswered[answer_topic]
+
+    @callback
+    def _record_taken_answer(self, answer_topic: str, owner: str) -> None:
+        """Count an answer taken while an earlier one may still be in transit."""
+        if (entries := self._open_unanswered(answer_topic)) is None:
+            return
+        self._possibly_late[owner] = self._possibly_late.get(owner, 0) + 1
+        _LOGGER.debug(
+            "OPUS answer for %s may belong to an earlier request that ended "
+            "without its answer (%d open); OPUS answers carry no request ID",
+            owner,
+            len(entries),
+        )
+
+    def late_answer_diagnostics(self, owner: str) -> dict[str, int]:
+        """Return the late-answer counters of one device or gateway."""
+        unanswered = 0
+        for topic in list(self._unanswered):
+            if (entries := self._open_unanswered(topic)) is not None:
+                unanswered += sum(
+                    1 for _, entry_owner in entries if entry_owner == owner
+                )
+        return {
+            "unanswered_requests": unanswered,
+            "possibly_late_answers": self._possibly_late.get(owner, 0),
+        }
 
     def _is_routed(self, answer_topic: str) -> bool:
         return any(topic_matches(p, answer_topic) for p in self._route_patterns)
@@ -299,6 +381,9 @@ class MQTTRequestManager:
         self._device_generations[device_id] = (
             self._device_generations.get(device_id, 0) + 1
         )
+        # A re-added child starts with fresh counters. Its open unanswered
+        # requests stay: their answers can still arrive (phase 12, L5).
+        self._possibly_late.pop(device_id, None)
         for future, owner in self._waiters.copy().items():
             if owner == device_id and not future.done():
                 future.set_exception(request_error("request_cancelled", device_id))
@@ -308,6 +393,8 @@ class MQTTRequestManager:
         """Prevent new operations and cancel current response waits."""
         self._closed = True
         self.async_cancel_pending()
+        self._unanswered.clear()
+        self._possibly_late.clear()
 
     async def async_request(
         self,
@@ -395,14 +482,31 @@ class MQTTRequestManager:
         self._waiters[subscribed] = device_id
         self._waiters[response] = device_id
         sent = False
+        answered = False
+        publish_failed = False
         send_slot = False
         routed = False
         cancellations: list[Callable[[], None]] = []
 
         @callback
         def handle_response(msg: ReceiveMessage) -> None:
-            if not sent or response.done() or getattr(msg, "retain", False):
+            nonlocal answered
+            if getattr(msg, "retain", False):
                 return
+            if not sent:
+                # Published before this request: never taken (phase 12, L2).
+                self._record_unowned_answer(answer_topic)
+                return
+            if response.done():
+                if answered:
+                    # A second answer while this request still listens.
+                    self._record_unowned_answer(answer_topic)
+                else:
+                    # Arrived after a local cancellation: it settles this one.
+                    answered = True
+                return
+            answered = True
+            self._record_taken_answer(answer_topic, device_id)
             try:
                 data = decode_response(msg.payload, require_status=require_status)
             except ValueError as err:
@@ -468,7 +572,12 @@ class MQTTRequestManager:
             if before_publish is not None:
                 before_publish()
             sent = True
-            await mqtt.async_publish(self.hass, topic, payload, qos=1, retain=False)
+            try:
+                await mqtt.async_publish(self.hass, topic, payload, qos=1, retain=False)
+            except HomeAssistantError:
+                # Nothing reached the broker: no answer can follow.
+                publish_failed = True
+                raise
             # The acknowledgement timeout starts exactly once the request
             # has actually been published, never at creation or enqueue.
             async with asyncio.timeout(timeout):
@@ -479,6 +588,10 @@ class MQTTRequestManager:
         except TimeoutError as err:
             raise request_error("request_timeout", device_id) from err
         finally:
+            if sent and not answered and not publish_failed and not self._closed:
+                # Timeout or cancellation after publish: the answer may still
+                # come. Diagnostics only; the next request is not delayed (A3).
+                self._record_unanswered(answer_topic, device_id)
             if send_slot:
                 self._last_send_done = asyncio.get_running_loop().time()
                 self._send_lock.release()

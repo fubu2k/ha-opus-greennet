@@ -836,6 +836,14 @@ gateway status, discovered devices, channel state, last update source, and the
 latest bridge command error without adding volatile diagnostic fields to every
 entity state.
 
+Each device and the gateway also list `late_answers`:
+`unanswered_requests` counts requests from the last two minutes that ended
+without an answer (timeout or cancellation), and `possibly_late_answers` counts
+answers that arrived while such a request was still open and may therefore
+belong to it (see [Timeouts without a request ID](#timeouts-without-a-request-id)).
+These counters only make the situation visible; they never delay, repeat or
+change a request.
+
 For local switch tests, press the physical control and compare the time between
 `received`, `dispatch`, and `entity_write`. If `received` is already delayed, the
 lag is before this integration. If `received` is fast but `entity_write` is slow,
@@ -897,6 +905,7 @@ tests/
 ├── test_field_freshness.py      # Retained replays versus live fields per channel
 ├── test_ack_device_health.py    # ACK 201 deferred delivery and per-device health
 ├── test_late_responses.py       # Late answers without a request ID (limitation pinned)
+├── test_late_answer_diagnostics.py # Late-answer counters in diagnostics (no traffic change)
 ├── test_coordinator_transport.py # Subscription, request, and recovery tests
 ├── test_transport_edge_cases.py # Request queue, subscription and probe edge cases
 ├── test_release_transport_safety.py # Interrupted startup and queue fault recovery
