@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- The supply voltage of SMS presence detectors (A5-07-01/03) is classified as a diagnostic entity and appears under **Diagnostic** on the device page. It stays enabled; existing entries keep their enabled/disabled setting, entity ID, name and icon, so automations continue to work.
+- Battery levels of all OPUS devices that report one (SMS presence detectors, A5-04-01/02/03 temperature/humidity sensors and the OPUS motion detector) are displayed in whole percent, for example `88 %` instead of `87.5 %`. Only the display is rounded: entity state, history and long-term statistics keep the reported value, and a display precision you set in the entity settings takes precedence.
+- Neither change sends a request to a device or changes MQTT traffic, entity inventory or unique IDs.
+
 ## [0.7.0b2] - 2026-10-19
 
 Quality series (phases 1-11) plus the device support of upstream v0.7.0b1 (kegelmeier/ha-opus-greennet), integrated into this fork's architecture. Existing entity IDs, unique IDs, device assignments, topics, services and wire payloads are unchanged.
