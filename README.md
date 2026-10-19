@@ -713,6 +713,14 @@ answer earlier requests. Retained radio telegrams never fire rocker events.
 After a reconnect a fresh device list is requested at most once every 60
 seconds.
 
+While the connection is uninterrupted, a retained device-model value no longer
+overwrites a field (per device and channel) that has already been updated by a
+live message, a radio telegram or the answer to the integration's own device
+list request. Other fields, other channels and the first snapshot of a device
+are applied as before. After a broker or bridge outage, retained values apply
+again, because they can be newer than the last value received live. This
+protection sends no MQTT request.
+
 ### Estimated values
 
 Cover position and tilt during a movement are estimated from the reported
@@ -846,6 +854,7 @@ tests/
 ├── test_coordinator_parsing.py  # JSON telegrams, fragments, and late discovery
 ├── test_coordinator_edge_cases.py # Malformed payloads, timers, and availability logging
 ├── test_retained_device_answers.py # Retained response and entity state regressions
+├── test_field_freshness.py      # Retained replays versus live fields per channel
 ├── test_coordinator_transport.py # Subscription, request, and recovery tests
 ├── test_transport_edge_cases.py # Request queue, subscription and probe edge cases
 ├── test_release_transport_safety.py # Interrupted startup and queue fault recovery

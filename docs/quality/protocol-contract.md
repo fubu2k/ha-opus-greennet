@@ -182,8 +182,8 @@ RWM (F6-05-02): value-only slots in `transmitModes` are resolved as `smokeAlarm`
 
 | Input | Retained message |
 |-------|------------------|
-| `stream/devices/#` | processed (snapshot, discovery); raw debug log suppressed |
-| `stream/device/#` | processed; raw debug log suppressed; latency log only for live messages |
+| `stream/devices/#` | processed (snapshot, discovery); raw debug log suppressed; since phase 10 a state value for a field already known in the armed session is discarded (6.1) |
+| `stream/device/#` | processed; raw debug log suppressed; latency log only for live messages; phase 10 rule 6.1 as for `stream/devices` |
 | `stream/telegram/#` | **discarded** (no events, no state) |
 | `getAnswer/devices/#` | **discarded** |
 | `putAnswer/devices/+/state` | routed to the request manager (which ignores retained), no state |
@@ -194,7 +194,52 @@ RWM (F6-05-02): value-only slots in `transmitModes` are resolved as `smokeAlarm`
 Additional existing freshness rule: on rediscovery of a known device, the
 snapshot state is only applied if the last live update is not newer than
 `_resync_requested_at`; otherwise only `rotationTime`/`channel` are applied.
+Since phase 10, "live" means a non-retained message: an applied retained replay
+keeps `last_update_received_monotonic` unchanged and is reported as
+`<source> (retained)` in `last_update_source`, so a replay arriving after the
+resync request no longer suppresses the requested snapshot answer. A delta
+window (`_device_stream_data`) opened by a retained message counts as retained
+until a live message joins it (`_device_stream_replay_windows`).
 Button keys from `stream/devices` are never treated as occurrences. **[Code][Test]**
+
+### 6.1 Field-level freshness of retained replays (phase 10)
+
+Basis: an established subscription receives every publication with retain=0;
+retain=1 is only set for messages sent because a subscription was made
+(MQTT 3.1.1 [MQTT-3.3.1-8/9]). Home Assistant re-subscribes each wildcard one
+at a time and exact topics afterwards (`_async_perform_subscriptions`, HA
+2026.10.2), and keeps every subscription until disconnect. **[Ref][Code]**
+
+- **Session.** Armed (`_replay_guard_armed`) at the end of a successful
+  `_async_refresh_gateway` health probe, after its uptime answer and before the
+  optional `get/devices` request, and only if all four stream wildcards are in
+  `_stream_topics`. Disarmed and cleared by `_cancel_background_work` (MQTT
+  disconnect, bridge `0`, unload). A failed probe does not disarm or arm.
+- **Provenance.** `_live_fields[device] = {(channel, key)}`, recorded only while
+  armed, from: non-retained `stream/devices` and `stream/device` value
+  messages (field resolved at receipt), fast-path `batteryLevel`/`dbm`,
+  applied telegram functions (`from` and optimistic `to`, without estimated
+  cover positions), and non-retained `getAnswer/devices` answers. No wire
+  timestamps or sequence numbers are used. **[Code][Test]**
+- **Field resolution.** Fast-path scalars → `(0, key)`; named
+  `states/<key>` → `(0, key)` for `KNOWN_STATE_KEYS` only; indexed
+  `states|transmitModes/<n>/value` → key from the cached model or the open
+  delta window, channel as in `_indexed_changed_functions` (RWM value-only
+  slots resolved for F6-05-02). Metadata, `key`/`channel` paths, buttons and
+  configuration parameters are never resolved and therefore never discarded.
+- **Rule.** A retained value whose resolved field is in `_live_fields` is
+  neither applied nor written to `_device_data`. Everything else is processed
+  exactly as in the table above: first snapshots, other fields, other channels,
+  devices without provenance, replays before arming and after an interruption.
+- **Feedback parity (A1).** A discarded replay is still passed to
+  `_record_confirmed_feedback` (known devices only), so pending reconciliation is
+  cancelled exactly as before phase 10 and no additional query is published.
+- **Cleanup.** `async_forget_device` removes the device's provenance; size is
+  bounded by devices × reported fields and reset on every interruption.
+- **Residual risk [unverified].** A stream-wildcard SUBACK that times out
+  during setup phase 2 still arms the session; a Mosquitto bridge reconnect
+  forwards the gateway's retained topics to Home Assistant as live messages,
+  which this rule cannot distinguish. Hardware ordering was not observed.
 
 ## 7. Availability, health and timing (frozen by A1–A3)
 

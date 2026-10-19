@@ -176,6 +176,13 @@ Status update 2026-10-19 (phase 9): implemented on branch
 entities and the service actions; `mdi:alert-circle` replaces `mdi:cog-alert`.
 The remaining metadata review of resumed phase 6 (section 10) stays open.
 
+Status update 2026-10-19 (phase 10): phase 9 merged (PR #7, merge `e4bb5e9`).
+Phase 10 was started before the resumed phase 6 metadata review at the
+maintainer's request; that review stays open. Phase 10 is implemented on branch
+`fix/opus-q10-field-freshness`, report `phases/phase-10.md`: session-scoped
+field provenance for retained replays (protocol contract section 6.1) and live-only
+receipt times for the rediscovery rule. Not merged; CI on the branch is pending.
+
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
 phase 8 -> phase 9 -> resumed phase 6 -> phases 10, 11, 12 -> phase 13.
