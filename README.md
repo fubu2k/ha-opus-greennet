@@ -766,6 +766,14 @@ If an action times out after 10 seconds, the gateway may still execute it, and
 a late reply cannot be matched to the request. Check the physical state before
 repeating the command. The integration does not retry automatically.
 
+If the late reply arrives while the next request to the same device is
+waiting, it is taken as that request's reply. The next action can then report
+success although the gateway rejected it, or report an error although the
+gateway accepted it. Replies never cross devices, and retained replies are
+ignored. A device report always overrides what the reply suggested. The same
+applies to a reply to another MQTT client (for example the MyOPUS app) that
+arrives while a request to the same device is waiting.
+
 ### Repairs
 
 The integration raises one kind of repair: after it removed a duplicate beta
@@ -888,6 +896,7 @@ tests/
 ├── test_retained_device_answers.py # Retained response and entity state regressions
 ├── test_field_freshness.py      # Retained replays versus live fields per channel
 ├── test_ack_device_health.py    # ACK 201 deferred delivery and per-device health
+├── test_late_responses.py       # Late answers without a request ID (limitation pinned)
 ├── test_coordinator_transport.py # Subscription, request, and recovery tests
 ├── test_transport_edge_cases.py # Request queue, subscription and probe edge cases
 ├── test_release_transport_safety.py # Interrupted startup and queue fault recovery
