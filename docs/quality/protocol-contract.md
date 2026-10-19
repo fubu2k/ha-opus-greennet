@@ -33,6 +33,21 @@ characters, normalised to upper case by the config flow.
 SUBACKs of the stream group are advisory only (`required=False`); a missing
 SUBACK does not fail the health probe. **[Code][Test]**
 
+### 1.1a Discovery subscription (phase 9, Home Assistant MQTT integration)
+
+`manifest.json` declares `"mqtt": ["EnOcean/+/stream/devices/+/friendlyId"]`.
+The Home Assistant MQTT integration (not the coordinator) subscribes to this
+filter and starts a config flow per new topic/payload pair. `async_step_mqtt`
+accepts only `EnOcean/<EAG>/stream/devices/<DEV>/friendlyId` with a non-empty
+payload and an EAG segment already in canonical upper-case form
+(`discovery.py`); everything else aborts with `invalid_discovery_info`.
+Retained and live messages are equal candidates; neither is a health signal.
+Receipt publishes nothing. Known, disabled and ignored gateways abort with
+`already_configured` before a unique ID is set (no discovery-key update, no
+reload of a retrying entry). Confirmation runs the existing
+`async_probe_gateway` uptime request once, exactly as manual setup. The payload
+(device name) is neither stored nor logged. **[Code][Test]**
+
 Temporary subscriptions (QoS 1) are created by `MQTTRequestManager` only for
 answer topics not covered by a registered route (profile, configuration,
 parameters). Registered routes: the uptime answer and `putAnswer/devices/+/state`. **[Code]**
@@ -41,7 +56,7 @@ parameters). Registered routes: the uptime answer and `putAnswer/devices/+/state
 
 | Topic | Payload | QoS / retain | Trigger |
 |-------|---------|--------------|---------|
-| `…/get/config/system/uptime` | `""` | 1 / false | setup, health tick, reconnect, config flow |
+| `…/get/config/system/uptime` | `""` | 1 / false | setup, health tick, reconnect, config flow (manual submit or discovery confirmation) |
 | `…/get/devices` | `""` | 1 / false | resync only |
 | `…/get/config/system/info` | `""` | 1 / false | resync only, answer not awaited |
 | `…/put/devices/<DEV>/state` | `{"state": {"functions": [...]}}` | 1 / false | commands and status queries |
@@ -224,6 +239,19 @@ Registry migrations (existing, unchanged): legacy multi-channel
 `<EAG>_<DEV>` → `<EAG>_<DEV>_ch0` (light, switch); fork suffixes
 `_illumination` → `_illuminance` and `_window_handle_lock` → `_autolock`.
 
+Repair issue (phase 9): when the fork-suffix migration removes a duplicate
+beta entry, `duplicate_beta_entity_<removed entity ID>` is created once
+(persistent, fixable via the repairs confirm flow, severity warning, data
+`config_entry_id`). It is deleted on confirmation or when the config entry is
+removed. The aggregate multi-channel cleanup raises no issue. No other code
+path creates issues; outages never do. **[Code][Test]**
+
+Icons (phase 9): `icons.json` adds state icons for `sensor.handle_state`,
+`sensor.unlock_request`, `binary_sensor.handle_closed` and
+`binary_sensor.mechanics_fault`, keyed by the unchanged raw states. Unique IDs,
+translation keys, device classes, categories and defaults are unchanged.
+Icons are frontend metadata only. **[Code][Test]**
+
 ## 9. Services (public, unchanged)
 
 `opus_greennet.get_device_configuration` (response only),
@@ -246,3 +274,7 @@ optional `config_entry_id`.
 - Whether the gateway publishes `stream/device/<DEV>/dbm` for rockers (relevance
   of finding F1) is **[unverified]**.
 - Whether the Mosquitto bridge status is published as retained is **[unverified]**.
+- Whether every firmware publishes a retained `stream/devices/<DEV>/friendlyId`
+  leaf for each device (the discovery filter) is **[unverified]** on hardware;
+  the evidence is a field report of a numeric `friendlyId` topic (CHANGELOG)
+  and the flattened device model of the reference.

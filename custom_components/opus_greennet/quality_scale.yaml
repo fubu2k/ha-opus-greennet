@@ -93,22 +93,23 @@ rules:
   devices: done
   diagnostics: done
   discovery:
-    status: todo
+    status: done
     comment: >-
-      No MQTT discovery (manifest mqtt topics / async_step_mqtt). The bridge
-      publishes under EnOcean/<EAG-ID>/..., so discovery is technically possible
-      but not implemented.
+      MQTT discovery: manifest mqtt filter EnOcean/+/stream/devices/+/friendlyId
+      and async_step_mqtt. A message names a candidate only; confirmation runs
+      the existing fresh uptime check. Requires bridged OPUS topics.
   discovery-update-info:
     status: exempt
     comment: >-
       The config entry stores no network address; the gateway is reached only
       through the Home Assistant MQTT broker by its stable EAG identifier.
+      Discovery announces only that identifier, which is the unique ID.
   docs-data-update:
     status: done
     comment: README section Availability and command behavior.
   docs-examples:
-    status: todo
-    comment: No automation or dashboard examples are documented yet.
+    status: done
+    comment: README section Examples (rocker control, handle state, alarm, dashboard).
   docs-known-limitations:
     status: done
     comment: README section Known limitations.
@@ -122,8 +123,8 @@ rules:
     status: done
     comment: README section Troubleshooting.
   docs-use-cases:
-    status: todo
-    comment: No use-case section is documented yet.
+    status: done
+    comment: README section Use cases, including battery-friendly automation advice.
   dynamic-devices:
     status: done
     comment: Devices discovered after setup are added through dispatcher signals.
@@ -138,8 +139,11 @@ rules:
   entity-translations: done
   exception-translations: done
   icon-translations:
-    status: todo
-    comment: No icons.json; entities rely on device-class default icons.
+    status: done
+    comment: >-
+      icons.json with state icons for the handle position, handle closed,
+      unlock request and mechanics fault entities plus service icons; all other
+      entities keep their device-class icons. No Python icon properties.
   reconfiguration-flow:
     status: exempt
     comment: >-
@@ -147,11 +151,11 @@ rules:
       entry unique ID. Changing it addresses a different gateway and requires a
       new config entry.
   repair-issues:
-    status: todo
+    status: done
     comment: >-
-      No repair issues yet. Candidate: the one-time removal of a duplicate beta
-      entity during unique-ID migration, which currently only logs a warning.
-      Transient broker, bridge or radio outages are intentionally not issues.
+      Persistent, fixable repair after the one-time removal of a duplicate beta
+      entity during unique-ID migration. Transient broker, bridge or radio
+      outages and quiet sensors are intentionally not issues.
   stale-devices:
     status: done
     comment: >-

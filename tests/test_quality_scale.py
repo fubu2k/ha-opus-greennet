@@ -284,8 +284,8 @@ def test_unique_config_entry_validator() -> None:
     assert _calls(flow, "_abort_if_unique_id_configured")
 
 
-def test_discovery_todo_matches_the_code() -> None:
-    """The official discovery validator fails, so the rule must stay todo."""
+def test_discovery_status_matches_the_code() -> None:
+    """The official discovery validator decides between todo and done."""
     manifest_keys = {
         "bluetooth",
         "dhcp",
@@ -432,6 +432,8 @@ def test_actions_are_set_up_in_async_setup() -> None:
         ("docs-supported-devices", "## Supported Device Types"),
         ("docs-supported-functions", "## Features"),
         ("docs-troubleshooting", "## Troubleshooting"),
+        ("docs-examples", "## Examples"),
+        ("docs-use-cases", "## Use cases"),
     ],
 )
 def test_documentation_rules_point_to_existing_sections(rule, heading) -> None:
@@ -456,3 +458,34 @@ def test_ci_enforces_the_promised_gates() -> None:
     assert fail_under > 95
     # No file is excluded from measurement to reach the number.
     assert "omit" not in pyproject
+
+
+def test_examples_cover_the_planned_use_cases() -> None:
+    """docs-examples: rocker control, handle state and an alarm, as YAML."""
+    examples = README.split("## Examples", 1)[1].split("\n## ", 1)[0]
+    for heading in ("### Rocker control", "### Handle state", "### Alarm"):
+        assert heading in examples, heading
+    assert examples.count("```yaml") >= 4
+    # Examples never schedule ReCom device access.
+    assert "get_device_configuration" not in examples
+    assert "get_device_parameters" not in examples
+
+
+def test_icon_translations_are_provided() -> None:
+    assert STATUS["icon-translations"] == "done"
+    icons = json.loads((INTEGRATION / "icons.json").read_text(encoding="utf-8"))
+    assert icons["entity"]
+
+
+def test_repair_issues_are_raised_and_translated() -> None:
+    assert STATUS["repair-issues"] == "done"
+    assert _calls(_module("entity"), "async_create_issue")
+    strings = json.loads((INTEGRATION / "strings.json").read_text(encoding="utf-8"))
+    assert "duplicate_beta_entity" in strings["issues"]
+    # Outages are availability, not repairs: only the migration raises one.
+    raising = [
+        path.name
+        for path in INTEGRATION.glob("*.py")
+        if _calls(ast.parse(path.read_text(encoding="utf-8")), "async_create_issue")
+    ]
+    assert raising == ["entity.py"]
