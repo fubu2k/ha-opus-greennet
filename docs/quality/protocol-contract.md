@@ -209,9 +209,11 @@ Device identifier: `(opus_greennet, "<EAG>_<DEV>")`; gateway: `(opus_greennet, "
 | climate | `entity_type == "climate"` | `<EAG>_<DEV>` | enabled |
 | event | `entity_type == "event"` (F6-02-xx, F6-03-xx) | `<EAG>_<DEV>` | enabled |
 | lock | D2-06-40 | `<EAG>_<DEV>_autolock` (read-only) | enabled |
-| sensor | HeatArea: `humidity`; D1-4B-05: `feed_temperature`; D1-4B-07: `energy_consumption`; SMS: `illuminance`, `supply_voltage`, `battery_level`; handle: `handle_state`; D2-06-40: `unlock_request` | `<EAG>_<DEV>_<suffix>` | enabled |
+| sensor | HeatArea: `humidity`; D1-4B-05: `feed_temperature`; D1-4B-07: `energy_consumption`; SMS: `illuminance`, `supply_voltage`, `battery_level`; handle: `handle_state` | `<EAG>_<DEV>_<suffix>` | enabled |
+| sensor | D2-06-40: `unlock_request` (diagnostic, phase 6) | `<EAG>_<DEV>_unlock_request` | **disabled for new registry entries**; existing entries unchanged |
 | sensor | **every** discovered device: `signal_strength` | `<EAG>_<DEV>_signal_strength` | **disabled** |
-| binary_sensor | SMS: `motion`; handle: `handle_open`, `handle_tilt`, `handle_closed`; D2-06-40: `mechanics_fault`; RWM: `smoke_alarm`, `battery_low`; descriptions: `liquid_detected` (F6-05-01), `window_open`, `actuator_not_responding`, `missing_temperature` (HeatArea), `actuator_low_battery`, `actuator_deactivated` (D1-4B-05), `circuit_in_use` (D1-4B-06) | `<EAG>_<DEV>_<key>` | enabled |
+| binary_sensor | SMS: `motion`; handle: `handle_open`, `handle_tilt`, `handle_closed`; RWM: `smoke_alarm`, `battery_low`; descriptions: `liquid_detected` (F6-05-01), `window_open`, `actuator_not_responding`, `missing_temperature` (HeatArea), `actuator_low_battery`, `actuator_deactivated` (D1-4B-05), `circuit_in_use` (D1-4B-06) | `<EAG>_<DEV>_<key>` | enabled |
+| binary_sensor | D2-06-40: `mechanics_fault` (diagnostic, phase 6) | `<EAG>_<DEV>_mechanics_fault` | **disabled for new registry entries**; existing entries unchanged |
 
 Registry migrations (existing, unchanged): legacy multi-channel
 `<EAG>_<DEV>` → `<EAG>_<DEV>_ch0` (light, switch); fork suffixes

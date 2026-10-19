@@ -131,7 +131,10 @@ rules:
   entity-device-class: done
   entity-disabled-by-default:
     status: done
-    comment: The per-device signal strength sensor is disabled by default.
+    comment: >-
+      The per-device signal strength sensor and the D2-06-40 handle unlock
+      request and mechanics fault diagnostics are disabled for new registry
+      entries; existing user enablement is preserved.
   entity-translations: done
   exception-translations: done
   icon-translations:

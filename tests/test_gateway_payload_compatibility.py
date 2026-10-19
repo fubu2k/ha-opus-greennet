@@ -4,7 +4,9 @@ import asyncio
 import json
 
 import pytest
+from homeassistant.helpers import entity_registry as er
 
+from custom_components.opus_greennet.const import DOMAIN
 from custom_components.opus_greennet.coordinator import OpusGreenNetCoordinator
 from tests.ha_helpers import configure_bridge, wait_for_entity
 
@@ -123,6 +125,20 @@ async def test_rwm_original_alarm_key_and_boolean_battery(hass, mqtt_transport, 
 
 @pytest.mark.parametrize("eep", ["D2-06-40", "F6-10-00", "D2-03-10"])
 async def test_hoppe_original_keys_reach_position_entities(hass, mqtt_transport, eep):
+    entry = (await configure_bridge(hass))["result"]
+    await hass.async_block_till_done()
+    if eep == "D2-06-40":
+        # Unlock request and mechanics fault are disabled for NEW registry
+        # entries. Simulate an existing installation in which the user keeps
+        # them enabled, so their pushed states remain observable here.
+        registry = er.async_get(hass)
+        for domain, suffix in (
+            ("sensor", "unlock_request"),
+            ("binary_sensor", "mechanics_fault"),
+        ):
+            registry.async_get_or_create(
+                domain, DOMAIN, f"AABB0011_HANDLE_{suffix}", config_entry=entry
+            )
     mqtt_transport.devices = [
         {
             "deviceId": "HANDLE",
@@ -135,7 +151,10 @@ async def test_hoppe_original_keys_reach_position_entities(hass, mqtt_transport,
             },
         }
     ]
-    entry = (await configure_bridge(hass))["result"]
+    mqtt_transport.receive(
+        "EnOcean/AABB0011/getAnswer/devices",
+        {"header": {"httpStatus": 200}, "devices": mqtt_transport.devices},
+    )
     position = await wait_for_entity(hass, "sensor", "AABB0011_HANDLE_handle_state")
     tilt = await wait_for_entity(hass, "binary_sensor", "AABB0011_HANDLE_handle_tilt")
     assert hass.states.get(position).state == "closed"
