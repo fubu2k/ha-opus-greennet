@@ -1,7 +1,7 @@
 # Phase 12 - Late-response ambiguity investigation
 
 - **Status:** investigation implemented as tests and documentation on the
-  branch; awaiting review. Not merged, no PR. No production code change, no
+  branch; CI green (run `39313178932`, section 9); awaiting review. Not merged, no PR. No production code change, no
   version change, no release, no CHANGELOG entry.
 - **Branch:** `test/opus-q12-late-responses` (new)
 - **Base SHA:** `c1ac37656198892f668cb9503ee18a3c508d8cf5` (`main`,
@@ -189,7 +189,11 @@ transmissions; no hardware claim is made.
 | `ruff format --check .` | passed (95 files) | local, ruff 0.16.3 |
 | `pytest tests/test_late_responses.py`, three repetitions | 18 passed each time | local smoke run, **not authoritative**: CPython 3.14.6, pytest 9.1.1, with a minimal stand-in for Home Assistant and a small asyncio runner instead of pytest-asyncio (both kept outside the repository). The integration modules under test (`mqtt_transport.py`, `coordinator.py`, `enocean_device.py`, `entity.py`, `switch.py`) were the real ones. |
 | Sensitivity check (local, same harness, reverted) | removing the `sent` check fails `test_late_answer_before_next_publish_is_discarded`; removing the retained check in `handle_response` fails both retained tests; `MIN_SEND_INTERVAL = 0.2` fails 16 of 18 cases | local smoke run |
-| pip check, strict mypy, full pytest with real Home Assistant, coverage gates, hassfest, race repetitions | not executed locally (PyPI is not reachable from this environment) | CI pending |
+| pip check, strict mypy, full pytest with real Home Assistant, coverage gates, hassfest, race repetitions | not executed locally (PyPI is not reachable from this environment) | – |
+| pip check, Ruff, strict mypy, full pytest incl. `test_late_responses.py`, total and per-module coverage gates, three race repetitions incl. `test_late_responses.py` and `test_traffic_baseline.py`, traffic baseline summary | passed | CI, job "Home Assistant 2026.10.2 (fixed reference)" `118267800617`, run `39313178932` (workflow_dispatch, head `7c9c67c`), 2026-10-19 21:42–21:51 +0200 |
+| Same gates against the latest stable release | passed | CI, job "Home Assistant (latest stable)" `118267800547`, same run |
+| Hassfest built from core `8d7fd8b` and icon validation against the reference MDI catalogue | passed | CI, job "Hassfest at Home Assistant 2026.10.2 (fixed reference)" `118267800648`, same run |
+| Hassfest `@master` (moving) | passed | CI, job "validate" `118267800098`, same run |
 
 Strict mypy covers `custom_components/opus_greennet` only; no file in its
 scope changed.
@@ -219,7 +223,7 @@ next device report.
 
 ## 12. Review status and next step
 
-Awaiting review of the branch and CI. Merge and release authorisation remain
+Awaiting review of the branch (CI green). Merge and release authorisation remain
 separate. Decision requested from the maintainer: accept the documented
 limitation as the phase 12 outcome, and decide whether M6 (diagnostic-only
 marker) should be implemented in a separate change. Next planned phase:

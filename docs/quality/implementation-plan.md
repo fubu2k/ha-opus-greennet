@@ -211,7 +211,8 @@ reproduce and pin late-answer attribution without a wire request ID
 (protocol contract section 7.2). No production code, timeout, queue or traffic
 change. No mitigation is implemented; candidates and the hardware evidence
 they need are listed in the report for a separate maintainer decision. Tests
-ran locally only against a stub of Home Assistant; CI pending, not merged.
+ran locally against a stub of Home Assistant; CI green (run `39313178932`),
+not merged.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
