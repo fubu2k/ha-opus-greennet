@@ -320,7 +320,8 @@ Device identifier: `(opus_greennet, "<EAG>_<DEV>")`; gateway: `(opus_greennet, "
 | climate | `entity_type == "climate"` | `<EAG>_<DEV>` | enabled |
 | event | `entity_type == "event"` (F6-02-xx, F6-03-xx) | `<EAG>_<DEV>` | enabled |
 | lock | D2-06-40 | `<EAG>_<DEV>_autolock` (read-only) | enabled |
-| sensor | HeatArea: `humidity`; D1-4B-05: `feed_temperature`; D1-4B-07: `energy_consumption`; SMS: `illuminance`, `supply_voltage`, `battery_level`; handle: `handle_state` | `<EAG>_<DEV>_<suffix>` | enabled |
+| sensor | HeatArea: `humidity`; D1-4B-05: `feed_temperature`; D1-4B-07: `energy_consumption`; SMS: `illuminance`, `battery_level`; handle: `handle_state` | `<EAG>_<DEV>_<suffix>` | enabled |
+| sensor | SMS (A5-07-01/03): `supply_voltage` (diagnostic, phase 6 metadata review) | `<EAG>_<DEV>_supply_voltage` | enabled; `EntityCategory.DIAGNOSTIC`; existing entries keep enablement and customisations |
 | sensor | D2-06-40: `unlock_request` (diagnostic, phase 6) | `<EAG>_<DEV>_unlock_request` | **disabled for new registry entries**; existing entries unchanged |
 | sensor | A5-04-01/02/03 and OPUS motion detector (F6-02-01 + A5-04-01): `temperature`, `humidity`, `battery_level` (upstream v0.6.0/v0.7.0b0) | `<EAG>_<DEV>_<suffix>` | enabled |
 | sensor | **every** discovered device: `signal_strength` | `<EAG>_<DEV>_signal_strength` | **disabled** |
@@ -338,6 +339,13 @@ beta entry, `duplicate_beta_entity_<removed entity ID>` is created once
 `config_entry_id`). It is deleted on confirmation or when the config entry is
 removed. The aggregate multi-channel cleanup raises no issue. No other code
 path creates issues; outages never do. **[Code][Test]**
+
+Display precision (phase 6 metadata review): every `battery_level` sensor
+(SMS, A5-04-01/02/03, OPUS motion detector) sets
+`suggested_display_precision = 0`, so the frontend shows whole percent. The
+state value, history and statistics are not rounded; a `display_precision`
+chosen by the user in the entity settings takes precedence. No other sensor
+sets a display precision. **[Code][Test]**
 
 Icons (phase 9): `icons.json` adds state icons for `sensor.handle_state`,
 `sensor.unlock_request`, `binary_sensor.handle_closed` and
