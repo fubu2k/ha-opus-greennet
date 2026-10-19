@@ -81,11 +81,23 @@ Firmware effects of `get/devices` (pure cache read or internal refresh) are
    commands can cause up to two status queries per channel from Home
    Assistant. Its radio effect on HeatArea actuators is unknown. Candidate for
    phase 11 review; no change in phase 8.
+   *Phase 11 review:* case (a) now applies to ACK `200` only. A third caller,
+   `_handle_deferred_command`, re-arms the two checks of fields left unconfirmed
+   by an earlier accepted command when a deferred cover command had stopped
+   their timers; it adds no field and no slot. Case (b) is kept unchanged: it is
+   the only confirmation path for bridge-native commands and, since phase 11,
+   for the eventual delivery of a deferred command. Removing it would leave
+   such state unconfirmed; its budget stays two checks per channel.
 2. **`async_query_climate_status`** has no caller. Status queries for climate
    come only from reconciliation.
 3. **ACK 201 (SoftSmartAck).** `decode_response` treats 200 and 201
    identically; reconciliation is scheduled the same way. Open item O1
    (phase 11). No extra polling may be added to force confirmation.
+   *Resolved in phase 11:* `async_send_command` returns
+   `CommandDelivery.DEFERRED` for 201; no estimate, no cover travel estimate
+   and no status query follow. Requests per deferred command drop from up to
+   three (command plus two checks) to one until the gateway transmits; then
+   case (b) applies once (protocol contract section 7.1).
 4. **Telegram paths.** Live and retained parsing publish nothing. Retained
    `stream/telegram` messages are discarded (asserted in
    `test_traffic_baseline.py`).

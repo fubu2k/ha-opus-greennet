@@ -350,8 +350,10 @@ snapshots and indexed stream updates support both map and list state formats.
 
 Commands wait for the gateway's acknowledgement. Status `200` means the gateway
 sent the telegram; `201` means it accepted deferred delivery. Neither confirms
-that the physical actuator has completed the operation. Device reports and
-subsequent channel-specific status queries reconcile the state. Requests fail
+that the physical actuator has completed the operation. After `200`, device
+reports and subsequent channel-specific status queries reconcile the state.
+After `201` the entity keeps its last reported state and no status query is
+sent until the gateway actually transmits the telegram. Requests fail
 when the gateway is known to be unavailable and are cancelled during reload.
 Interim `unknown`/`invalid` readings and unrelated metadata do not cancel the
 5- and 20-second checks. Confirmation must report a valid value for the requested
@@ -377,6 +379,9 @@ zone does not by itself prove that it is currently heating.
 - An acknowledgement (`200` or `201`) confirms the gateway, not the radio
   actuator. Physical completion is only known from device feedback or a later
   status query.
+- After `201` (deferred delivery) it is not documented whether the gateway
+  still delivers a queued telegram when a newer command for the same function
+  is sent in the meantime. Check the device before repeating such a command.
 - Cover positions during movement are estimates based on the reported travel
   time. The final position comes from the device report or status query.
 - The HOPPE AutoLock entity is read-only; lock and unlock actions are rejected.
@@ -697,12 +702,25 @@ make any entity unavailable.
 
 ### Acknowledgements 200 and 201
 
-After a command, the gateway answers on `putAnswer`. `200` means the gateway
-sent the telegram; `201` means it accepted the command for deferred delivery.
-Both count as an accepted command. Neither proves that the actuator executed
-it. The integration then shows the expected state and checks it with status
-queries 5 and 20 seconds later; for covers, 10 and 20 seconds after the
-estimated end of the movement. Any other status fails the action.
+After a command, the gateway answers on `putAnswer`. Any status other than
+`200` or `201` fails the action. Neither proves that the actuator executed
+the command.
+
+- `200`: the gateway sent the telegram. The integration shows the expected
+  state and checks it with status queries 5 and 20 seconds later; for covers,
+  10 and 20 seconds after the estimated end of the movement.
+- `201` (SoftSmartAck): the gateway queued the telegram for later delivery,
+  for example until the device next communicates. The action succeeds, but the
+  entity keeps its last reported state, a cover starts no movement estimate,
+  and no status query is sent, because a query would wait for the same device
+  and adds radio traffic. When the gateway later transmits the telegram, the
+  value is shown and the usual two checks follow. Until a matching device
+  report or that transmission arrives, the value is listed under
+  `deferred_commands` in the integration diagnostics.
+
+A warning or error reported by one device, for example a HeatArea's
+`actuatorNotResponding`, appears on that device's own entities only. It never
+makes the gateway or other entities unavailable.
 
 ### Retained state
 
@@ -855,6 +873,7 @@ tests/
 ├── test_coordinator_edge_cases.py # Malformed payloads, timers, and availability logging
 ├── test_retained_device_answers.py # Retained response and entity state regressions
 ├── test_field_freshness.py      # Retained replays versus live fields per channel
+├── test_ack_device_health.py    # ACK 201 deferred delivery and per-device health
 ├── test_coordinator_transport.py # Subscription, request, and recovery tests
 ├── test_transport_edge_cases.py # Request queue, subscription and probe edge cases
 ├── test_release_transport_safety.py # Interrupted startup and queue fault recovery

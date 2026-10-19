@@ -137,6 +137,12 @@ class EnOceanDevice:
     )
     dbm: int | None = None
     last_command_error: str | None = None
+    # Commanded wire values the gateway accepted for deferred delivery (ACK
+    # 201) and that no device report or outbound telegram has matched yet,
+    # per channel and key. Diagnostic only; never an assumed device state.
+    deferred_commands: dict[int, dict[str, str]] = field(
+        default_factory=dict, repr=False, compare=False
+    )
     channels: dict[int, EnOceanChannel] = field(default_factory=dict)
     profile: JsonObject | None = None
 
@@ -311,8 +317,10 @@ class EnOceanDevice:
 
     # Command estimates ------------------------------------------------------
     #
-    # An accepted command acknowledgement is not device feedback. After the
-    # acknowledgement the commanded value is assumed, but only if the channel
+    # An accepted command acknowledgement is not device feedback. After a
+    # transmitted (200) acknowledgement the commanded value is assumed; after a
+    # deferred (201) one the entities apply no estimate at all, because the
+    # telegram has not reached the device. The estimate applies only if the channel
     # received no newer update while the command was awaited: the same channel
     # object must still be in place and its ``state_revision`` must be
     # unchanged. Feedback, discovery state and the coordinator's cover travel
