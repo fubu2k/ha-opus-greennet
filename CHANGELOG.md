@@ -4,12 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-Quality series (phases 1-5): internal refactoring, two behaviour fixes and strict typing. Entities, entity IDs, unique IDs, device assignments, topics, services and wire payloads are unchanged.
+Quality series (phases 1-7) plus the device support of upstream v0.7.0b1 (kegelmeier/ha-opus-greennet), integrated into this fork's architecture. Existing entity IDs, unique IDs, device assignments, topics, services and wire payloads are unchanged.
+
+### Breaking requirement
+- **Home Assistant 2026.10.1 or newer is required**, including for manual installation (HACS metadata and test dependencies enforce it). The integration uses `probatio` and Home Assistant APIs that are not available in 2026.9.4.
+
+### Added
+- Temperature, humidity and battery-level sensors for A5-04-01, A5-04-02 and A5-04-03 devices (upstream #64/#65), including Jaeger Direkt sensors. A5-04-02/03 accept -20 to +60 °C; A5-04-01 and HeatArea keep 0 to 40 °C.
+- Contact binary sensor (opening device class) for D5-00-01 single input contacts (upstream #70/#71): `open` is on, `closed` is off, missing or unrecognized values stay unknown.
+- Motion detection for OPUS motion detectors announcing F6-02-01 plus A5-04-01 (upstream #72): a `buttonAI` press reports motion, a `buttonA0` press reports no motion, releases keep the state. The existing rocker event entity is kept. Motion stays unknown after a restart until the next motion telegram.
+- English and German names for the new entities.
 
 ### Fixed
 - Rocker switch events are no longer replayed by later updates of the same device (signal strength, battery, metadata, command acknowledgements, availability changes). Two identical real presses still produce two events.
 
 ### Changed
+- HOPPE D2-06-40 window handles: the unlock-request sensor and the mechanics-fault binary sensor are diagnostic entities and are disabled by default when Home Assistant registers them for the first time. Existing installations keep their current setting, entity IDs, names and icons. Enabling them sends no request to the handle. Handle position, open/tilted/closed sensors and the AutoLock state are unchanged.
 - Background status checks that are still waiting in the send queue are dropped before publishing when device feedback or a newer command has already superseded them. Delays (5 s / 20 s), timeouts and priorities are unchanged; user commands and Stop are never dropped.
 - Idle per-topic request locks are released after each gateway request instead of accumulating per device.
 - Entities skip a state write when a device update does not change their visible state or attributes, e.g. signal-strength-only updates for covers and switches. Commands and availability changes are always written.
@@ -20,10 +30,16 @@ Quality series (phases 1-5): internal refactoring, two behaviour fixes and stric
 ### Development
 - All integration modules pass strict type checking (`mypy --strict`). `mypy` 2.4.0 is a test dependency and runs as a CI step.
 - Schema validation imports `probatio` directly; Home Assistant has used it in place of voluptuous since 2026.9, so runtime behaviour is unchanged.
-- Quality documentation in `docs/quality/` (implementation plan, protocol contract, per-phase reports).
+- Quality documentation in `docs/quality/` (implementation plan, protocol contract, per-phase reports, quality-scale evidence, upstream sync report `upstream-sync-v0.7.0b1.md`).
+- Guardrail tests for the new upstream profiles (`tests/test_upstream_backport.py`): no device requests, retained-answer protection, stable identities and registry defaults, no event replay, no redundant state writes.
+- Removed integration file copies that were accidentally uploaded to the repository root; they made hassfest fail.
 
 ### Validation
-- 1094 tests pass on Home Assistant 2026.10.1 with Ruff, mypy and dependency checks; coverage 92.8 %. All tests use a mocked MQTT layer; no hardware test was performed for these changes.
+- Phases 1-5: 1094 tests pass on Home Assistant 2026.10.1 with Ruff, mypy and dependency checks; coverage 92.8 %.
+- Combined state (phases 1-7, phase 6 and upstream v0.7.0b1): CI run 39267215141 passed on the latest stable Home Assistant, including Ruff, mypy, the full test suite with total and per-module coverage gates, three lifecycle/race repetitions and hassfest.
+- All tests use a mocked MQTT layer. No hardware test was performed for this combination; upstream reports community tests of the new sensors on its own builds.
+
+Thanks to @florian-hartung and the upstream maintainer for the device support.
 
 ## [0.5.0] - 2026-10-11
 

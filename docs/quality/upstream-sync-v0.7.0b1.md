@@ -1,7 +1,8 @@
 # Upstream sync - kegelmeier/ha-opus-greennet v0.7.0b1
 
-- **Status:** implemented on branch, **pending CI and review**. Not merged.
-- **Branch:** `feat/opus-upstream-v0.7.0b1`
+- **Status:** completed. CI green; merged into `main` via PR #4 as merge
+  commit `bac5620` (2026-10-19). No version change, no release.
+- **Branch:** `feat/opus-upstream-v0.7.0b1` (head `8e1b22d`)
 - **Fork base:** `main` at `2a28216` (phases 1-7 and phase 6, PR #2)
 - **Upstream:** tag `v0.7.0b1` = `5fcc57c` (2026-10-18). The archive attached
   by the maintainer was no longer readable (temporary 7-Zip folder); the 28
@@ -96,7 +97,11 @@ checks the new profiles against the fork's guardrails:
 | Gate | Result | Origin |
 |------|--------|--------|
 | `ruff check .`, `ruff format --check .` | passed | local, ruff 0.16.3 |
-| mypy, pytest with coverage gates, lifecycle repetitions, hassfest | **pending** | CI on the pull request (PyPI unreachable locally) |
+| mypy, pytest with total and per-module coverage gates, three lifecycle/race repetitions | passed | CI run `39267215141` (PR #4), job "Home Assistant (latest stable)"; also run `39265794661` (closed PR #3, same head) |
+| hassfest | passed | same runs, job "validate" |
+
+The exact Home Assistant patch version and coverage figures are in the CI
+log, which was not retrievable from the authoring environment.
 
 ## Residual risks
 
@@ -106,3 +111,12 @@ checks the new profiles against the fork's guardrails:
 - Motion stays unknown after a restart until the next motion telegram.
 - A5-04 sensors without a battery report keep an unknown battery entity
   (upstream behaviour, unchanged).
+
+## Follow-up
+
+- A duplicate branch from a parallel run, `feat/upstream-v0.7.0b1-backport`
+  (single non-merge commit `36547e3`, identical integration code), was not
+  merged and has been deleted.
+- `CHANGELOG.md` "Unreleased" now lists the upstream features, the HA
+  2026.10.1 minimum and phase 6. Version bump and GitHub release remain a
+  separate maintainer step.
