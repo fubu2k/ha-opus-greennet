@@ -20,10 +20,13 @@ Reviewed main HEAD in the plan: `63c7380`. Commits since then:
   and differ from it in `binary_sensor.py`, `binary_sensor_descriptions.py`,
   `const.py`, `enocean_device.py`, `sensor.py`, `strings.json` and
   `manifest.json` (for example temperature/humidity sensors and an OPUS motion
-  detector). This phase changes only `custom_components/opus_greennet/` and
-  leaves the root copies untouched. **Open decision for the maintainer:** if the
-  root files are meant to replace the integration, that is a separate change
-  that must keep this phase's edits; it is not reviewed here.
+  detector). **Decision (maintainer, 2026-10-19): accidental upload, removed
+  on this branch.** All 28 files added by `feabed5` are deleted; none existed
+  before it. Reason: hassfest found a second `manifest.json` at the repository
+  root and failed with `[MANIFEST] Domain does not match dir name`
+  ("Integrations: 2"). The integration itself stays at its previous code plus
+  this phase. A later integration update to the 0.7.0b1 content would be a
+  separate phase in `custom_components/opus_greennet/`.
 
 ## Scope and authorised behaviour change
 
@@ -124,7 +127,7 @@ installation) before discovery, so it still verifies the HOPPE `unlock` and
 | `python -m mypy` | **not run** | PyPI unreachable in the authoring environment |
 | `pytest -v --cov ...`, `script/check_coverage.py` | **not run** | as above |
 | Three lifecycle/race repetitions | **not run** | as above |
-| hassfest | **not run** | CI only |
+| hassfest | failed on the first PR run (root `manifest.json` from `feabed5`); root copies removed, rerun pending | CI |
 
 The test suite has not been executed for this phase. CI on the pull request
 (`.github/workflows/tests.yml`, latest stable HA) is the first actual run and
@@ -151,7 +154,6 @@ its result must be recorded here before review is completed. A fixed
   projections, full per-entity inventory) is open.
 - Icon policy (section 11) is not implemented; no `icons.json`.
 - No hardware or frontend visual check; backend tests do not prove rendering.
-- Repository-root copies from `feabed5` are unresolved (see above).
 
 ## Review status
 
