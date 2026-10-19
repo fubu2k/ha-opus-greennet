@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.core import HomeAssistant
 
 from custom_components.opus_greennet.const import BUTTON_KEYS
-from custom_components.opus_greennet.coordinator import (
-    SIGNAL_DEVICE_STATE_UPDATE,
-)
 from custom_components.opus_greennet.enocean_device import EnOceanChannel, EnOceanDevice
 from custom_components.opus_greennet.event import EVENT_TYPES, OpusGreenNetEvent
-from tests.ha_helpers import configure_bridge, wait_for_entity
+from tests.fake_gateway import FakeGateway, device_object, telegram
+from tests.ha_helpers import setup_bridge, wait_for_entity, wait_until
 
 
 @pytest.fixture
@@ -82,29 +80,30 @@ def test_no_event_when_button_fields_unset(event_entity, rocker_device):
 
 
 async def test_availability_changes_do_not_replay_last_rocker_event(
-    hass, mqtt_transport
-):
-    mqtt_transport.devices = [
-        {"deviceId": "ROCKER1", "friendlyId": "Test", "eeps": [{"eep": "F6-02-01"}]}
-    ]
-    result = await configure_bridge(hass)
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    gateway.devices = [device_object("ROCKER1", "F6-02-01", friendly_id="Test")]
+    entry = await setup_bridge(hass, gateway)
     entity_id = await wait_for_entity(hass, "event", "AABB0011_ROCKER1")
-    coordinator = result["result"].runtime_data.coordinator
-    rocker_device = coordinator.get_device("ROCKER1")
-    rocker_device.channels[0] = EnOceanChannel(
-        channel_id=0, last_button="buttonA0", last_button_action="pressed"
+    coordinator = entry.runtime_data.coordinator
+    await gateway.push(
+        telegram("ROCKER1", [{"key": "buttonA0", "value": "pressed", "channel": 0}])
     )
-    async_dispatcher_send(
-        hass, f"{SIGNAL_DEVICE_STATE_UPDATE}_AABB0011_ROCKER1", rocker_device
-    )
-    await hass.async_block_till_done()
+    await wait_until(lambda: hass.states.get(entity_id).state != "unknown")
     original = hass.states.get(entity_id)
     assert original.attributes["event_type"] == "buttonA0_pressed"
 
-    await mqtt_transport.set_connected(False)
-    assert hass.states.get(entity_id).state == "unavailable"
-
-    await mqtt_transport.set_connected(True)
+    with patch(
+        "custom_components.opus_greennet.coordinator.STREAM_RETRY_DELAYS",
+        (0.01, 0.02),
+    ):
+        await gateway.stop()
+        await wait_until(lambda: hass.states.get(entity_id).state == "unavailable")
+        # The reconnected stream starts with a device list (full resync).
+        await gateway.start()
+        await gateway.wait_for_stream()
+        await wait_until(lambda: coordinator.available)
+    await hass.async_block_till_done()
     restored = hass.states.get(entity_id)
     assert restored.state == original.state
     assert restored.attributes["event_type"] == "buttonA0_pressed"

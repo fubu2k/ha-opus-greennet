@@ -24,10 +24,12 @@ TO_REDACT = {
     "address",
     "apikey",
     "authorization",
+    "baseid",
     "deviceid",
     "eagid",
     "eurid",
     "friendlyid",
+    "homekitpin",
     "host",
     "hostname",
     "ip",
@@ -132,7 +134,7 @@ def log_entity_state_write(
     device: EnOceanDevice,
     channel_id: int | None = None,
 ) -> None:
-    """Log latency from MQTT receipt to the entity state write."""
+    """Log latency from telegram receipt to the entity state write."""
     if not logger.isEnabledFor(logging.DEBUG):
         return
 

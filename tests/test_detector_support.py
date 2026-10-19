@@ -1,46 +1,78 @@
-"""Sensor profile regressions using MQTT messages and real HA entities."""
+"""Detector profiles (RWM smoke, presence) end to end over the REST stream."""
 
-import asyncio
+from __future__ import annotations
 
 import pytest
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
+from custom_components.opus_greennet import protocol
 from custom_components.opus_greennet.const import DOMAIN
-from custom_components.opus_greennet.coordinator import OpusGreenNetCoordinator
-from tests.ha_helpers import configure_bridge, wait_for_entity
+from tests.fake_gateway import FakeGateway, device_object, telegram
+from tests.ha_helpers import setup_bridge, wait_for_entity, wait_until
+
+RWM_EEP = "F6-05-02"
 
 
-@pytest.mark.parametrize("stream", ["device", "devices"])
-async def test_rwm_discovery_and_live_value_only_updates(hass, mqtt_transport, stream):
-    mqtt_transport.devices = [
-        {
-            "deviceId": "RWM1",
-            "friendlyId": "Smoke detector",
-            "eeps": [{"eep": "F6-05-02"}],
-            "transmitModes": [{"value": "idle"}, {"value": "ok"}],
-        }
-    ]
-    await configure_bridge(hass)
+async def _refresh_device_list(entry: ConfigEntry) -> None:
+    """Run the periodic (non-authoritative) device list refresh once."""
+    coordinator = entry.runtime_data.coordinator
+    coordinator._async_refresh_tick(dt_util.utcnow())  # noqa: SLF001
+    assert coordinator._refresh_task is not None  # noqa: SLF001
+    await coordinator._refresh_task  # noqa: SLF001
+
+
+def _rwm(smoke: object, battery: object) -> dict:
+    """Return the RWM as the gateway lists it: value-only transmitModes slots."""
+    return device_object(
+        "RWM1",
+        RWM_EEP,
+        friendly_id="Smoke detector",
+        transmitModes=[{"value": smoke}, {"value": battery}],
+    )
+
+
+@pytest.mark.parametrize("source", ["telegram", "device list"])
+async def test_rwm_discovery_and_live_value_only_updates(
+    hass: HomeAssistant, gateway: FakeGateway, source: str
+) -> None:
+    gateway.devices = [_rwm("idle", "ok")]
+    await setup_bridge(hass, gateway)
     smoke = await wait_for_entity(hass, "binary_sensor", "AABB0011_RWM1_smoke_alarm")
     battery = await wait_for_entity(hass, "binary_sensor", "AABB0011_RWM1_battery_low")
     assert hass.states.get(smoke).state == "off"
     assert hass.states.get(battery).state == "off"
-    for index, value in [(0, "alarm"), (1, "low")]:
-        mqtt_transport.receive(
-            f"EnOcean/AABB0011/stream/{stream}/RWM1/transmitModes/{index}/value", value
+
+    async def report(smoke_value: str, battery_value: str) -> None:
+        if source == "telegram":
+            await gateway.push(
+                telegram(
+                    "RWM1",
+                    [
+                        {"key": "smokeAlarm", "value": smoke_value},
+                        {"key": "batteryLow", "value": battery_value},
+                    ],
+                )
+            )
+        else:
+            # A new stream starts with the complete (authoritative) device list.
+            gateway.devices = [_rwm(smoke_value, battery_value)]
+            await gateway.close_streams()
+
+    await report("alarm", "low")
+    await wait_until(
+        lambda: (
+            (hass.states.get(smoke).state, hass.states.get(battery).state)
+            == ("on", "on")
         )
-    await asyncio.sleep(0.05)
-    await hass.async_block_till_done()
-    assert hass.states.get(smoke).state == "on"
-    assert hass.states.get(battery).state == "on"
-    mqtt_transport.receive(
-        f"EnOcean/AABB0011/stream/{stream}/RWM1/transmitModes/0/value", "notAvailable"
     )
-    await asyncio.sleep(0.05)
-    await hass.async_block_till_done()
-    assert hass.states.get(smoke).state == "unknown"
-    await mqtt_transport.set_connected(False)
-    assert hass.states.get(battery).state == "unavailable"
+    await report("notAvailable", "low")
+    await wait_until(lambda: hass.states.get(smoke).state == "unknown")
+    assert hass.states.get(battery).state == "on"
+    await gateway.stop()
+    await wait_until(lambda: hass.states.get(battery).state == "unavailable")
     registry = er.async_get(hass)
     assert (
         len(
@@ -56,9 +88,9 @@ async def test_rwm_discovery_and_live_value_only_updates(hass, mqtt_transport, s
 
 def test_rwm_fallback_is_profile_scoped():
     data = {"transmitModes": [{"value": "alarm"}, {"value": "low"}]}
-    assert OpusGreenNetCoordinator._device_state_functions(data) == []
-    data["eeps"] = [{"eep": "F6-05-02"}]
-    assert OpusGreenNetCoordinator._device_state_functions(data) == [
+    assert protocol.device_state_functions(data) == []
+    data["eeps"] = [{"eep": RWM_EEP}]
+    assert protocol.device_state_functions(data) == [
         {"key": "smokeAlarm", "value": "alarm"},
         {"key": "batteryLow", "value": "low"},
     ]
@@ -75,30 +107,33 @@ def test_smoke_states_are_explicit(make_device, value, expected):
 
 
 @pytest.mark.parametrize("eep", ["A5-07-01", "A5-07-03"])
-async def test_presence_indexed_states_and_telemetry(hass, mqtt_transport, eep):
-    mqtt_transport.devices = [{"deviceId": "SMS", "eeps": [{"eep": eep}]}]
-    await configure_bridge(hass)
+async def test_presence_states_and_telemetry(
+    hass: HomeAssistant, gateway: FakeGateway, eep: str
+) -> None:
+    gateway.devices = [device_object("SMS", eep)]
+    entry = await setup_bridge(hass, gateway)
     motion = await wait_for_entity(hass, "binary_sensor", "AABB0011_SMS_motion")
     values = {}
     for suffix in ("illuminance", "supply_voltage", "battery_level"):
         values[suffix] = await wait_for_entity(hass, "sensor", f"AABB0011_SMS_{suffix}")
         assert hass.states.get(values[suffix]).state == "unknown"
     assert hass.states.get(motion).state == "unknown"
-    for index, (key, value) in enumerate(
-        [
-            ("motionDetector", "detected"),
-            ("illuminance", "200"),
-            ("supplyVoltage", "3.2"),
-            ("batteryLevel", "85"),
-        ]
-    ):
-        for field, payload in (("value", value), ("key", key)):
-            mqtt_transport.receive(
-                f"EnOcean/AABB0011/stream/device/SMS/states/{index}/{field}", payload
-            )
-    await asyncio.sleep(0.05)
+
+    await gateway.push(
+        telegram(
+            "SMS",
+            [
+                {"key": "motionDetector", "value": "detected"},
+                {"key": "illuminance", "value": "200"},
+                {"key": "supplyVoltage", "value": "3.2"},
+            ],
+        )
+    )
+    await wait_until(lambda: hass.states.get(motion).state == "on")
+    # The battery level arrives with the periodic device list.
+    gateway.devices = [device_object("SMS", eep, batteryLevel="85%")]
+    await _refresh_device_list(entry)
     await hass.async_block_till_done()
-    assert hass.states.get(motion).state == "on"
     for suffix, value, unit in [
         ("illuminance", 200, "lx"),
         ("supply_voltage", 3.2, "V"),
@@ -107,14 +142,17 @@ async def test_presence_indexed_states_and_telemetry(hass, mqtt_transport, eep):
         state = hass.states.get(values[suffix])
         assert float(state.state) == value
         assert state.attributes["unit_of_measurement"] == unit
-    mqtt_transport.receive(
-        "EnOcean/AABB0011/stream/device/SMS/states/0/value", "noMotion"
+
+    await gateway.push(
+        telegram("SMS", [{"key": "motionDetector", "value": "noMotion"}])
     )
-    mqtt_transport.receive("EnOcean/AABB0011/stream/device/SMS/batteryLevel", "82")
-    await asyncio.sleep(0.05)
-    await hass.async_block_till_done()
-    assert hass.states.get(motion).state == "off"
+    gateway.devices = [device_object("SMS", eep, batteryLevel="82")]
+    await _refresh_device_list(entry)
+    await wait_until(lambda: hass.states.get(motion).state == "off")
     assert float(hass.states.get(values["battery_level"]).state) == 82
+    # The metadata refresh keeps the live readings from the stream.
+    assert hass.states.get(motion).state == "off"
+    assert float(hass.states.get(values["illuminance"]).state) == 200
 
 
 @pytest.mark.parametrize(

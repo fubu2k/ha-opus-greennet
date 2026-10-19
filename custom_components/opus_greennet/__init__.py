@@ -7,7 +7,13 @@ from dataclasses import dataclass
 
 import probatio as vol
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.const import Platform
+from homeassistant.const import (
+    CONF_HOST,
+    CONF_PASSWORD,
+    CONF_PORT,
+    CONF_USERNAME,
+    Platform,
+)
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -15,17 +21,19 @@ from homeassistant.core import (
     SupportsResponse,
 )
 from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
     ConfigEntryNotReady,
-    HomeAssistantError,
     ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_EAG_ID, DOMAIN
-from .coordinator import OpusGreenNetCoordinator
+from .api import OpusApiError, OpusAuthError, OpusGatewayClient
+from .const import CONF_EAG_ID, DEFAULT_PORT, DEFAULT_USERNAME, DOMAIN
+from .coordinator import GatewayMismatchError, OpusGreenNetCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -138,34 +146,49 @@ def _validate_service_device(
         )
 
 
-def _describe_setup_failure(err: Exception) -> str:
-    """Return a short, payload-free description of why gateway setup failed."""
-    if isinstance(err, HomeAssistantError) and err.translation_key:
-        reason = (err.translation_placeholders or {}).get("reason")
-        return f"{err.translation_key} ({reason})" if reason else err.translation_key
-    return f"{type(err).__name__}: {err}" if str(err) else type(err).__name__
-
-
 async def async_setup_entry(
     hass: HomeAssistant, entry: OpusGreenNetConfigEntry
 ) -> bool:
     """Set up Opus GreenNet Bridge from a config entry."""
     eag_id = entry.data[CONF_EAG_ID]
-    coordinator = OpusGreenNetCoordinator(hass, eag_id)
+    if CONF_HOST not in entry.data:
+        # Entries created for the former MQTT transport only know the EAG
+        # identifier. The reauthentication flow asks for the gateway address.
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="gateway_address_required"
+        )
+    client = OpusGatewayClient(
+        async_get_clientsession(hass),
+        entry.data[CONF_HOST],
+        entry.data.get(CONF_PORT, DEFAULT_PORT),
+        entry.data.get(CONF_USERNAME, DEFAULT_USERNAME),
+        entry.data[CONF_PASSWORD],
+    )
+    coordinator = OpusGreenNetCoordinator(
+        hass, client, eag_id, on_auth_failed=lambda: entry.async_start_reauth(hass)
+    )
 
     try:
         await coordinator.async_setup()
-    except (HomeAssistantError, OSError) as err:
+    except OpusAuthError as err:
         await coordinator.async_unload()
-        # The translated ConfigEntryNotReady text is deliberately generic.
-        # Record the precise cause so request_timeout, mqtt_unavailable and
-        # an unreachable gateway can be told apart in the log.
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="invalid_auth"
+        ) from err
+    except GatewayMismatchError as err:
+        await coordinator.async_unload()
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="wrong_gateway"
+        ) from err
+    except OpusApiError as err:
+        await coordinator.async_unload()
+        # The translated ConfigEntryNotReady text is deliberately generic;
+        # the log keeps the precise cause.
         _LOGGER.warning(
             "OPUS gateway %s is not ready, Home Assistant will retry: %s",
             eag_id,
-            _describe_setup_failure(err),
+            err,
         )
-        _LOGGER.debug("Setup failure details for %s", eag_id, exc_info=err)
         raise ConfigEntryNotReady(
             translation_domain=DOMAIN,
             translation_key="gateway_unavailable",
@@ -175,6 +198,7 @@ async def async_setup_entry(
         raise
 
     try:
+        version = coordinator.gateway_info.get("version")
         device_registry = dr.async_get(hass)
         gateway_device = device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
@@ -183,6 +207,7 @@ async def async_setup_entry(
             model="GreenNet Bridge",
             name=entry.title,
             serial_number=eag_id,
+            sw_version=version if isinstance(version, str) else None,
         )
         entry.runtime_data = OpusGreenNetRuntimeData(
             coordinator=coordinator,
@@ -246,14 +271,7 @@ def _register_services(hass: HomeAssistant) -> None:
         coordinator = _coordinator_for_call(hass, call)
         device_id = call.data[ATTR_DEVICE_ID]
         _validate_service_device(coordinator, device_id)
-        result = await coordinator.async_get_device_configuration(device_id)
-        if result is None:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="device_request_timeout",
-                translation_placeholders={"device_id": device_id},
-            )
-        return result
+        return await coordinator.async_get_device_configuration(device_id)
 
     async def handle_set_device_configuration(call: ServiceCall) -> None:
         coordinator = _coordinator_for_call(hass, call)
@@ -267,14 +285,7 @@ def _register_services(hass: HomeAssistant) -> None:
         coordinator = _coordinator_for_call(hass, call)
         device_id = call.data[ATTR_DEVICE_ID]
         _validate_service_device(coordinator, device_id)
-        result = await coordinator.async_get_device_parameters(device_id)
-        if result is None:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="device_request_timeout",
-                translation_placeholders={"device_id": device_id},
-            )
-        return result
+        return await coordinator.async_get_device_parameters(device_id)
 
     async def handle_reload_entry(call: ServiceCall) -> None:
         config_entry_id = call.data.get(ATTR_CONFIG_ENTRY_ID)

@@ -1,147 +1,115 @@
 """Fault recovery checks for the large-installation transport release."""
 
 import asyncio
-from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.opus_greennet.api import OpusConnectionError
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
-from custom_components.opus_greennet.mqtt_transport import MQTTRequestManager
-from tests.test_coordinator_transport import UPTIME_RESPONSE
-from tests.test_coordinator_transport import broker as broker
-from tests.test_coordinator_transport import (
+from tests.fake_gateway import device_object
+from tests.ha_helpers import setup_bridge, wait_for_entity, wait_until
+from tests.test_coordinator_commands import bridge as bridge
+from tests.test_coordinator_commands import (
     connected_coordinator as connected_coordinator,
 )
+from tests.test_coordinator_commands import radio as radio
+from tests.test_coordinator_commands import settle, short_timeout, state_path
 
 
-async def test_reconnect_finishes_interrupted_stream_discovery(
-    broker, connected_coordinator, monkeypatch
+@pytest.fixture(autouse=True)
+def fast_retries():
+    with patch(
+        "custom_components.opus_greennet.coordinator.STREAM_RETRY_DELAYS",
+        (0.01, 0.02),
+    ):
+        yield
+
+
+async def test_outage_discards_commands_queued_for_any_device(
+    radio, connected_coordinator
 ):
-    """Debouncing a reconnect must not abandon an incomplete startup."""
-    broker.response = UPTIME_RESPONSE
+    """Commands queued behind an in-flight request are never sent after an outage."""
+    radio.auto_respond = False
     coord = connected_coordinator
-    coord._started = True
-    delay_stream_ack = True
-    original_suback = broker.on_subscribe_done
-
-    def subscription_done(hass, topic, qos, callback):
-        if delay_stream_ack and topic.endswith("/stream/devices/#"):
-            return lambda: None
-        return original_suback(hass, topic, qos, callback)
-
-    monkeypatch.setattr(
-        "custom_components.opus_greennet.mqtt_transport.mqtt.async_on_subscribe_done",
-        subscription_done,
-    )
+    tasks = [
+        asyncio.create_task(coord.async_turn_on(device_id))
+        for device_id in ("DEV0", "DEV0", "DEV1", "DEV2")
+    ]
     try:
-        coord._handle_connection_status(True)
-        first_refresh = coord._refresh_task
-        async with asyncio.timeout(1):
-            while "EnOcean/AABB0011/stream/devices/#" not in coord._stream_topics:
-                await asyncio.sleep(0)
-        coord._handle_connection_status(False)
-        await asyncio.gather(first_refresh, return_exceptions=True)
-
-        # Reconnect inside the debounce window while phase two is incomplete.
-        delay_stream_ack = False
-        coord._handle_connection_status(True)
-        await asyncio.wait_for(coord._refresh_task, 1)
-        assert "EnOcean/AABB0011/stream/device/#" in coord._stream_topics
-        assert "EnOcean/AABB0011/stream/telegram/#" in coord._stream_topics
-        assert any(topic.endswith("/get/devices") for topic, _, _ in broker.published)
-        assert coord.available is True
-    finally:
-        await coord.async_unload()
-    broker.assert_clean()
-
-
-async def test_disconnect_discards_commands_queued_for_other_devices(
-    broker, connected_coordinator
-):
-    broker.auto_respond = False
-    coord = connected_coordinator
-    tasks = [asyncio.create_task(coord.async_turn_on(f"DEV{i}")) for i in range(3)]
-    try:
-        for _ in range(5):
-            await asyncio.sleep(0)
-        assert len(broker.published) == 1
-        coord._handle_connection_status(False)
-        coord._gateway_available = True
+        await settle()
+        assert len(radio.sent) == 1
+        # The event stream failed; the in-flight request then fails as well.
+        coord._set_gateway_available(False)
+        radio.respond(OpusConnectionError("connection reset"))
         results = await asyncio.wait_for(
             asyncio.gather(*tasks, return_exceptions=True), 1
         )
-        assert all(isinstance(result, HomeAssistantError) for result in results)
-        assert len(broker.published) == 1
-        assert not coord._requests._waiters
-        assert not coord._requests._send_lock.locked()
+        assert [result.translation_key for result in results] == [
+            "gateway_unavailable"
+        ] * 4
+        assert len(radio.sent) == 1
+        assert not coord._radio_queue.locked()
+        assert coord._radio_queue.queue_depth == 0
+        assert not coord._command_waiters
     finally:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-    broker.assert_clean()
 
 
-async def test_timeout_releases_global_slot_for_next_device(broker):
-    broker.auto_respond = False
-    manager = MQTTRequestManager(MagicMock())
-    first = asyncio.create_task(
-        manager.async_request("get/DEV1", "getAnswer/DEV1", "DEV1", timeout=0.02)
-    )
-    second = asyncio.create_task(
-        manager.async_request("get/DEV2", "getAnswer/DEV2", "DEV2", timeout=0.1)
-    )
-    try:
-        with pytest.raises(HomeAssistantError) as raised:
-            await first
-        assert raised.value.translation_key == "request_timeout"
-        await asyncio.sleep(0)
-        assert [topic for topic, _, _ in broker.published] == ["get/DEV1", "get/DEV2"]
-        broker.receive("getAnswer/DEV2", {"header": {"httpStatus": 200}})
-        await second
-        assert not manager._send_lock.locked()
-        assert not manager._waiters
-    finally:
-        for task in (first, second):
-            task.cancel()
-        await asyncio.gather(first, second, return_exceptions=True)
-    broker.assert_clean()
+async def test_timeout_releases_radio_slot_for_next_device(
+    gateway, bridge, monkeypatch
+):
+    short_timeout(monkeypatch, bridge, 0.1)
+    gateway.delays[state_path("DEV1")] = 0.3
+    first = asyncio.create_task(bridge.async_turn_on("DEV1"))
+    await wait_until(lambda: gateway.requests_to("PUT", state_path("DEV1")))
+    second = asyncio.create_task(bridge.async_turn_on("DEV2"))
+    with pytest.raises(HomeAssistantError) as raised:
+        await first
+    assert raised.value.translation_key == "request_timeout"
+    await second
+    assert gateway.requests_to("PUT", state_path("DEV2")) == [
+        {"state": {"functions": [{"key": "switch", "value": "on"}]}}
+    ]
+    assert not bridge._radio_queue.locked()
+    assert bridge._radio_queue.queue_depth == 0
 
 
-async def test_persistent_answer_route_rejects_retained_ack(broker):
-    broker.auto_respond = False
-    manager = MQTTRequestManager(MagicMock())
-    manager.async_add_route_pattern("getAnswer/+")
-    task = asyncio.create_task(
-        manager.async_request("get/DEV1", "getAnswer/DEV1", "DEV1", timeout=0.1)
-    )
-    try:
-        await asyncio.sleep(0)
-        for topic, retained in [("getAnswer/DEV1", True), ("getAnswer/DEV2", False)]:
-            manager.async_route(
-                SimpleNamespace(
-                    topic=topic,
-                    payload='{"header":{"httpStatus":200}}',
-                    retain=retained,
-                )
-            )
-        await asyncio.sleep(0)
-        assert not task.done()
-        manager.async_route(
-            SimpleNamespace(
-                topic="getAnswer/DEV1",
-                payload='{"header":{"httpStatus":200}}',
-                retain=False,
-            )
+async def test_gateway_outage_cancels_cover_estimate_and_status_checks(hass, gateway):
+    gateway.devices = [
+        device_object(
+            "COVER",
+            "D2-05-00",
+            states=[{"key": "position", "value": 100}],
+            configuration={
+                "parameters": [{"key": "verticalMovementTime", "value": 25}]
+            },
         )
-        await task
-        assert not manager._routes
-        assert not manager._waiters
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-    broker.assert_clean()
+    ]
+    entry = await setup_bridge(hass, gateway)
+    coordinator = entry.runtime_data.coordinator
+    entity = await wait_for_entity(hass, "cover", "AABB0011_COVER")
+    await hass.services.async_call(
+        "cover", "open_cover", {"entity_id": entity}, blocking=True
+    )
+    assert hass.states.get(entity).state == "opening"
+    assert coordinator._cover_movements
+    assert coordinator._pending_reconciliation_queries
+
+    await gateway.stop()
+    await wait_until(lambda: hass.states.get(entity).state == "unavailable")
+    assert not coordinator._cover_movements
+    assert not coordinator._pending_reconciliation_queries
+    assert coordinator.devices["COVER"].channels[0].movement is None
+
+    await gateway.start()
+    await wait_until(lambda: hass.states.get(entity).state == "closed")
+    # No status check was left behind to fire after the outage.
+    assert not coordinator._pending_reconciliation_queries
+    assert len(gateway.requests_to("PUT", "/devices/COVER/state")) == 1
 
 
 @pytest.mark.parametrize("value", [None, "unknown", "notAvailable", 1])

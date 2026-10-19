@@ -66,11 +66,24 @@ def test_unmeasured_module_fails(tmp_path: Path) -> None:
 def test_high_total_does_not_hide_a_weak_core_module(tmp_path: Path) -> None:
     """A 99 % average still fails when one core module is weakly tested."""
     values = dict.fromkeys(MODULES, 100.0)
-    values["mqtt_transport.py"] = 80.0
+    values["api.py"] = 80.0
     assert sum(values.values()) / len(values) > 98
     assert check(_report(tmp_path, values), ROOT) == [
-        "mqtt_transport.py: 80.00 % is not above 95 %"
+        "api.py: 80.00 % is not above 95 %"
     ]
+
+
+def test_gate_covers_the_rest_transport_modules() -> None:
+    """The REST client and protocol helpers are gated; the MQTT module is gone."""
+    assert {"api.py", "protocol.py", "coordinator.py", "wire.py"} <= set(MODULES)
+    assert "mqtt_transport.py" not in MODULES
+
+
+def test_report_entries_of_removed_modules_are_ignored(tmp_path: Path) -> None:
+    """A stale report entry for a deleted module cannot satisfy or fail the gate."""
+    values = _passing()
+    values["mqtt_transport.py"] = 10.0
+    assert check(_report(tmp_path, values), ROOT) == []
 
 
 def test_main_exit_codes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

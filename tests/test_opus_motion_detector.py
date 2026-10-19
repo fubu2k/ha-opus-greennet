@@ -6,13 +6,14 @@ once the follow-up time has expired. Temperature and humidity arrive as A5-04-01
 The payloads below were captured from a real OPUS-GW v1.21.34.
 """
 
-import asyncio
-import json
+from __future__ import annotations
 
 import pytest
+from homeassistant.core import HomeAssistant
 
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
-from tests.ha_helpers import configure_bridge, wait_for_entity
+from tests.fake_gateway import FakeGateway, device_object, telegram
+from tests.ha_helpers import setup_bridge, wait_for_entity, wait_until
 
 MOTION_EEPS = [
     {"eep": "F6-02-01", "version": 0.9, "direction": "from"},
@@ -118,43 +119,55 @@ def test_temperature_range_follows_the_a5_04_profile(eep, inside, outside):
         assert device.channels[0].temperature == inside[-1]
 
 
-async def test_entities_are_created_and_follow_motion(hass, mqtt_transport):
-    mqtt_transport.devices = [
-        {
-            "deviceId": "MOT1",
-            "friendlyId": "Motion01",
-            "eeps": [dict(e) for e in MOTION_EEPS],
-            "productId": "004000000009",
-            "manufacturer": "Jaeger Direkt",
-            "batteryLevel": "58%",
-            "states": [
+async def test_entities_are_created_and_follow_motion(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    gateway.devices = [
+        device_object(
+            "MOT1",
+            ["F6-02-01", "A5-04-01"],
+            friendly_id="Motion01",
+            productId="004000000009",
+            batteryLevel="58%",
+            states=[
                 {"key": "humidity", "value": 59.6, "unit": "%"},
                 {"key": "temperature", "value": 16.96, "unit": "°C"},
             ],
-        }
+        )
     ]
-    await configure_bridge(hass)
+    await setup_bridge(hass, gateway)
     motion = await wait_for_entity(hass, "binary_sensor", "AABB0011_MOT1_motion")
     temperature = await wait_for_entity(hass, "sensor", "AABB0011_MOT1_temperature")
     humidity = await wait_for_entity(hass, "sensor", "AABB0011_MOT1_humidity")
     battery = await wait_for_entity(hass, "sensor", "AABB0011_MOT1_battery_level")
     # Existing rocker automations keep working.
-    await wait_for_entity(hass, "event", "AABB0011_MOT1")
+    event = await wait_for_entity(hass, "event", "AABB0011_MOT1")
 
     assert hass.states.get(motion).state == "unknown"
     assert hass.states.get(motion).attributes["device_class"] == "motion"
     assert float(hass.states.get(temperature).state) == 16.96
     assert float(hass.states.get(humidity).state) == 59.6
     assert float(hass.states.get(battery).state) == 58
+    assert hass.states.get(event).state == "unknown"
 
     for button, expected in (("buttonAI", "on"), ("buttonA0", "off")):
-        mqtt_transport.receive(
-            "EnOcean/AABB0011/stream/telegram/MOT1/from",
-            json.dumps({"functions": [{"key": button, "value": "pressed"}]}),
+        await gateway.push(telegram("MOT1", [{"key": button, "value": "pressed"}]))
+        await wait_until(lambda: hass.states.get(motion).state == expected)
+        assert hass.states.get(event).attributes["event_type"] == f"{button}_pressed"
+
+    # A5-04-01 readings arrive as their own telegrams.
+    await gateway.push(
+        telegram(
+            "MOT1",
+            [
+                {"key": "humidity", "value": 61.2, "unit": "%"},
+                {"key": "temperature", "value": 17.5, "unit": "°C"},
+            ],
         )
-        await asyncio.sleep(0.05)
-        await hass.async_block_till_done()
-        assert hass.states.get(motion).state == expected
+    )
+    await wait_until(lambda: float(hass.states.get(temperature).state) == 17.5)
+    assert float(hass.states.get(humidity).state) == 61.2
+    assert hass.states.get(motion).state == "off"
 
 
 @pytest.mark.parametrize("invalid", [None, [], {}, 42])

@@ -87,7 +87,9 @@ jobs:
               tests/test_background_efficiency.py \
               tests/test_device_removal.py \
               tests/test_binary_sensor_discovery.py \
-              tests/test_transport_edge_cases.py || exit 1
+              tests/test_coordinator_stream.py \
+              tests/test_coordinator_requests.py \
+              tests/test_coordinator_commands.py || exit 1
           done
 
   validate:

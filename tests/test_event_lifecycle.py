@@ -1,9 +1,9 @@
-"""Phase 3: transient button fields must not be replayed by later dispatches."""
+"""Transient button fields must not be replayed by later dispatches."""
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
+from tests.fake_gateway import device_object
 
 DISPATCH = "custom_components.opus_greennet.coordinator.async_dispatcher_send"
 
@@ -17,11 +17,14 @@ def _rocker(coordinator):
 
 
 def _press(coordinator, device, seen):
-    coordinator._telegram_data[device.device_id] = {
-        "from": {"functions": [{"key": "buttonA0", "value": "pressed", "channel": 0}]}
-    }
-    with patch(DISPATCH, side_effect=lambda *_a: seen.append(_snapshot(device))):
-        coordinator._finalize_telegram(device.device_id)
+    with patch(DISPATCH, side_effect=lambda *args: seen.append(_snapshot(args[-1]))):
+        coordinator._handle_telegram(
+            {
+                "deviceId": device.device_id,
+                "direction": "from",
+                "functions": [{"key": "buttonA0", "value": "pressed", "channel": 0}],
+            }
+        )
 
 
 def _snapshot(device):
@@ -35,7 +38,7 @@ def test_press_is_visible_during_dispatch_and_cleared_afterwards(coordinator):
     device = _rocker(coordinator)
     seen = []
     _press(coordinator, device, seen)
-    assert ("buttonA0", "pressed") in seen
+    assert seen == [("buttonA0", "pressed")]
     assert _snapshot(device) == (None, None)
 
 
@@ -43,14 +46,15 @@ def test_rssi_update_after_press_does_not_replay_button(coordinator):
     device = _rocker(coordinator)
     _press(coordinator, device, [])
     seen = []
-    with patch(DISPATCH, side_effect=lambda *_a: seen.append(_snapshot(device))):
-        coordinator._handle_device_stream_message(
-            SimpleNamespace(
-                topic=f"EnOcean/AABB0011/stream/device/{device.device_id}/dbm",
-                payload="-61",
+    with patch(DISPATCH, side_effect=lambda *args: seen.append(_snapshot(args[-1]))):
+        # Signal metadata from the periodic refresh and from a new stream.
+        for authoritative in (False, True):
+            coordinator._apply_device_list(
+                {"devices": [device_object("ROCKER1", "F6-02-01", dbm=-61)]},
+                authoritative=authoritative,
             )
-        )
-    assert seen
+    assert coordinator.devices["ROCKER1"].dbm == -61
+    assert len(seen) == 2
     assert all(item in (None, (None, None)) for item in seen)
 
 

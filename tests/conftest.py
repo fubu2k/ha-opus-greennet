@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 from homeassistant import loader
 from homeassistant.config_entries import ConfigEntries
@@ -18,7 +19,14 @@ from homeassistant.helpers import issue_registry as ir
 
 from custom_components.opus_greennet.coordinator import OpusGreenNetCoordinator
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
-from tests.ha_helpers import MQTTTransport
+from tests.fake_gateway import FakeGateway
+
+
+class _PlainResolver(aiohttp.ThreadedResolver):
+    """Home Assistant's resolver without zeroconf (no network component here)."""
+
+    async def real_close(self) -> None:
+        await self.close()
 
 
 @pytest.fixture
@@ -30,6 +38,11 @@ async def hass(tmp_path: Path) -> AsyncIterator[HomeAssistant]:
     """
     component_directory = Path(__file__).resolve().parents[1] / "custom_components"
     (tmp_path / "custom_components").symlink_to(component_directory)
+    resolver = patch(
+        "homeassistant.helpers.aiohttp_client._async_make_resolver",
+        side_effect=lambda hass: _PlainResolver(),
+    )
+    resolver.start()
     hass = HomeAssistant(str(tmp_path))
     loader.async_setup(hass)
     hass.config_entries = ConfigEntries(hass, {})
@@ -41,37 +54,24 @@ async def hass(tmp_path: Path) -> AsyncIterator[HomeAssistant]:
         ir.async_load(hass, load_empty=True),
     )
     await hass.config_entries.async_initialize()
-    # MQTT's network boundary is provided by each test's transport fixture.
-    hass.config.components.add("mqtt")
     try:
         yield hass
     finally:
         for entry in hass.config_entries.async_entries("opus_greennet"):
             await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_stop(force=True)
+        resolver.stop()
 
 
 @pytest.fixture
-def mqtt_transport(hass: HomeAssistant) -> Iterator[MQTTTransport]:
-    """Replace only the MQTT client network boundary."""
-    transport = MQTTTransport(hass)
-    with (
-        patch(
-            "homeassistant.components.mqtt.async_wait_for_mqtt_client",
-            new=AsyncMock(return_value=True),
-        ),
-        patch(
-            "homeassistant.components.mqtt.is_connected",
-            side_effect=lambda hass: transport.connected,
-        ),
-        patch("homeassistant.components.mqtt.async_subscribe", transport.subscribe),
-        patch(
-            "homeassistant.components.mqtt.async_on_subscribe_done",
-            transport.subscribed,
-        ),
-        patch("homeassistant.components.mqtt.async_publish", transport.publish),
-    ):
-        yield transport
+async def gateway() -> AsyncIterator[FakeGateway]:
+    """Run a fake OPUS gateway on a local port."""
+    fake = FakeGateway()
+    await fake.start()
+    try:
+        yield fake
+    finally:
+        await fake.stop()
 
 
 @pytest.fixture
@@ -115,6 +115,6 @@ def make_telegram():
 def coordinator():
     """Create a coordinator with mocked hass and patched async_send_command."""
     hass = MagicMock()
-    c = OpusGreenNetCoordinator(hass, "AABB0011")
+    c = OpusGreenNetCoordinator(hass, MagicMock(), "AABB0011")
     c.async_send_command = AsyncMock()
     return c

@@ -129,16 +129,12 @@ class EnOceanDevice:
     last_update_received_monotonic: float | None = field(
         default=None, repr=False, compare=False
     )
-    last_update_finalized_monotonic: float | None = field(
-        default=None, repr=False, compare=False
-    )
     last_update_dispatched_monotonic: float | None = field(
         default=None, repr=False, compare=False
     )
     dbm: int | None = None
     last_command_error: str | None = None
     channels: dict[int, EnOceanChannel] = field(default_factory=dict)
-    profile: JsonObject | None = None
 
     @property
     def primary_eep(self) -> str | None:

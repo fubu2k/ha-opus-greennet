@@ -1,18 +1,16 @@
 """Characterise command-driven state changes end to end through the entities.
 
-These tests drive the real entity, coordinator, request manager and parsers
-against the deterministic broker. They pin the wire payloads, the optimistic
-post-ACK state, the protection against feedback that arrives while a command
-awaits its acknowledgement, and the number of Home Assistant state writes.
-They were written to pass unchanged before and after the phase 2 ownership
-refactoring, so they serve as the before/after comparison.
+These tests drive the real entity, coordinator, radio queue and parsers with
+only the gateway client replaced (its PUT response is the acknowledgement).
+They pin the wire payloads, the optimistic post-ACK state, the protection
+against feedback that arrives while a command awaits its acknowledgement, and
+the number of Home Assistant state writes.
 """
 
 from __future__ import annotations
 
 import ast
 import asyncio
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -28,16 +26,17 @@ from custom_components.opus_greennet.enocean_device import (
 )
 from custom_components.opus_greennet.light import OpusGreenNetLight
 from custom_components.opus_greennet.switch import OpusGreenNetSwitch
-from tests.test_coordinator_transport import broker as broker
-from tests.test_coordinator_transport import (
+from tests.fake_gateway import telegram
+from tests.test_coordinator_commands import (
     connected_coordinator as connected_coordinator,
 )
-from tests.test_reconciliation_feedback import ANSWER_TOPIC, COMMAND_TOPIC
+from tests.test_coordinator_commands import radio as radio
 from tests.test_reconciliation_feedback import timers as timers
 
 EAG_ID = "AABB0011"
 STATE_SIGNAL = f"{SIGNAL_DEVICE_STATE_UPDATE}_{EAG_ID}_DEV1"
 CHANNEL_FIELDS = ("is_on", "brightness", "position", "angle", "movement")
+STATE_PATH = "/devices/DEV1/state"
 
 
 @pytest.fixture
@@ -60,10 +59,7 @@ def dispatched(monkeypatch):
 
 @pytest.fixture
 async def coord(connected_coordinator, timers, dispatched):
-    try:
-        yield connected_coordinator
-    finally:
-        await connected_coordinator.async_unload()
+    return connected_coordinator
 
 
 def add_device(coord, eep: str, channels: dict[int, dict] | None = None):
@@ -83,12 +79,8 @@ def add_entity(coord, dispatched, entity_class, channel_id: int = 0):
     return entity
 
 
-def published_functions(broker) -> list[list[dict]]:
-    return [
-        json.loads(payload)["state"]["functions"]
-        for topic, payload, _ in broker.published
-        if topic == COMMAND_TOPIC
-    ]
+def published_functions(radio) -> list[list[dict]]:
+    return radio.functions(STATE_PATH)
 
 
 def channel_state(device, channel_id):
@@ -103,21 +95,7 @@ def query_delays(timers) -> list[float]:
 
 
 def feedback(coord, functions):
-    coord._handle_telegram_property_message(
-        SimpleNamespace(
-            topic=f"EnOcean/{EAG_ID}/stream/telegram/DEV1/from",
-            payload=json.dumps({"functions": functions}),
-            retain=False,
-        )
-    )
-
-
-async def wait_for_publish(broker, count: int = 1) -> None:
-    for _ in range(100):
-        if len(published_functions(broker)) >= count:
-            return
-        await asyncio.sleep(0)
-    raise AssertionError("command was not published")
+    coord._handle_document(telegram("DEV1", functions))
 
 
 SWITCH_SEED = {0: {"is_on": False}, 1: {"is_on": True}}
@@ -336,9 +314,9 @@ SUCCESS_CASES = [
     [case[1:] for case in SUCCESS_CASES],
     ids=[case[0] for case in SUCCESS_CASES],
 )
-async def test_accepted_command_publishes_wire_values_and_estimates_once(
+async def test_accepted_command_sends_wire_values_and_estimates_once(
     coord,
-    broker,
+    radio,
     timers,
     dispatched,
     entity_class,
@@ -362,7 +340,7 @@ async def test_accepted_command_publishes_wire_values_and_estimates_once(
 
     await getattr(entity, action)(**kwargs)
 
-    assert published_functions(broker) == [functions]
+    assert published_functions(radio) == [functions]
     assert channel_state(device, channel_id) == expected
     assert {other: channel_state(device, other) for other in others} == others
     # Exactly one write by the commanding entity, no coordinator state dispatch.
@@ -370,13 +348,13 @@ async def test_accepted_command_publishes_wire_values_and_estimates_once(
     assert dispatched.signals == []
     # Existing reconciliation schedule, no additional query.
     assert query_delays(timers) == [5, 20]
-    assert len(broker.published) == 1
-    broker.assert_clean()
+    assert len(radio.sent) == 1
+    assert not coord._radio_queue.locked()
 
 
 @pytest.mark.parametrize("channel_id", [0, 1])
 async def test_stop_sends_stop_payload_without_estimating_state(
-    coord, broker, timers, dispatched, channel_id
+    coord, radio, timers, dispatched, channel_id
 ):
     device = add_device(coord, "D2-05-00", COVER_SEED)
     entity = add_entity(coord, dispatched, OpusGreenNetCover, channel_id)
@@ -387,7 +365,7 @@ async def test_stop_sends_stop_payload_without_estimating_state(
     expected = [{"key": "stop", "value": "true"}]
     if channel_id:
         expected.insert(0, {"key": "channel", "value": "1"})
-    assert published_functions(broker) == [expected]
+    assert published_functions(radio) == [expected]
     assert {cid: channel_state(device, cid) for cid in COVER_SEED} == before
     entity.async_write_ha_state.assert_not_called()
     assert dispatched.signals == []
@@ -428,10 +406,9 @@ FAILING_ACTIONS = [
 @pytest.mark.parametrize("entity_class,eep,seed,action,kwargs", FAILING_ACTIONS)
 async def test_failed_command_leaves_state_untouched(
     coord,
-    broker,
+    radio,
     timers,
     dispatched,
-    monkeypatch,
     response,
     translation_key,
     entity_class,
@@ -440,10 +417,10 @@ async def test_failed_command_leaves_state_untouched(
     action,
     kwargs,
 ):
-    monkeypatch.setattr(
-        "custom_components.opus_greennet.mqtt_transport.REQUEST_TIMEOUT", 0.01
-    )
-    broker.response = response
+    if response is None:
+        radio.auto_respond = False
+        radio.timeout = 0.01
+    radio.response = response
     device = add_device(coord, eep, seed)
     entity = add_entity(coord, dispatched, entity_class)
     before = {cid: channel_state(device, cid) for cid in seed}
@@ -452,16 +429,24 @@ async def test_failed_command_leaves_state_untouched(
         await getattr(entity, action)(**kwargs)
 
     assert raised.value.translation_key == translation_key
-    assert len(published_functions(broker)) == 1  # no automatic retry
+    assert len(published_functions(radio)) == 1  # no automatic retry
     assert {cid: channel_state(device, cid) for cid in seed} == before
-    entity.async_write_ha_state.assert_not_called()
+    if translation_key == "request_rejected":
+        # The rejection is recorded and dispatched; the entity only rewrites
+        # its unchanged state for that dispatch and applies no estimate.
+        assert device.last_command_error
+        assert dispatched.signals == [STATE_SIGNAL]
+    else:
+        assert device.last_command_error is None
+        assert dispatched.signals == []
+    assert entity.async_write_ha_state.call_count == len(dispatched.signals)
     assert query_delays(timers) == []
     assert coord.available is True  # a failed command never changes availability
-    broker.assert_clean()
+    assert not coord._radio_queue.locked()
 
 
-async def test_unavailable_gateway_rejects_without_publishing(
-    coord, broker, timers, dispatched
+async def test_unavailable_gateway_rejects_without_sending(
+    coord, radio, timers, dispatched
 ):
     device = add_device(coord, "D2-01-01", {0: {"is_on": False}})
     entity = add_entity(coord, dispatched, OpusGreenNetSwitch)
@@ -471,7 +456,7 @@ async def test_unavailable_gateway_rejects_without_publishing(
         await entity.async_turn_on()
 
     assert raised.value.translation_key == "gateway_unavailable"
-    assert broker.published == []
+    assert radio.sent == []
     assert device.channels[0].is_on is False
     entity.async_write_ha_state.assert_not_called()
     assert timers == []
@@ -527,7 +512,7 @@ FEEDBACK_CASES = [
 )
 async def test_feedback_during_ack_wait_wins_over_estimate(
     coord,
-    broker,
+    radio,
     timers,
     dispatched,
     entity_class,
@@ -540,17 +525,17 @@ async def test_feedback_during_ack_wait_wins_over_estimate(
     estimated_state,
 ):
     del estimated_state
-    broker.auto_respond = False
+    radio.auto_respond = False
     device = add_device(coord, eep, seed)
     entity = add_entity(coord, dispatched, entity_class)
     expected = channel_state(device, 0)
     expected.update(reported_state)
 
     task = asyncio.create_task(getattr(entity, action)(**kwargs))
-    await wait_for_publish(broker)
+    await radio.wait_sent(1)
     feedback(coord, reported)
     assert entity.async_write_ha_state.call_count == 1
-    broker.receive(ANSWER_TOPIC, {"header": {"httpStatus": 200}})
+    radio.respond()
     await task
 
     assert channel_state(device, 0) == expected
@@ -559,7 +544,7 @@ async def test_feedback_during_ack_wait_wins_over_estimate(
     assert dispatched.signals == [STATE_SIGNAL]
     # Confirmed by feedback: no delayed status query was scheduled.
     assert query_delays(timers) == []
-    broker.assert_clean()
+    assert not coord._radio_queue.locked()
 
 
 @pytest.mark.parametrize(
@@ -568,7 +553,7 @@ async def test_feedback_during_ack_wait_wins_over_estimate(
 )
 async def test_feedback_before_command_is_replaced_by_estimate(
     coord,
-    broker,
+    radio,
     timers,
     dispatched,
     entity_class,
@@ -596,19 +581,19 @@ async def test_feedback_before_command_is_replaced_by_estimate(
 
 
 async def test_other_channel_feedback_during_ack_keeps_own_estimate(
-    coord, broker, timers, dispatched
+    coord, radio, timers, dispatched
 ):
-    broker.auto_respond = False
+    radio.auto_respond = False
     device = add_device(coord, "D2-01-04", SWITCH_SEED)
     entity = add_entity(coord, dispatched, OpusGreenNetSwitch, 0)
     sibling = add_entity(coord, dispatched, OpusGreenNetSwitch, 1)
 
     task = asyncio.create_task(entity.async_turn_on())
-    await wait_for_publish(broker)
+    await radio.wait_sent(1)
     feedback(
         coord, [{"key": "channel", "value": "1"}, {"key": "switch", "value": "off"}]
     )
-    broker.receive(ANSWER_TOPIC, {"header": {"httpStatus": 200}})
+    radio.respond()
     await task
 
     assert device.channels[0].is_on is True
@@ -620,7 +605,7 @@ async def test_other_channel_feedback_during_ack_keeps_own_estimate(
 
 
 async def test_cover_travel_estimate_suppresses_target_assignment(
-    coord, broker, timers, dispatched, monkeypatch
+    coord, radio, timers, dispatched, monkeypatch
 ):
     monkeypatch.setattr(
         "custom_components.opus_greennet.coordinator.monotonic", lambda: 100.0
@@ -633,7 +618,7 @@ async def test_cover_travel_estimate_suppresses_target_assignment(
     await entity.async_open_cover()
 
     channel = device.channels[0]
-    assert published_functions(broker) == [[{"key": "position", "value": "0"}]]
+    assert published_functions(radio) == [[{"key": "position", "value": "0"}]]
     assert channel.position == 100  # last report kept while travelling
     assert channel.movement == "opening"
     assert entity.is_opening is True
@@ -646,8 +631,8 @@ async def test_cover_travel_estimate_suppresses_target_assignment(
 @pytest.mark.parametrize(
     "module", ["entity", "light", "switch", "cover", "climate", "lock"]
 )
-def test_entity_layer_does_not_import_mqtt(module):
-    """Entities delegate commands; they never reach the MQTT layer directly."""
+def test_entity_layer_does_not_import_the_transport(module):
+    """Entities delegate commands; they never reach the gateway API directly."""
     path = (
         Path(__file__).parents[1] / "custom_components" / "opus_greennet" / module
     ).with_suffix(".py")
@@ -659,9 +644,7 @@ def test_entity_layer_does_not_import_mqtt(module):
             imported.add(node.module or "")
             imported.update(f"{node.module}.{alias.name}" for alias in node.names)
     forbidden = {
-        name
-        for name in imported
-        if "mqtt" in name.split(".") or name.startswith("mqtt_transport")
+        name for name in imported if {"mqtt", "aiohttp", "api"} & set(name.split("."))
     }
     assert forbidden == set()
 

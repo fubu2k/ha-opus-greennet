@@ -16,7 +16,8 @@ from custom_components.opus_greennet.binary_sensor import (
 )
 from custom_components.opus_greennet.const import DOMAIN
 from custom_components.opus_greennet.coordinator import SIGNAL_DEVICE_DISCOVERED
-from tests.ha_helpers import configure_bridge, wait_for_entity
+from tests.fake_gateway import FakeGateway, device_object
+from tests.ha_helpers import setup_bridge, wait_for_entity, wait_until
 
 PROFILES = [
     ("D5-00-01", 1),
@@ -97,17 +98,22 @@ async def test_new_profile_entities_and_other_devices_remain_addable(
         call.args[0]()
 
 
-async def test_rediscovery_waits_for_live_binary_removal(hass, mqtt_transport, caplog):
-    definition = {
-        "deviceId": "RWM",
-        "eeps": [{"eep": "F6-05-02"}],
-        "states": {"alarm": "off", "batteryLow": False},
-    }
-    mqtt_transport.devices = [definition]
-    entry = (await configure_bridge(hass))["result"]
+async def test_rediscovery_waits_for_live_binary_removal(
+    hass, gateway: FakeGateway, caplog
+):
+    gateway.devices = [
+        device_object(
+            "RWM",
+            "F6-05-02",
+            states=[
+                {"key": "alarm", "value": "off"},
+                {"key": "batteryLow", "value": False},
+            ],
+        )
+    ]
+    entry = await setup_bridge(hass, gateway)
     old_id = await wait_for_entity(hass, "binary_sensor", "AABB0011_RWM_smoke_alarm")
     coordinator = entry.runtime_data.coordinator
-    device = coordinator.devices["RWM"]
     entered = asyncio.Event()
     finish = asyncio.Event()
 
@@ -127,9 +133,11 @@ async def test_rediscovery_waits_for_live_binary_removal(hass, mqtt_transport, c
         registry.async_remove_device(child.id)
         async with asyncio.timeout(3):
             await entered.wait()
-        coordinator.devices["RWM"] = device
-        async_dispatcher_send(hass, "opus_greennet_device_discovered_AABB0011", device)
-        # Yield to discovery callbacks while removal remains blocked.
+        assert "RWM" not in coordinator.devices
+        # The gateway still lists the device: the next stream's device list
+        # rediscovers it while the old entity's removal remains blocked.
+        await gateway.close_streams()
+        await wait_until(lambda: "RWM" in coordinator.devices)
         await asyncio.sleep(0)
         await asyncio.sleep(0)
         assert "already exists" not in caplog.text

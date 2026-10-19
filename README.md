@@ -5,7 +5,7 @@
 # Opus GreenNet Bridge
 
 Home Assistant integration for the **Opus GreenNet Bridge**, controlling
-**EnOcean** devices via MQTT following the EnOcean over IP specification.
+**EnOcean** devices through the gateway's EnOcean over IP REST API.
 
 [![HACS Custom][hacs-shield]][hacs]
 [![GitHub Release][release-shield]][releases]
@@ -16,14 +16,15 @@ Home Assistant integration for the **Opus GreenNet Bridge**, controlling
 
 </div>
 
-A custom Home Assistant integration for the Opus GreenNet Bridge, enabling control of EnOcean devices via MQTT following the EnOcean over IP specification.
+A custom Home Assistant integration for the Opus GreenNet Bridge, enabling control
+of EnOcean devices. Home Assistant talks to the gateway directly over its EnOcean
+over IP REST API: no MQTT broker and no broker bridge are needed.
 
 ## Features
 
 - **Auto-discovery**: Automatically discovers EnOcean devices connected to your Opus GreenNet Bridge
-- **Immediate telemetry**: Flat battery-level and signal-strength updates bypass the multipart state debounce
-- **Real-time updates**: Receives state changes via MQTT push notifications, including device deltas, local-control telegrams, and bridge-originated command telegrams
-- **Connection recovery**: Checks that the gateway responds, marks entities unavailable during outages, and refreshes discovery and state after reconnection
+- **Real-time updates**: One persistent event stream from the gateway delivers every telegram as it happens, typically within a few hundredths of a second, including local switch operation, rocker presses and commands from other controllers such as HomeKit
+- **Connection recovery**: Checks that the gateway responds, marks entities unavailable during outages, and resynchronises every device after reconnection or a gateway restart
 - **Command feedback**: Waits for gateway acknowledgements, reports rejected or timed-out commands, and follows accepted commands with channel-specific status checks
 - **Bidirectional control**: Send commands to actuators (lights, switches, covers, thermostats)
 - **Climate control**: HeatArea thermostat support for Valve, CosiTherm, and Electro Heating areas
@@ -77,10 +78,17 @@ and Tilted binary sensors to its respective window-contact inputs.
 
 D2-06-40 also exposes the reported lock state independently of handle position,
 an unlock-request sensor, and a mechanics-fault sensor. AutoLock is read-only:
-lock/unlock actions raise an error without publishing MQTT commands. The
-reporter's tested MQTT write path disrupted the gateway bridge, and control
-remains disabled pending manufacturer clarification. AutoLock configuration and
+lock/unlock actions raise an error without sending a command to the gateway. A
+reporter's tested write path disrupted the gateway, and control remains disabled
+pending manufacturer clarification. AutoLock configuration and
 reported lock state are separate; a closed handle does not imply a locked handle.
+
+### Single input contacts
+
+D5-00-01 contacts expose a Contact binary sensor with the opening device class.
+The gateway values `open` and `closed` appear as `on` and `off`. Missing or
+unrecognized contact values remain `unknown`; a gateway outage makes the entity
+`unavailable`. No battery percentage is inferred when the gateway publishes none.
 
 ## Removing or replacing a device
 
@@ -125,28 +133,18 @@ Detector feedback accepts both the beta's descriptive keys and the gateway keys
 reported on OPUS IQ-DOT firmware 1.21.30: `alarm` (on/off), boolean `batteryLow`,
 `motionDetected` (boolean), `illumination`, and HOPPE `handle`, `unlock`
 (requested/notRequested), and `mechanics` (error/ok). The existing key/value
-formats remain supported. Battery percentages accept an optional `%` suffix in
-snapshots, indexed updates, and the immediate telemetry path, with finite 0–100
-validation. Unknown values are never interpreted as no alarm or a closed handle.
+formats remain supported. Battery percentages accept an optional `%` suffix
+(the gateway reports for example `96%`), with finite 0–100 validation. Unknown values are never interpreted as no alarm or a closed handle.
 
 ### Large installations and gateway recovery
 
-Awaited gateway requests share one queue across devices. Control commands take
-priority over status queries, and each acknowledgement timeout starts after the
-request is published. Large batches can take longer to finish because requests
-are sent one at a time. A missing acknowledgement fails that action; gateway
-availability is determined by connection events and the independent health probe.
-
-Setup checks the gateway before subscribing to the large retained device streams.
-Device discovery then continues in the background. Stream subscriptions use QoS 0
-to reduce acknowledgement traffic during retained replay; answer subscriptions
-remain at QoS 1. Discovery resumes if a reconnect interrupts startup, while rapid
-reconnects avoid requesting repeated complete snapshots. An outage cancels the
+Gateway requests that use the radio share one queue across devices: exactly one
+is in flight at a time. Control commands take priority over status queries, and
+delayed background status checks wait behind both. Large batches can take
+longer to finish because requests are sent one at a time. A missing
+acknowledgement fails that action; gateway availability is determined by the
+event stream and the independent health probe. An outage cancels the
 integration's queued commands rather than replaying them after recovery.
-
-Retained `getAnswer/devices` responses are ignored to prevent stale RPC replies
-from restoring old sensor states. Retained `stream/devices` snapshots remain
-supported.
 
 F6-05-01 leak sensors remain `unknown` until a valid `liquidDetected` reading is
 received. Missing data does not imply that a sensor is dry. Invalid updates and
@@ -154,101 +152,37 @@ rediscovery preserve a previously received alarm state.
 
 ## Prerequisites
 
-1. **Home Assistant** with MQTT integration configured (e.g., Mosquitto add-on)
-2. **Opus GreenNet Bridge** with its built-in MQTT broker
-3. **EnOcean devices** paired with your bridge
-4. **MQTT Bridge** configured between your HA broker and the Opus GreenNet broker (see below)
+1. **Home Assistant** 2026.10.1 or newer
+2. **Opus GreenNet Bridge** reachable from Home Assistant in your network. Give it
+   a fixed IP address (DHCP reservation) so the configured address stays valid.
+3. **EnOcean devices** paired with the gateway
+4. The gateway's **API credentials**: user `admin`, password = the gateway's
+   EURID in capital letters (printed on the gateway; fictional example:
+   `A1B2C3D4`), unless you changed them
 
-## MQTT Bridge Setup (Required)
+No MQTT broker, MQTT integration or Mosquitto bridge is needed.
 
-The Opus GreenNet Bridge runs its own MQTT broker. To connect it to Home Assistant, you need to configure an MQTT bridge on your Home Assistant MQTT broker (e.g., Mosquitto).
+## Upgrading from an MQTT version (0.x)
 
-### For Mosquitto Add-on
+Versions up to 0.7 reached the gateway through a Mosquitto bridge and the Home
+Assistant MQTT integration. From 1.0 on the integration connects to the gateway
+directly. Your devices, entities, entity IDs, names, areas, dashboards and
+automations are kept; only the connection changes.
 
-1. In Home Assistant, go to **Settings** → **Add-ons** → **Mosquitto broker** → **Configuration**
+1. Update the integration and restart Home Assistant.
+2. The gateway entry reports **Re-authentication required** (it does not know
+   the gateway's address yet). Open the repair notification or **Settings →
+   Devices & services → Opus GreenNet Bridge → Reconfigure** and enter the
+   gateway's IP address. Port (`8080`), user (`admin`) and password (the EURID)
+   are prefilled with the vendor defaults.
+3. The entry loads again with all existing entities.
+4. Optional cleanup once everything works: remove the OPUS connection block
+   from your Mosquitto configuration (for example
+   `/share/mosquitto/opus_bridge.conf`) and restart the broker. Keep the MQTT
+   broker and integration only if other devices use them.
 
-2. Add the following to the **Customize** section (or edit the Mosquitto config directly):
-
-   Create a file `/share/mosquitto/opus_bridge.conf` with:
-
-   ```
-   connection opus_greennet_<EAG-ID>
-   address <OPUS_BRIDGE_IP>:1883
-   bridge_protocol_version mqttv311
-   remote_username <username>
-   remote_password <password>
-   cleansession true
-   keepalive_interval 15
-   restart_timeout 5 30
-   bridge_outgoing_retain false
-   notifications true
-   notifications_local_only true
-   notification_topic opus_greennet/<EAG-ID>/bridge/status
-
-   topic EnOcean/<EAG-ID>/stream/# in 1
-   topic EnOcean/<EAG-ID>/getAnswer/# in 1
-   topic EnOcean/<EAG-ID>/putAnswer/# in 1
-   topic EnOcean/<EAG-ID>/get/# out 0
-   topic EnOcean/<EAG-ID>/put/# out 0
-   ```
-
-   Replace:
-   - `<OPUS_BRIDGE_IP>` with your Opus GreenNet Bridge's IP address
-   - `<EAG-ID>` with its eight-character uppercase identifier, in every occurrence
-   - `<username>`: `admin`
-   - `<password>`: Your gateway's EURID in uppercase (fictional example: `A1B2C3D4`)
-
-3. Reference this config file in the Mosquitto add-on configuration:
-
-   ```yaml
-   customize:
-     active: true
-     folder: mosquitto
-   ```
-
-4. Restart the Mosquitto add-on
-
-### For Standalone Mosquitto
-
-Use the same connection block above in your `mosquitto.conf`, including the
-credentials, topic directions, and notification topic.
-
-### Updating an existing MQTT bridge
-
-Replace the old `topic EnOcean/# both 1` rule with the scoped rules above; do not
-leave both configurations enabled. Each gateway needs its own connection name
-and topic identifier.
-
-`in` carries OPUS updates to your local broker; `out` carries requests to OPUS.
-Outbound QoS 0 avoids building a persistent command backlog with Mosquitto's
-default `queue_qos0_messages false`. A lost request produces an action timeout;
-commands are not automatically retried. Keep that broker default when using this
-configuration. `retain=False` alone does not prevent queued QoS 1 commands.
-Previously retained commands or an existing queue are not purged by changing
-these rules; inspect and clear any obsolete command messages separately before
-reconnecting the bridge.
-
-The optional notification topic reports `1` for a connected bridge and `0` for a
-disconnected bridge. The integration listens to it for prompt availability
-updates. Existing configurations without this topic continue to use periodic
-gateway health checks. See the [Mosquitto bridge documentation](https://mosquitto.org/man/mosquitto-conf-5.html)
-for connection, notification, and queue settings.
-
-### Verify the Bridge
-
-Use an MQTT client (like MQTT Explorer) connected to your HA broker to verify you can see topics like:
-```
-EnOcean/<EAG-ID>/stream/telegram/#
-```
-
-If you see messages when triggering EnOcean devices, the bridge is working.
-
-### Single input contacts
-
-D5-00-01 contacts expose a Contact binary sensor with the opening device class.
-The gateway values `open` and `closed` appear as `on` and `off`. Missing or
-unrecognized contact values remain `unknown`; a gateway outage makes the entity
-`unavailable`. No battery percentage is inferred when the gateway publishes none.
+The integration checks that the address answers as the configured gateway
+(same EURID) and rejects a different gateway.
 
 ## Installation
 
@@ -277,42 +211,52 @@ After installing, add the integration:
 
 [![Add Integration][config-flow-badge]][config-flow]
 
-…or go to **Settings → Devices & Services → Add Integration → “Opus GreenNet Bridge”**, then:
+…or go to **Settings → Devices & Services → Add Integration → “Opus GreenNet Bridge”**, then enter:
 
-1. Enter your **EAG Identifier** (Bridge ID; fictional example: `A1B2C3D4`)
-2. Click **Submit**
+| Field | Description |
+|-------|-------------|
+| **Host** | IP address or host name of the gateway |
+| **Port** | Port of the REST API, `8080` by default |
+| **Username** | API user, `admin` by default |
+| **Password** | API password, by default the gateway's EURID in capital letters |
 
-Setup waits for a response from that specific gateway. A connected Home Assistant
-MQTT broker alone is insufficient. If setup fails, check the identifier, gateway
-power, bridge credentials, and the directional topic rules above. Existing
-entries automatically retry when the gateway is unavailable during startup.
+Setup reads the gateway's system information and uses its EURID as the stable
+identifier of the entry, its devices and entities. If setup fails, check the
+address, the credentials and that Home Assistant can reach port 8080 of the
+gateway. Existing entries automatically retry when the gateway is unavailable
+during startup. To change the address or credentials later, use **Reconfigure**
+on the integration entry; rejected credentials start a re-authentication.
 
 ## Availability and command behavior
 
-The integration uses push updates, with a fresh MQTT uptime health check approximately
-every 60 seconds. MQTT disconnects and the optional bridge-status topic update
-availability immediately; a failed health check also marks entities unavailable.
+The integration keeps one HTTP event stream to the gateway open
+(`GET /devices/stream`). Every stream starts with the complete device list,
+which resynchronises all state, and then delivers each telegram as the gateway
+handles it. If the stream ends, it is reopened immediately; if the gateway
+cannot be reached, entities become unavailable and the connection is retried
+with increasing pauses (1 to 60 seconds).
+
+A health check reads the gateway uptime about every 60 seconds. It marks
+entities unavailable when the gateway stops answering, and reopens the stream
+after a gateway restart. Every 30 minutes the device list is read again to
+refresh slowly changing values that the stream does not carry (battery level,
+signal strength, cover movement times) and to add newly paired devices.
 Batteryless EnOcean devices are not marked offline just because they are quiet.
-On reconnection, the integration requests a fresh device list and gateway data.
-Gateway system information is optional: some firmware responds to MQTT uptime
-and device requests but does not answer the system-information endpoint. Device
-snapshots and indexed stream updates support both map and list state formats.
 
-Commands wait for the gateway's acknowledgement. Status `200` means the gateway
-sent the telegram; `201` means it accepted deferred delivery. Neither confirms
-that the physical actuator has completed the operation. Device reports and
-subsequent channel-specific status queries reconcile the state. Requests fail
-when the gateway is known to be unavailable and are cancelled during reload.
-Interim `unknown`/`invalid` readings and unrelated metadata do not cancel the
-5- and 20-second checks. Confirmation must report a valid value for the requested
-field on its channel. Cover Stop sends the profile's dedicated stop command and
-then checks the reported position and, when supported, tilt; it does not assume
-a new position.
+Commands are HTTP requests; the gateway's response is the acknowledgement.
+Status `200` means the gateway sent the telegram; `201` means it accepted
+deferred delivery. Neither confirms that the physical actuator has completed the
+operation. Device reports and subsequent channel-specific status queries
+reconcile the state. Requests fail when the gateway is known to be unavailable
+and are cancelled during reload. Interim `unknown`/`invalid` readings and
+unrelated metadata do not cancel the 5- and 20-second checks. Confirmation must
+report a valid value for the requested field on its channel. Cover Stop sends
+the profile's dedicated stop command and then checks the reported position and,
+when supported, tilt; it does not assume a new position.
 
-OPUS acknowledgement topics do not include request identifiers. Requests to the
-same endpoint are serialized, but a late reply after a timeout or a simultaneous
-command from another MQTT client can remain ambiguous. Check the physical state
-before retrying a timed-out command.
+Commands sent to a device by another controller (for example Apple HomeKit or
+the gateway's own logic) also appear on the event stream. They are shown
+immediately and verified by the same status checks.
 
 Measurements explicitly reported as `notAvailable` become unknown. Lights and
 switches remain unknown until their state is reported or a command is accepted.
@@ -321,24 +265,25 @@ zone does not by itself prove that it is currently heating.
 
 ## Known limitations
 
-- OPUS acknowledgement topics carry no request identifier. Requests to the same
-  answer topic are serialized; a reply that arrives after the 10-second timeout
-  cannot be attributed with certainty.
 - An acknowledgement (`200` or `201`) confirms the gateway, not the radio
   actuator. Physical completion is only known from device feedback or a later
   status query.
 - Cover positions during movement are estimates based on the reported travel
   time. The final position comes from the device report or status query.
 - The HOPPE AutoLock entity is read-only; lock and unlock actions are rejected.
-- The gateway is not discovered automatically; the EAG identifier is entered
-  manually. There is no options or reconfigure flow; a different gateway is a
-  new integration entry.
+- The gateway is not discovered automatically; its address is entered once.
+  Give the gateway a fixed address, or update it with **Reconfigure**.
+- The gateway's API is plain HTTP with basic authentication, as provided by the
+  manufacturer. Keep the gateway in a trusted network.
+- Battery level and signal strength are refreshed from the device list every
+  30 minutes; the event stream does not carry them.
 - Quiet or batteryless devices are never removed automatically, because the
   gateway cannot confirm that a device is gone (see
   [Removing or replacing a device](#removing-or-replacing-a-device)).
 - Commands and configuration writes are never retried automatically after a
   timeout or an outage.
-- Automated tests simulate MQTT. They do not verify physical hardware.
+- Automated tests run against a simulated gateway. They do not verify physical
+  hardware.
 
 ## Services
 
@@ -356,24 +301,31 @@ The `device_id` is the EURID of the target device (fictional example: `AABB1122`
 gateway when more than one Opus GreenNet config entry is loaded. The two read
 actions return their response data directly in Home Assistant.
 
-## MQTT Topic Structure
+## REST API
 
-The integration follows the EnOcean over IP MQTT specification:
+The integration uses these endpoints of the gateway's EnOcean over IP REST API
+(basic authentication, JSON documents with a `header.httpStatus`):
 
 ```
-EnOcean/{EAG-Identifier}/stream/telegram/{Device-Identifier}/from  # Device → Gateway
-EnOcean/{EAG-Identifier}/stream/telegram/{Device-Identifier}/to    # Gateway → Device
-EnOcean/{EAG-Identifier}/put/devices/{Device-Identifier}/state     # Commands
-EnOcean/{EAG-Identifier}/get/devices                               # Device discovery
-EnOcean/{EAG-Identifier}/getAnswer/devices/{Device-Identifier}     # Discovery response
+GET  /system/info                      # Gateway identity (EURID) and version
+GET  /system/uptime                    # Health check
+GET  /devices                          # Device list with current state
+GET  /devices/stream                   # Event stream: device list, then telegrams
+GET  /devices/{Device-Identifier}      # One device (late discovery)
+PUT  /devices/{Device-Identifier}/state          # Commands and status queries
+GET  /devices/{Device-Identifier}/configuration  # ReCom: stored configuration
+PUT  /devices/{Device-Identifier}/configuration  # ReCom: write configuration
+GET  /devices/{Device-Identifier}/parameters     # ReCom: supported parameters
 ```
 
 ## Telegram Payload Format
 
-The identifiers and values below are fictional examples.
+Each telegram on the event stream is one JSON document. The identifiers and
+values below are fictional examples.
 
 ```json
 {
+  "header": {"content": "telegram"},
   "telegram": {
     "deviceId": "AABB1122",
     "friendlyId": "Example_Light",
@@ -396,43 +348,36 @@ The identifiers and values below are fictional examples.
 
 ### Devices not appearing
 
-1. Check that MQTT integration is connected
-2. Verify your EAG Identifier is correct
-3. Check Home Assistant logs for MQTT subscription errors
-4. Ensure your Opus GreenNet Bridge is publishing to the expected topics
+1. Check that the integration entry is loaded and the gateway is available
+2. Verify that the device is paired with the gateway and listed in the
+   gateway's own app
+3. Check the Home Assistant log for messages from `custom_components.opus_greennet`
+4. Newly paired devices appear on the next stream start or device list refresh
+   (at the latest after 30 minutes); reloading the entry adds them at once
 
-### Broker, gateway or radio actuator
+### Network, gateway or radio actuator
 
-Three independent links are involved. Identify which one fails before changing
-the configuration:
+Independent links are involved. Identify which one fails before changing the
+configuration:
 
 | Link | Symptom | Check |
 |------|---------|-------|
-| Home Assistant MQTT broker | All entities unavailable; actions fail with "The Home Assistant MQTT connection is unavailable" | State of the MQTT integration and the broker log |
-| Bridge to the OPUS gateway | All entities unavailable; actions fail with "The OPUS gateway is unavailable" | `opus_greennet/<EAG-ID>/bridge/status` (`1` connected, `0` disconnected); the uptime health check runs about every 60 seconds |
+| Network to the OPUS gateway | All entities unavailable; actions fail with "The OPUS gateway is unavailable" | Gateway power and address; `http://<gateway>:8080/system/uptime` must answer (with the API credentials); the health check runs about every 60 seconds |
+| Gateway credentials | Entry asks for re-authentication | User and password of the gateway API |
 | EnOcean radio actuator | Entities available, but the physical device does not follow | Range, power and pairing of the actuator; the debug log of the follow-up status queries |
 
-A broker or bridge outage makes the gateway unavailable and cancels queued
-commands. They are not replayed after recovery. A quiet radio device does not
-make any entity unavailable.
+A gateway outage makes the entities unavailable and cancels queued commands.
+They are not replayed after recovery. A quiet radio device does not make any
+entity unavailable.
 
 ### Acknowledgements 200 and 201
 
-After a command, the gateway answers on `putAnswer`. `200` means the gateway
+Every command is answered by the gateway's HTTP response. `200` means the gateway
 sent the telegram; `201` means it accepted the command for deferred delivery.
 Both count as an accepted command. Neither proves that the actuator executed
 it. The integration then shows the expected state and checks it with status
 queries 5 and 20 seconds later; for covers, 10 and 20 seconds after the
 estimated end of the movement. Any other status fails the action.
-
-### Retained state
-
-The broker keeps retained copies of OPUS topics. Retained device snapshots on
-`stream/devices` restore the last known state after a restart or reconnect.
-Retained `getAnswer/devices` and `putAnswer` messages are ignored because they
-answer earlier requests. Retained radio telegrams never fire rocker events.
-After a reconnect a fresh device list is requested at most once every 60
-seconds.
 
 ### Estimated values
 
@@ -441,18 +386,19 @@ travel time plus a 5-second grace period. After an accepted command the
 expected state is shown until a device report or status query confirms or
 corrects it.
 
-### Timeouts without a request ID
+### Timeouts
 
-If an action times out after 10 seconds, the gateway may still execute it, and
-a late reply cannot be matched to the request. Check the physical state before
-repeating the command. The integration does not retry automatically.
+If an action is not acknowledged within 10 seconds, the gateway may still
+execute it. Check the physical state before repeating the command. The
+integration does not retry automatically. ReCom configuration requests travel
+over the radio and may take several seconds; they wait up to 45 seconds.
 
 ### Recovery
 
 - If the gateway does not answer at startup, Home Assistant retries the setup
   automatically.
-- After an MQTT or bridge reconnect, subscriptions are restored and the device
-  list is refreshed.
+- After a connection loss or a gateway restart, the event stream is reopened
+  and every device is resynchronised from the gateway's device list.
 - Run the `opus_greennet.reload_entry` action to restart the integration
   without restarting Home Assistant. Pending requests are cancelled.
 - Download diagnostics (see below) before reporting a problem.
@@ -474,28 +420,23 @@ logger:
 
 ### Debug update lag
 
-When debug logging is enabled, state updates include latency markers for the
-main handoff points:
-
-- `OPUS update latency received`: MQTT message reached the integration
-- `OPUS update latency finalized`: debounced MQTT fragments were converted into state functions
-- `OPUS update latency dispatch`: the coordinator notified Home Assistant entities
-- `OPUS update latency entity_write`: the entity wrote its Home Assistant state
-
-Retained device-model properties are not logged individually during reconnects;
-large cached snapshots would otherwise flood the log and delay startup. Live
-updates keep their latency markers.
+When debug logging is enabled, every applied telegram is logged as
+`OPUS telegram/from <device> ... gateway_to_ha_ms=<n>`: the time from the
+gateway's telegram timestamp until Home Assistant received it (clock offsets
+between gateway and Home Assistant affect this value). Entity writes are logged
+as `OPUS update latency entity_write` with the time since the telegram was
+received.
 
 Download a redacted diagnostic report from **Settings → Devices & services →
 Opus GreenNet Bridge → three-dot menu → Download diagnostics**. It includes the
 gateway status, discovered devices, channel state, last update source, and the
-latest bridge command error without adding volatile diagnostic fields to every
-entity state.
+latest command error without adding volatile diagnostic fields to every entity
+state. Addresses, credentials, identifiers and the gateway's HomeKit setup code
+are redacted.
 
-For local switch tests, press the physical control and compare the time between
-`received`, `dispatch`, and `entity_write`. If `received` is already delayed, the
-lag is before this integration. If `received` is fast but `entity_write` is slow,
-the lag is inside Home Assistant or this integration.
+For local switch tests, press the physical control and compare
+`gateway_to_ha_ms` with the `entity_write` timing. If the gateway latency is
+already high, the delay is in the gateway or the network.
 
 ## Removing the integration
 
@@ -503,10 +444,7 @@ the lag is inside Home Assistant or this integration.
    three-dot menu of the entry and select **Delete**. Home Assistant removes the
    entry, its devices and entities. The gateway and the pairing of the EnOcean
    devices are not changed.
-2. When no other entry uses the gateway, remove its connection block from the
-   Mosquitto configuration (for example `/share/mosquitto/opus_bridge.conf`)
-   and restart the broker. Otherwise the broker keeps bridging the OPUS topics.
-3. Remove the integration in HACS, or delete
+2. Remove the integration in HACS, or delete
    `custom_components/opus_greennet` for a manual installation, and restart
    Home Assistant.
 
@@ -518,10 +456,12 @@ the lag is inside Home Assistant or this integration.
 custom_components/opus_greennet/
 ├── __init__.py           # Integration setup and service registration
 ├── manifest.json         # Integration metadata and version
-├── config_flow.py        # UI configuration
-├── const.py              # Constants, EEP mappings, and MQTT topics
-├── coordinator.py        # MQTT communication, discovery, and commands
-├── mqtt_transport.py     # Confirmed subscriptions, requests, and gateway probing
+├── config_flow.py        # UI configuration, reauthentication and reconfiguration
+├── api.py                # REST client: requests, error mapping, event stream splitting
+├── protocol.py           # Pure helpers that read gateway documents
+├── coordinator.py        # Event stream, health check, device state and commands
+├── const.py              # Constants and EEP mappings
+├── wire.py               # Typed JSON boundary helpers
 ├── enocean_device.py     # Device and channel data model
 ├── entity.py             # Shared entity and device-registry behavior
 ├── diagnostics.py        # Redacted integration diagnostics
@@ -540,31 +480,34 @@ custom_components/opus_greennet/
     ├── en.json           # English translations
     └── de.json           # German translations
 tests/
-├── conftest.py                  # Shared fixtures
-├── ha_helpers.py                # Simulated MQTT boundary for real HA tests
+├── conftest.py                  # Shared fixtures (real HA core, fake gateway)
+├── fake_gateway.py              # In-process OPUS gateway serving the REST API over HTTP
+├── ha_helpers.py                # Config flow and waiting helpers for real HA tests
+├── test_api.py                  # REST client, error mapping, stream splitter, priority lock
+├── test_protocol.py             # Pure protocol helpers
+├── test_coordinator_stream.py   # Setup, event stream, availability, health check, refresh
+├── test_coordinator_devices.py  # Device lists: discovery, resync and metadata refresh
+├── test_coordinator_telegrams.py # Device reports, outbound commands and their effects
+├── test_coordinator_requests.py # Request queue, acknowledgements and error mapping
+├── test_coordinator_commands.py # Command acknowledgements, outages and unload
+├── test_coordinator_edge_cases.py # Malformed answers, failures and lifecycle
+├── test_rest_lifecycle.py       # End-to-end smoke test over real HTTP
 ├── test_enocean_device.py       # Device model tests
-├── test_coordinator_helpers.py  # Pure helper and command tests
-├── test_coordinator_mqtt.py     # MQTT finalization tests
-├── test_coordinator_parsing.py  # JSON telegrams, fragments, and late discovery
-├── test_coordinator_edge_cases.py # Malformed payloads, timers, and availability logging
-├── test_retained_device_answers.py # Retained response and entity state regressions
-├── test_coordinator_transport.py # Subscription, request, and recovery tests
-├── test_transport_edge_cases.py # Request queue, subscription and probe edge cases
-├── test_release_transport_safety.py # Interrupted startup and queue fault recovery
-├── test_background_efficiency.py # Superseded background work and redundant writes
 ├── test_gateway_payload_compatibility.py # Reported IQ-DOT payload regression tests
 ├── test_state_ownership.py      # State ownership between reports and commands
 ├── test_strict_typing_boundaries.py # Typed wire-value boundaries
+├── test_release_transport_safety.py # Outage and queue fault recovery
+├── test_background_efficiency.py # Superseded background work and redundant writes
 ├── test_beta_entity_migration.py # Fork IDs, duplicate cleanup, and translations
 ├── test_binary_sensor_discovery.py # Repeated discovery and removal ordering
 ├── test_binary_sensor_descriptions.py # Stable sensor inventory and metadata
-├── test_detector_support.py     # Sensor discovery and live MQTT updates
+├── test_detector_support.py     # RWM and presence detectors end to end
 ├── test_temperature_humidity_sensor.py # A5-04-03 readings, ranges, and HA entities
-├── test_contact_sensor.py       # D5-00-01 states, MQTT updates, and reload
-├── test_scalar_telemetry.py      # Immediate battery and signal-strength updates
-├── test_window_handles.py        # Handle positions and protected AutoLock actions
-
-├── test_device_removal.py        # Child removal, rediscovery and request isolation
+├── test_contact_sensor.py       # D5-00-01 states, live updates, and reload
+├── test_opus_motion_detector.py # OPUS motion detector (F6-02-01 + A5-04-01)
+├── test_scalar_telemetry.py     # Battery level and signal strength
+├── test_window_handles.py       # Handle positions and protected AutoLock actions
+├── test_device_removal.py       # Child removal, rediscovery and request isolation
 ├── test_cover_stop.py           # Stop command encoding and follow-up queries
 ├── test_cover_movement.py       # Estimated travel, feedback, timing and cleanup
 ├── test_reconciliation_feedback.py # Valid feedback, channels, and command timing
@@ -572,13 +515,12 @@ tests/
 ├── test_event_lifecycle.py      # Transient button fields are never replayed
 ├── test_entities.py             # Entity state and Home Assistant service tests
 ├── test_platform_edge_cases.py  # Platform setup and entity edge cases
-├── test_init.py                 # Entry setup, unloading, and service routing
+├── test_init.py                 # Entry setup, migration errors, unloading, services
 ├── test_service_actions.py      # Actions through the real Home Assistant service registry
 ├── test_diagnostics.py          # Diagnostic redaction tests
 ├── test_diagnostics_edge_cases.py # Diagnostics for partial and missing data
-├── test_ha_lifecycle.py         # Real Home Assistant lifecycle and config flows
-├── test_config_flow.py          # Config flow validation tests
-├── test_config_flow_recovery.py # Recovery after every config flow error
+├── test_ha_lifecycle.py         # Real Home Assistant lifecycle against the fake gateway
+├── test_config_flow.py          # User, reauth (MQTT migration) and reconfigure flows
 ├── test_translations.py         # Translation, exception key and service consistency
 ├── test_quality_scale.py        # quality_scale.yaml schema and rule evidence
 └── test_coverage_gate.py        # Per-module coverage gate
@@ -612,6 +554,9 @@ Motion starts unknown until a valid telegram arrives after restart.
 The v0.7.0b1 quality beta requires HA 2026.10.1 or newer, including for manual installation.
 Its combined suite contains 1,315 tests, with strict typing and per-module coverage gates.
 Users on older HA versions should keep stable v0.6.0 or upgrade HA first.
+Version 1.0 replaces the MQTT transport with the gateway's REST API. Its suite
+contains 1,486 tests that run against an in-process gateway serving the REST API
+and its event stream over real HTTP (`tests/fake_gateway.py`).
 CI resolves the latest stable Home Assistant release from PyPI on each run and
 tests that exact version, recorded in the workflow summary. It runs on pull
 requests, pushes to main, every Monday at 06:17 UTC, and manual dispatch. Beta
@@ -624,7 +569,7 @@ config flow (`script/check_coverage.py`). Lifecycle and race regression suites
 run three more times. `quality_scale.yaml` is validated against the official
 rule keys and schema by `tests/test_quality_scale.py`; it is a self-assessment,
 not an official quality scale rating (see
-[the evidence matrix](docs/quality/quality-scale-evidence.md)). MQTT transport is
+[the evidence matrix](docs/quality/quality-scale-evidence.md)). The gateway is
 simulated; physical-device verification remains part of beta testing.
 
 ### Beta testing
@@ -633,13 +578,14 @@ Enable pre-release versions for this repository in HACS, select the beta, and
 restart Home Assistant. Existing entity IDs and rocker event names are preserved.
 Check physical controls, low brightness, both actuator channels, cover position
 and tilt, climate activity, and rapid rocker presses. Also test a gateway outage
-and reconnection, then reload the integration during a pending request. Report
+(power cycle) and reconnection, then reload the integration during a pending
+request. Report
 your gateway firmware, device EEP, and the observed result with redacted
 diagnostics.
 
 ## References
 
-- [EnOcean over IP MQTT Specification](https://www.enocean-alliance.org/ip/)
+- [EnOcean over IP Specification (REST API)](https://www.enocean-alliance.org/ip/)
 - [EnOcean Equipment Profiles (EEP)](https://www.enocean-alliance.org/eep/)
 - [Home Assistant Developer Documentation](https://developers.home-assistant.io/)
 

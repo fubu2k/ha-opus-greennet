@@ -3,7 +3,6 @@
   "name": "Opus GreenNet Bridge",
   "codeowners": ["@kegelmeier"],
   "config_flow": true,
-  "dependencies": ["mqtt"],
   "documentation": "https://github.com/kegelmeier/ha-opus-greennet",
   "integration_type": "hub",
   "iot_class": "local_push",

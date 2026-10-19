@@ -2,22 +2,24 @@
 
 ## Project Overview
 
-Home Assistant custom integration for OPUS GreenNet Bridge (EnOcean over IP via MQTT).
+Home Assistant custom integration for OPUS GreenNet Bridge (EnOcean over IP via the gateway REST API).
 Repository: https://github.com/kegelmeier/ha-opus-greennet
 
 ## Tech Stack
 
 - Python 3.14 (Home Assistant 2026.8+)
 - Home Assistant custom component architecture
-- MQTT (EnOcean over IP protocol)
+- EnOcean over IP REST API of the gateway (HTTP + event stream, aiohttp)
 - HACS compatible
 
 ## Project Structure
 
 - `custom_components/opus_greennet/` — all integration code
 - `manifest.json` — version (single source of truth) + metadata
-- `const.py` — all constants, EEP mappings, topic patterns
-- `coordinator.py` — MQTT communication, device discovery, command dispatch
+- `const.py` — all constants and EEP mappings
+- `api.py` — REST client (requests, error mapping, event stream splitting, request priority lock)
+- `protocol.py` — pure helpers that read gateway documents (state functions, feedback fields)
+- `coordinator.py` — connection lifecycle (event stream, health probe), device state, commands
 - `enocean_device.py` — device/channel data model
 - Platform files: `light.py`, `switch.py`, `cover.py`, `climate.py`, `sensor.py`, `binary_sensor.py`, `event.py`
 - `services.yaml` — HA service definitions (rendered in Developer Tools)
@@ -111,7 +113,7 @@ Versioning is done **manually and separately** from PRs. After one or more PRs a
 
 - All platforms follow the dispatcher signal pattern (see `light.py` as reference)
 - Device state is held in `EnOceanChannel` dataclass fields
-- Coordinator handles ALL MQTT communication; entities never touch MQTT directly
+- Coordinator handles ALL gateway communication; entities never call the API directly
 - Use `KNOWN_STATE_KEYS` in const.py when adding new function keys
 - Multi-channel devices require the `channel` key in command functions
 
@@ -124,5 +126,6 @@ Versioning is done **manually and separately** from PRs. After one or more PRs a
 
 ## Reference
 
-- MQTT protocol spec: `opus_mqtt_services_reference.md` in repo root
+- Gateway interface contract: `docs/quality/protocol-contract.md`
+- Former MQTT reference (payload semantics still apply): `opus_mqtt_services_reference.md`
 - EEP profiles: https://www.enocean-alliance.org/eep/

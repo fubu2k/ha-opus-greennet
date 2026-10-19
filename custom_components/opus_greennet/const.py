@@ -6,65 +6,13 @@ from typing import Final
 
 DOMAIN: Final = "opus_greennet"
 
-# Configuration keys
+# Configuration keys (host, port, username and password use Home Assistant's
+# shared CONF_* names). The EAG identifier is the gateway's EURID; it anchors
+# every device and entity unique ID.
 CONF_EAG_ID: Final = "eag_id"
 
-# MQTT Topic patterns (EnOcean over IP specification)
-TOPIC_BASE: Final = "EnOcean"
-TOPIC_STREAM_TELEGRAM: Final = "{base}/{eag_id}/stream/telegram/{device_id}/from"
-TOPIC_STREAM_DEVICE: Final = "{base}/{eag_id}/stream/device/{device_id}"
-TOPIC_PUT_STATE: Final = "{base}/{eag_id}/put/devices/{device_id}/state"
-TOPIC_SUB_PUT_ANSWER_STATE: Final = "{base}/{eag_id}/putAnswer/devices/+/state"
-TOPIC_GET_DEVICES: Final = "{base}/{eag_id}/get/devices"
-TOPIC_GET_ANSWER_DEVICES: Final = "{base}/{eag_id}/getAnswer/devices/#"
-TOPIC_GET_DEVICE_PROFILE: Final = "{base}/{eag_id}/get/devices/{device_id}/profile"
-TOPIC_GET_ANSWER_DEVICE_PROFILE: Final = (
-    "{base}/{eag_id}/getAnswer/devices/{device_id}/profile"
-)
-
-# ReCom API topics
-TOPIC_GET_DEVICE_CONFIGURATION: Final = (
-    "{base}/{eag_id}/get/devices/{device_id}/configuration"
-)
-TOPIC_GET_ANSWER_DEVICE_CONFIGURATION: Final = (
-    "{base}/{eag_id}/getAnswer/devices/{device_id}/configuration"
-)
-TOPIC_PUT_DEVICE_CONFIGURATION: Final = (
-    "{base}/{eag_id}/put/devices/{device_id}/configuration"
-)
-TOPIC_PUT_ANSWER_DEVICE_CONFIGURATION: Final = (
-    "{base}/{eag_id}/putAnswer/devices/{device_id}/configuration"
-)
-TOPIC_GET_DEVICE_PARAMETERS: Final = (
-    "{base}/{eag_id}/get/devices/{device_id}/parameters"
-)
-TOPIC_GET_ANSWER_DEVICE_PARAMETERS: Final = (
-    "{base}/{eag_id}/getAnswer/devices/{device_id}/parameters"
-)
-TOPIC_GET_LINK_TABLES: Final = "{base}/{eag_id}/get/devices/{device_id}/linkTables"
-TOPIC_GET_ANSWER_LINK_TABLES: Final = (
-    "{base}/{eag_id}/getAnswer/devices/{device_id}/linkTables"
-)
-TOPIC_PUT_LINK_TABLES: Final = "{base}/{eag_id}/put/devices/{device_id}/linkTables"
-TOPIC_PUT_ANSWER_LINK_TABLES: Final = (
-    "{base}/{eag_id}/putAnswer/devices/{device_id}/linkTables"
-)
-
-# Gateway system info topics
-TOPIC_GET_SYSTEM_INFO: Final = "{base}/{eag_id}/get/config/system/info"
-TOPIC_GET_ANSWER_SYSTEM_INFO: Final = "{base}/{eag_id}/getAnswer/config/system/info"
-TOPIC_GET_SYSTEM_UPTIME: Final = "{base}/{eag_id}/get/config/system/uptime"
-TOPIC_GET_ANSWER_SYSTEM_UPTIME: Final = "{base}/{eag_id}/getAnswer/config/system/uptime"
-
-# Subscription patterns (with wildcards)
-TOPIC_SUB_TELEGRAM_FROM: Final = "{base}/{eag_id}/stream/telegram/+/from"
-TOPIC_SUB_TELEGRAM_FROM_ALL: Final = "{base}/{eag_id}/stream/telegram/#"
-TOPIC_SUB_TELEGRAM_TO: Final = "{base}/{eag_id}/stream/telegram/+/to"
-TOPIC_SUB_DEVICE: Final = "{base}/{eag_id}/stream/device/+"
-TOPIC_SUB_DEVICE_STREAM_ALL: Final = "{base}/{eag_id}/stream/device/#"
-TOPIC_SUB_DEVICES: Final = "{base}/{eag_id}/stream/devices/+"
-TOPIC_SUB_DEVICES_ALL: Final = "{base}/{eag_id}/stream/devices/#"
-TOPIC_SUB_GET_ANSWER: Final = "{base}/{eag_id}/getAnswer/devices/+"
+DEFAULT_PORT: Final = 8080
+DEFAULT_USERNAME: Final = "admin"
 
 # EEP (EnOcean Equipment Profile) to entity type mappings
 # Format: EEP prefix -> (entity_type, description)
@@ -134,7 +82,7 @@ OPUS_MOTION_DETECTOR_EEPS: Final = frozenset({"F6-02-01", "A5-04-01"})
 KEY_BUTTON_MOTION: Final = "buttonAI"
 KEY_BUTTON_NO_MOTION: Final = "buttonA0"
 
-INDEXED_STATE_CONTAINERS: Final = ("states", "transmitModes")
+RWM_EEP: Final = "F6-05-02"
 KEY_SMOKE_ALARM: Final = "smokeAlarm"
 KEY_BATTERY_LOW_RWM: Final = "batteryLow"
 
@@ -191,7 +139,6 @@ BUTTON_VALUE_RELEASED: Final = "released"
 STATE_ON: Final = "on"
 STATE_OFF: Final = "off"
 
-# Cover states
 
 # Climate heater mode values
 HEATER_MODE_HEATING: Final = "heating"

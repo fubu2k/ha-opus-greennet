@@ -170,7 +170,7 @@ class OpusGreenNetEntity(Entity):
 
     @property
     def available(self) -> bool:
-        """Return whether the MQTT transport is connected."""
+        """Return whether the gateway is reachable."""
         return self._coordinator.available
 
     async def async_added_to_hass(self) -> None:
