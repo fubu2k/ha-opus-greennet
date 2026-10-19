@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-10-19
+
+Stable release of the v0.7.0b1 beta: the motion-detector support from #72 and the quality phases 1–5 from #74/#75. This is the last release that connects through MQTT; the upcoming 1.0 talks to the gateway directly over its REST API.
+
+### Breaking requirement
+- **Home Assistant 2026.10.1 or newer is required**, including for manual installation. Stay on v0.6.0 or upgrade Home Assistant first.
+
+### Added
+- OPUS motion detector (F6-02-01 + A5-04-01): `buttonAI` pressed means motion, `buttonA0` pressed means no motion; temperature, humidity and battery entities. Thanks to @florian-hartung and @nlsrchtr (#72).
+- A5-04-01 and A5-04-02 temperature/humidity profiles with profile-specific temperature limits.
+
+### Fixed
+- Rocker presses are no longer replayed by later battery, signal-strength or other device updates; repeated real presses still produce separate events.
+- Contact readings and profile-specific temperature ranges are preserved by the refactored device model.
+
+### Changed
+- Superseded queued background status checks are dropped, idle request locks are released and redundant entity state writes are avoided.
+- Optimistic light/switch/cover state after accepted commands is handled in the device model; MQTT payloads are validated per field.
+- Strict typing, quality evidence, per-module coverage gates and repeated lifecycle/race checks in CI. No official Home Assistant quality scale rating is claimed. Thanks to @fubu2k (#74, #75).
+
+### Validation
+- 1,315 tests on Home Assistant 2026.10.1 and the latest stable release, with Ruff, strict mypy and dependency checks.
+- Ran as v0.7.0b1 on an installation with 65 OPUS devices (switches, dimmers, two-channel actuators, blinds, leak sensors).
+
 ## [0.7.0b1] - 2026-10-18
 
 Quality and reliability beta incorporating #74 and its included #75 quality evidence, while retaining the motion-detector features from v0.7.0b0 and all v0.6.0 sensor support. v0.6.0 remains stable.
