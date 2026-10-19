@@ -9,6 +9,15 @@ All notable changes to this project will be documented in this file.
 - Battery levels of all OPUS devices that report one (SMS presence detectors, A5-04-01/02/03 temperature/humidity sensors and the OPUS motion detector) are displayed in whole percent, for example `88 %` instead of `87.5 %`. Only the display is rounded: entity state, history and long-term statistics keep the reported value, and a display precision you set in the entity settings takes precedence.
 - Neither change sends a request to a device or changes MQTT traffic, entity inventory or unique IDs.
 
+### Added
+- Integration diagnostics list `late_answers` for every device and for the gateway: `unanswered_requests` counts requests from the last two minutes that ended without a gateway reply (timeout or cancellation), and `possibly_late_answers` counts replies that arrived while such a request was still open. OPUS replies carry no request ID, so such a reply may belong to the earlier request. The counters only make this visible: they never delay, repeat, drop or change a request, and they change no entity state or availability.
+
+### Compatibility and upgrade notes
+- The README section "Timeouts without a request ID" now explains the known limitation: if a reply arrives after the 10-second timeout while the next request to the same device is waiting, that request can report success although the gateway rejected it, or an error although the gateway accepted it. Replies never cross devices, retained replies are ignored, and the next device report shows the real state. The same applies to a reply to another MQTT client (for example the MyOPUS app). Timeouts, request order and MQTT traffic are unchanged.
+
+### Development and quality assurance
+- New regression suites `tests/test_late_responses.py` (18 cases) and `tests/test_late_answer_diagnostics.py` (19 cases) reproduce how late replies are attributed and pin that no cooldown, retry or extra request follows a timeout. Both run three additional times in CI. Report: `docs/quality/phases/phase-12.md`.
+
 ## [0.7.0b2] - 2026-10-19
 
 Quality series (phases 1-11) plus the device support of upstream v0.7.0b1 (kegelmeier/ha-opus-greennet), integrated into this fork's architecture. Existing entity IDs, unique IDs, device assignments, topics, services and wire payloads are unchanged.
