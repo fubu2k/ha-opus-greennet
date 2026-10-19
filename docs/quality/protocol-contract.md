@@ -335,6 +335,18 @@ Attribution rules (current behaviour, unchanged by phase 12):
   is never changed by a late or misattributed command answer (A2). A late
   uptime answer can complete the next health probe; it proves only that the
   gateway answered, never any device state. **[Code][Test]**
+- **Late-answer diagnostics (option M6).** `MQTTRequestManager` remembers, per
+  answer topic, each published request that ended without an answer (timeout,
+  caller cancellation, `async_cancel_pending`, `async_cancel_device`; not a
+  failed publish, not after unload) for `LATE_ANSWER_DIAGNOSTIC_WINDOW` = 120 s.
+  A non-retained answer that no request takes (routed without owner, before
+  the next publish, or a second answer while a request still listens) settles
+  the oldest entry. An answer taken while an entry is open increments
+  `possibly_late_answers` of the request's owner and is logged at debug level.
+  Diagnostics list both counters per device and for the gateway
+  (`late_answers`). Answers on temporary subscriptions that arrive after the
+  request ended are not observable and expire with the window. The counters
+  change no result, state, timing, request count or availability. **[Code][Test]**
 - Consequences, limits and the evaluated mitigations: `phases/phase-12.md`.
 
 ## 8. Entity inventory and identities (frozen by A5)

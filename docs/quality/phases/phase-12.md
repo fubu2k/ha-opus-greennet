@@ -1,9 +1,13 @@
 # Phase 12 - Late-response ambiguity investigation
 
-- **Status:** investigation implemented as tests and documentation on the
-  branch; CI green (run `39313178932`, section 9); awaiting review. Not merged, no PR. No production code change, no
+- **Status:** part A (investigation, tests and documentation) on branch
+  `test/opus-q12-late-responses`, CI green (run `39313178932`, section 9);
+  part B (option M6, diagnostic-only marker, approved by the maintainer on
+  2026-10-19 after part A) on branch `feat/opus-q12-late-answer-diagnostics`,
+  stacked on part A (section 13). Awaiting review. Not merged, no PR. No
   version change, no release, no CHANGELOG entry.
-- **Branch:** `test/opus-q12-late-responses` (new)
+- **Branches:** `test/opus-q12-late-responses` (part A, head `dc0851f`),
+  `feat/opus-q12-late-answer-diagnostics` (part B, base `dc0851f`)
 - **Base SHA:** `c1ac37656198892f668cb9503ee18a3c508d8cf5` (`main`,
   2026-10-19 21:28 +0200, "docs: add unreleased changelog entry for phase 6
   metadata fix"; includes the resumed phase 6 merge `6ce8f38`, PR #10)
@@ -30,8 +34,9 @@ information; and to document the limitation if no reliable mitigation exists.
 Result: the ambiguity is reproduced deterministically and pinned by
 `tests/test_late_responses.py` (16 test functions, 18 cases). The wire format
 offers no correlation information that is verified to be reliable (section 3).
-No mitigation is implemented in this phase (section 5); one traffic-neutral,
-diagnostic-only candidate is proposed for a separate decision.
+Part A implements no mitigation (section 5). Part B implements only the
+traffic-neutral, diagnostic-only candidate M6 (section 13); it makes the
+ambiguity visible and does not resolve it.
 
 | ID | Finding | Status |
 |----|---------|--------|
@@ -143,12 +148,13 @@ Consequences for a user:
 | M3 | Per-topic quarantine/drain: hold the next publish on the topic until a stray answer arrives or a bound expires | needs a defensible lateness bound; none is measured (H2). Adds latency to user commands on that device; waits the full bound if the answer was lost. Plan section 14 allows it only with such a bound. | deferred until H1/H2 exist |
 | M4 | Count-based skip: after an unresolved timeout, discard the first answer and take the second | assumes exactly-once, in-order answers (H1, unverified). If A's answer was lost, B discards its own answer and times out: false failure, and a user repeat adds radio traffic | rejected without H1 |
 | M5 | Order answers by `header.timestamp` | reliability not established (section 3, H3); plan section 12 forbids wire times before that | deferred until H3 |
-| M6 | Diagnostic-only marker: count published-but-unanswered requests per answer topic (timeout or cancellation after publish); flag a result obtained while the count is above zero as "possibly late" in the debug log and diagnostics; decrement on an answer without owner; clear on reconnect, removal and unload | no publish, no delay, no behaviour change for entities (A1-A5 neutral). Needs a rule for a lost answer (the flag would otherwise stay): bounded expiry of the diagnostic flag only. Changes no state decision, so it is a transparency aid, not a fix | candidate; needs maintainer approval in a separate change |
+| M6 | Diagnostic-only marker: count published-but-unanswered requests per answer topic (timeout or cancellation after publish); flag a result obtained while the count is above zero as "possibly late" in the debug log and diagnostics; decrement on an answer without owner; clear on reconnect, removal and unload | no publish, no delay, no behaviour change for entities (A1-A5 neutral). Needs a rule for a lost answer (the flag would otherwise stay): bounded expiry of the diagnostic flag only. Changes no state decision, so it is a transparency aid, not a fix | approved; implemented in part B (section 13) |
 | M7 | Keep B's checks when its real negative answer arrives after a misattributed success (L3) | the checks would correct the estimate, but they are two requests that the current code does not send; under A1 not without a reviewed traffic decision | not proposed |
 
 None of the options removes the ambiguity without hardware evidence. Phase 12
 therefore documents the limitation (README, protocol contract section 7.2)
-instead of adding a blanket cooldown, as plan section 14 requires.
+instead of adding a blanket cooldown, as plan section 14 requires. Only M6,
+which decides nothing, was implemented after approval.
 
 ## 6. Guardrails A1-A5
 
@@ -171,7 +177,7 @@ instead of adding a blanket cooldown, as plan section 14 requires.
 | `README.md` | "Timeouts without a request ID" (user-facing consequences), test list |
 | `docs/quality/phases/phase-12.md` | **New:** this report |
 
-No file under `custom_components/` changed.
+Part A: no file under `custom_components/` changed. Part B: section 13.
 
 ## 8. Gateway/cache versus radio counts
 
@@ -223,9 +229,82 @@ next device report.
 
 ## 12. Review status and next step
 
-Awaiting review of the branch (CI green). Merge and release authorisation remain
-separate. Decision requested from the maintainer: accept the documented
-limitation as the phase 12 outcome, and decide whether M6 (diagnostic-only
-marker) should be implemented in a separate change. Next planned phase:
-phase 13 (final rule audit); the per-entity inventory of resumed phase 6
-stays open.
+Awaiting review of both branches; part A CI green, part B CI pending. Merge
+and release authorisation remain separate. Part B depends on part A (stacked);
+merge part A first or review both together. Next planned phase: phase 13
+(final rule audit); the per-entity inventory of resumed phase 6 stays open.
+
+## 13. Part B - option M6, late-answer diagnostics
+
+Approved by the maintainer on 2026-10-19 ("baue einen diagnose marker option
+m6"). Branch `feat/opus-q12-late-answer-diagnostics`, base
+`dc0851f` (part A head, code identical to `7c9c67c`).
+
+### 13.1 Behaviour
+
+`MQTTRequestManager` (`mqtt_transport.py`) observes, without acting:
+
+| Event | Counter effect |
+|-------|----------------|
+| A published request ends without an answer: timeout, caller cancellation, `async_cancel_pending` (reconnect, health failure), `async_cancel_device` (removal) | one open entry `(monotonic time, owner)` for its answer topic; debug log |
+| Publish failed (`HomeAssistantError` from `mqtt.async_publish`) or the manager is closed | no entry |
+| A non-retained answer that no request takes: routed without an owner (`async_route`), arriving before the next publish, or a second answer while a request still listens | settles the oldest open entry of that topic |
+| The own answer arrives after a local cancellation, before cleanup | settles that request itself (no entry) |
+| A request takes an answer while its topic has an open entry | `possibly_late_answers` of the owner + 1; debug log; the result is used exactly as before |
+| Retained answer | ignored (A4) |
+| Entry older than `LATE_ANSWER_DIAGNOSTIC_WINDOW` = 120 s | expires (lazy, no timer) |
+| Device removal | that owner's `possibly_late_answers` reset; open entries kept (their answers can still arrive, L5) |
+| Unload (`async_close`) | everything cleared |
+
+Diagnostics (`diagnostics.py`) list
+`late_answers: {"unanswered_requests": n, "possibly_late_answers": m}` per
+device and for the gateway (owner = EAG ID, uptime probes);
+`OpusGreenNetCoordinator.late_answer_diagnostics(owner)` passes them through.
+
+Deviation from the M6 sketch in section 5: open entries are *not* cleared on
+reconnect or device removal, because part A showed that those answers still
+arrive (L5). The 120 s window bounds only the diagnostic flag (12 times the
+request timeout, two health ticks); it never delays, drops or re-routes an
+answer.
+
+Limits: answers on temporary subscriptions (service reads and writes) that
+arrive after their request ended are not observable; their entries expire
+with the window. An answer to another MQTT client (L7) can settle an entry or
+be counted. The counters are evidence for H2 and H5, not a correction.
+
+### 13.2 Guardrails
+
+| Guardrail | Effect |
+|-----------|--------|
+| A1 | No publish, subscription, timer or task added. Every test asserts the publication count. |
+| A2 | `coordinator.available` unchanged (test). |
+| A3 | No delay, cooldown, drain or retry; part A's pacing test (`MIN_SEND_INTERVAL`, B published within 20 loop iterations) and timeout pins pass unchanged. |
+| A4 | Retained answers neither settle nor count (tests). |
+| A5 | No entity, unique ID, name, category, default or registry change. Diagnostics gain one key per device and gateway. |
+
+All 18 part-A cases pass unchanged: results, states, checks and counts are
+identical with M6.
+
+### 13.3 Files
+
+| File | Change |
+|------|--------|
+| `custom_components/opus_greennet/mqtt_transport.py` | `LATE_ANSWER_DIAGNOSTIC_WINDOW`; `_unanswered`, `_possibly_late`; `_open_unanswered`, `_record_unanswered`, `_record_unowned_answer`, `_record_taken_answer`, `late_answer_diagnostics`; `async_route`, `handle_response`, publish failure and `finally` bookkeeping; reset on removal, clear on close |
+| `custom_components/opus_greennet/coordinator.py` | `late_answer_diagnostics` pass-through |
+| `custom_components/opus_greennet/diagnostics.py` | `late_answers` per device and gateway |
+| `tests/test_late_answer_diagnostics.py` | **New:** 19 test functions, 19 cases |
+| `tests/test_diagnostics.py` | the two `SimpleNamespace` coordinator doubles gain `late_answer_diagnostics` |
+| `.github/workflows/tests.yml` | new suite in both race repetitions |
+| `docs/quality/protocol-contract.md` | section 7.2: M6 bullet |
+| `docs/quality/implementation-plan.md` | section 7 status |
+| `README.md` | diagnostics description, test list |
+
+### 13.4 Commands and results
+
+| Check | Result | Origin |
+|-------|--------|--------|
+| `ruff check .`, `ruff format --check .` | passed (97 files) | local, ruff 0.16.3 |
+| `pytest tests/test_late_answer_diagnostics.py tests/test_late_responses.py`, three repetitions | 37 passed each time | local smoke run with the stand-in described in section 9, **not authoritative** |
+| Branch coverage of `mqtt_transport.py` (smoke run, transport and diagnostics suites only, coverage.py 7.13.0 from source) | 98 %; every new line and branch covered; the 6 missed lines are pre-existing and covered by other suites in CI | local |
+| Whole test directory under the stand-in, base `7c9c67c` (part A code) versus part B | identical set of failing and erroring cases (all caused by the stand-in: light/cover constants, real-HA fixtures); 1201 passed on part B | local |
+| Strict mypy, full pytest with real Home Assistant, coverage gates, hassfest | not executed locally (PyPI unreachable; local mypy cannot parse Python 3.14 syntax) | CI pending |

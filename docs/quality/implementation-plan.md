@@ -213,6 +213,10 @@ change. No mitigation is implemented; candidates and the hardware evidence
 they need are listed in the report for a separate maintainer decision. Tests
 ran locally against a stub of Home Assistant; CI green (run `39313178932`),
 not merged.
+Option M6 (diagnostic-only late-answer counters, no traffic or behaviour
+change) was approved by the maintainer and is implemented on branch
+`feat/opus-q12-late-answer-diagnostics`, stacked on the phase 12 branch
+(report section 13); CI pending, not merged.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
