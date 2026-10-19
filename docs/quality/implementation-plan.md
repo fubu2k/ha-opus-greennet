@@ -164,12 +164,19 @@ later behaviour changes were already delivered.
 
 ## 7. Phase order and status
 
-All work below is planned, not implemented. Default order:
+Status update 2026-10-19: phase 8 completed (PR #5, merge `a4d593a`, report
+`phases/phase-08.md`). Phase 6 delivered only the mandatory handle diagnostics
+of section 10 (PR #2); the remaining metadata review and section 11 remain open.
+Phase 8 found that `mdi:cog-alert` (section 11) is not in the HA 2026.10.2 icon
+catalogue; the icon phase must choose a validated replacement.
+
+Unless marked completed above, all work below is planned, not implemented.
+Default order:
 phase 8 -> phase 9 -> resumed phase 6 -> phases 10, 11, 12 -> phase 13.
 A separately approved metadata phase can run earlier. Investigations may find
 that a proposed correction is unnecessary; record evidence rather than force it.
 
-## 8. Planned phase 8 – Reproducible baseline and traffic evidence
+## 8. Phase 8 – Reproducible baseline and traffic evidence (completed)
 
 Suggested branch: `feat/opus-q08-reproducible-baseline`.
 

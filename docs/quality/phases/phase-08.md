@@ -1,7 +1,9 @@
 # Phase 8 - Reproducible baseline and traffic evidence
 
-- **Status:** implemented on a branch, **awaiting first CI run and review**.
-  No merge, no version change, no release, no CHANGELOG entry.
+- **Status:** completed. CI green on the branch and on `main`. PR #5 was
+  merged on 2026-10-19 17:16 +0200 (merge commit `a4d593a`) while the PR run
+  was still in progress; both runs finished successfully afterwards. No version
+  change, no release, no CHANGELOG entry.
 - **Branch:** `feat/opus-q08-reproducible-baseline` (new)
 - **Base SHA:** `bbd7e168e58d3e7e61756ead7cb27b3dea2c42b7` (`main`,
   2026-10-19 16:51 +0200, "chore: release v0.7.0b2")
@@ -174,10 +176,20 @@ See `docs/quality/capability-matrix.md`. Findings without runtime change:
 | `tests/test_reference_baseline.py` | 6 functions passed when executed directly (no Home Assistant import needed) | local, Python 3.13 |
 | `classify()` of `test_traffic_baseline.py` | 13 endpoint cases passed when executed directly | local |
 | Workflow YAML | parses; jobs `reference`, `test`, `validate-reference`, `validate` | local (Ruby YAML) |
-| mypy, full pytest, coverage gates, race repetitions, both hassfest jobs | **not executed** | PyPI was not reachable from this environment; first evidence is the CI run of the branch |
+| mypy, full pytest incl. `test_traffic_baseline.py` and `test_reference_baseline.py`, total and per-module coverage gates, three race repetitions | passed | CI, job "Home Assistant 2026.10.2 (fixed reference)": run `39276489238` (PR #5, head `e61b5e0`) and run `39276511261` (push to `main`, `a4d593a`) |
+| Same gates against the latest stable release | passed | CI, job "Home Assistant (latest stable)", same runs |
+| Hassfest built from core `8d7fd8b` (tag 2026.10.2) | passed | CI, job "Hassfest at Home Assistant 2026.10.2 (fixed reference)", same runs |
+| Hassfest `@master` (moving) | passed | CI, job "validate", same runs |
 
-Nothing in this report claims a passed CI run or hardware observation for the
-new files.
+Because the reference job asserts the exact counts of the traffic baseline,
+its success confirms every scenario value in the table above for the fixed
+reference release. Evidence artifacts: `reference-baseline-a4d593a…`
+(artifact `12199900439`, run `39276511261`) and the PR merge-ref artifact
+`12200105205`. Their contents (Python patch, `pip freeze`, JUnit test count,
+coverage figures, `traffic-baseline.json`) and the job summaries could not be
+downloaded from this environment (artifact and log storage blocked by the
+egress proxy); they remain available in the GitHub Actions UI for 90 days.
+No hardware observation exists.
 
 ## Hardware observations
 
@@ -194,7 +206,8 @@ None. No device command, query or configuration access was performed.
 
 ## Review status and next step
 
-Stop for review. After a green CI run: record run ID, Python patch, test
-count, coverage and the uploaded traffic JSON in this report, then mark
-phase 8 completed in `implementation-plan.md`. Next planned phase: 9
-(applicable quality-scale gaps). Merge and release authorisation are separate.
+Phase 8 is completed. Process note: merging before CI finished contradicts the
+workflow of `implementation-plan.md` section 5 (step 7: review, then separate
+merge approval); it had no runtime effect here because no integration code
+changed. Next planned phase: 9 (applicable quality-scale gaps). Release
+authorisation remains separate.
