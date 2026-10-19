@@ -171,8 +171,8 @@ Phase 8 found that `mdi:cog-alert` (section 11) is not in the HA 2026.10.2 icon
 catalogue; the icon phase must choose a validated replacement.
 
 Status update 2026-10-19 (phase 9): implemented on branch
-`feat/opus-q09-quality-gaps`, report `phases/phase-09.md`; awaiting CI and
-review, not merged. Section 11 icons were implemented for the four handle
+`feat/opus-q09-quality-gaps`, report `phases/phase-09.md`; CI green (run
+`39288963525`), awaiting review, not merged. Section 11 icons were implemented for the four handle
 entities and the service actions; `mdi:alert-circle` replaces `mdi:cog-alert`.
 The remaining metadata review of resumed phase 6 (section 10) stays open.
 

@@ -1,7 +1,8 @@
 # Phase 9 - Applicable quality-scale gaps
 
-- **Status:** implemented, awaiting CI and review. Not merged. No version
-  change, no release, no CHANGELOG entry.
+- **Status:** implemented; CI green on the branch (workflow_dispatch run
+  `39288963525`, head `0e09a3a`); awaiting review. Not merged, no PR. No
+  version change, no release, no CHANGELOG entry.
 - **Branch:** `feat/opus-q09-quality-gaps` (new)
 - **Base SHA:** `b4f6abf5983ec20451f6611fc92279fe608b87d8` (`main`,
   2026-10-19 18:19 +0200, merge of PR #6 `docs/opus-q08-ci-evidence`)
@@ -172,9 +173,19 @@ MQTT counts are not radio transmissions; no hardware claim is made.
 | Same script with `mdi:cog-alert` injected | rejected | local |
 | `quality_scale.yaml` status count | 45 done, 9 exempt | local (PyYAML) |
 | Home Assistant APIs used (`async_step_mqtt`, `_async_current_ids`, `_set_confirm_only`, `MqttServiceInfo`, `DiscoveryKey`, `ir.async_create_issue(is_persistent=...)`, `ConfirmRepairFlow` fallback without a repairs platform, `async_get_icons`, hassfest icon and translation schemas) | read from source at core `8d7fd8b` | local, static |
-| pip check, mypy, pytest with coverage gates, three race repetitions, hassfest (fixed and moving), icon catalogue step | **not executed locally**: PyPI is blocked in this environment, so Home Assistant could not be installed | to be recorded from CI |
+| pip check, mypy, pytest with coverage gates, three race repetitions | not executed locally (PyPI is blocked in this environment) | – |
+| pip check, Ruff, strict mypy, full pytest incl. the three new test modules, total and per-module coverage gates (100 % `config_flow.py`), three race repetitions incl. `test_traffic_baseline.py` | passed | CI, job "Home Assistant 2026.10.2 (fixed reference)" `118184286706`, run `39288963525` (workflow_dispatch on `feat/opus-q09-quality-gaps`, head `0e09a3a`), 2026-10-19 18:50–18:59 +0200 |
+| Same gates against the latest stable release | passed | CI, job "Home Assistant (latest stable)" `118184287061`, same run |
+| Hassfest built from core `8d7fd8b` (manifest `mqtt`, `icons.json` schema, translations incl. `issues`, discoverable config flow) and `check_icons.py` against the reference MDI catalogue | passed | CI, job "Hassfest at Home Assistant 2026.10.2 (fixed reference)" `118184287145`, same run |
+| Hassfest `@master` (moving) | passed | CI, job "validate" `118184286949`, same run |
 
-CI results are added in section 9 after the first run of the branch.
+Because the traffic baseline asserts exact publish counts and was not changed,
+its success confirms that setup, health, reconnect and command traffic are
+unchanged. Evidence artifact: `reference-baseline-0e09a3a…` (artifact
+`12205316465`). Job logs and artifact contents (exact test count, coverage
+figures, Python patch) could not be downloaded from this environment (log
+storage blocked by the egress proxy); they remain in the GitHub Actions UI for
+90 days. The commit that adds these results changes only this report.
 
 ## 6. Registry and identity compatibility
 
@@ -212,6 +223,6 @@ row), implementation plan (section 7 status).
 
 ## 9. Review status and next step
 
-Awaiting CI on `feat/opus-q09-quality-gaps` and review. Merge and release
-authorisation remain separate. Next planned phase: resumed phase 6 (remaining
+CI passed on `feat/opus-q09-quality-gaps` (run `39288963525`). Awaiting review
+and a PR decision. Merge and release authorisation remain separate. Next planned phase: resumed phase 6 (remaining
 metadata review, section 10).
