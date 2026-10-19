@@ -7,7 +7,9 @@ from typing import Any
 from homeassistant.components.light import LightEntity
 from homeassistant.components.light.const import (
     ATTR_BRIGHTNESS,
+    ATTR_TRANSITION,
     ColorMode,
+    LightEntityFeature,
 )
 from homeassistant.components.light.const import (
     DOMAIN as LIGHT_DOMAIN,
@@ -118,6 +120,10 @@ class OpusGreenNetLight(OpusGreenNetEntity, LightEntity):
         else:
             self._attr_color_mode = ColorMode.ONOFF
             self._attr_supported_color_modes = {ColorMode.ONOFF}
+        # Commands switch at once; a transition uses the dimmer's own fade
+        # (its configured ramping time, not the requested duration).
+        if device.supports_ramping_mode:
+            self._attr_supported_features = LightEntityFeature.TRANSITION
 
     @property
     def is_on(self) -> bool | None:
@@ -140,8 +146,9 @@ class OpusGreenNetLight(OpusGreenNetEntity, LightEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
         brightness = kwargs.get(ATTR_BRIGHTNESS)
+        transition = bool(kwargs.get(ATTR_TRANSITION))
         if brightness == 0 and self._device.is_dimmable:
-            await self.async_turn_off()
+            await self.async_turn_off(**kwargs)
             return
         snapshot = self._device.snapshot_channel_state(self._channel_id)
 
@@ -152,12 +159,14 @@ class OpusGreenNetLight(OpusGreenNetEntity, LightEntity):
                 self._channel_id,
                 brightness_pct,
                 is_dimmable=self._device.is_dimmable,
+                transition=transition,
             )
         else:
             await self._coordinator.async_turn_on(
                 self._device.device_id,
                 self._channel_id,
                 is_dimmable=self._device.is_dimmable,
+                transition=transition,
             )
 
         if self._device.is_dimmable:
@@ -176,6 +185,7 @@ class OpusGreenNetLight(OpusGreenNetEntity, LightEntity):
             self._device.device_id,
             self._channel_id,
             is_dimmable=self._device.is_dimmable,
+            transition=bool(kwargs.get(ATTR_TRANSITION)),
         )
         if self._device.is_dimmable:
             applied = self._device.apply_dim_estimate(snapshot, 0)

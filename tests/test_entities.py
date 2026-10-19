@@ -125,9 +125,13 @@ async def test_light_properties_and_commands() -> None:
     assert entity.available is True
 
     await entity.async_turn_on(brightness=128)
-    coordinator.async_turn_on.assert_awaited_once_with("DEV1", 1, 50, is_dimmable=True)
+    coordinator.async_turn_on.assert_awaited_once_with(
+        "DEV1", 1, 50, is_dimmable=True, transition=False
+    )
     await entity.async_turn_off()
-    coordinator.async_turn_off.assert_awaited_once_with("DEV1", 1, is_dimmable=True)
+    coordinator.async_turn_off.assert_awaited_once_with(
+        "DEV1", 1, is_dimmable=True, transition=False
+    )
     assert device.channels[1].is_on is False
 
 
@@ -551,7 +555,7 @@ async def test_light_nonzero_brightness_never_turns_off(brightness, expected):
     await entity.async_turn_on(brightness=brightness)
 
     coordinator.async_turn_on.assert_awaited_once_with(
-        "DEV1", 0, expected, is_dimmable=True
+        "DEV1", 0, expected, is_dimmable=True, transition=False
     )
     assert entity.is_on is True
     assert entity.brightness >= 1
@@ -567,7 +571,9 @@ async def test_light_zero_brightness_uses_off_command():
     await entity.async_turn_on(brightness=0)
 
     coordinator.async_turn_on.assert_not_awaited()
-    coordinator.async_turn_off.assert_awaited_once_with("DEV1", 0, is_dimmable=True)
+    coordinator.async_turn_off.assert_awaited_once_with(
+        "DEV1", 0, is_dimmable=True, transition=False
+    )
     assert entity.is_on is False
 
 
@@ -814,7 +820,14 @@ async def test_feedback_during_command_ack_wins_in_home_assistant(
         blocking=True,
     )
     assert gateway.requests_to("PUT", "/devices/DEV1/state") == [
-        {"state": {"functions": [{"key": "dimValue", "value": "100"}]}}
+        {
+            "state": {
+                "functions": [
+                    {"key": "dimValue", "value": "100"},
+                    {"key": "rampingMode", "value": "switch"},
+                ]
+            }
+        }
     ]
     state = hass.states.get(entity_id)
     assert state.state == "on"

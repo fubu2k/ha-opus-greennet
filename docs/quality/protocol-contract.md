@@ -107,9 +107,15 @@ Format `{"state": {"functions": functions}}`; values are always strings.
 | Action | functions |
 |--------|-----------|
 | Switch on/off | `[{"key": "switch", "value": "on"/"off"}]` |
-| Dimmer on without brightness | `[{"key": "dimValue", "value": "100"}]` |
-| Dimmer off | `[{"key": "dimValue", "value": "0"}]` |
-| Dimmer brightness | `[{"key": "dimValue", "value": str(max(1, round(brightness_to_value((1, 100), b))))}]`; HA brightness 0 → off |
+| Dimmer on without brightness | `[{"key": "dimValue", "value": "100"}, ramping]` |
+| Dimmer off | `[{"key": "dimValue", "value": "0"}, ramping]` |
+| Dimmer brightness | `[{"key": "dimValue", "value": str(max(1, round(brightness_to_value((1, 100), b))))}, ramping]`; HA brightness 0 → off |
+
+`ramping` is sent to D2-01 dimmers only: `{"key": "rampingMode", "value": "switch"}`
+(new value at once, as Apple HomeKit commands do), or `"rampingTime1"` (the
+dimmer's own configured fade) when the action has a `transition`. Without it the
+gateway uses `rampingTime1`, a slow fade on many dimmers. The key is not part of
+other dimmer profiles (A5-38-08), which the gateway would reject. **[HW]**
 | Cover open / close | `position` `"0"` / `"100"` (OPUS 0 = open, 100 = closed) |
 | Cover position | `position` `str(100 - ha_position)` |
 | Cover tilt | `angle` `str(ha_tilt)` (not inverted) |

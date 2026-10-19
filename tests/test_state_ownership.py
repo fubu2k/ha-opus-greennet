@@ -169,7 +169,10 @@ SUCCESS_CASES = [
         0,
         "async_turn_on",
         {},
-        [{"key": "dimValue", "value": "100"}],
+        [
+            {"key": "dimValue", "value": "100"},
+            {"key": "rampingMode", "value": "switch"},
+        ],
         {"is_on": True, "brightness": 100},
     ),
     (
@@ -180,7 +183,7 @@ SUCCESS_CASES = [
         0,
         "async_turn_on",
         {"brightness": 128},
-        [{"key": "dimValue", "value": "50"}],
+        [{"key": "dimValue", "value": "50"}, {"key": "rampingMode", "value": "switch"}],
         {"is_on": True, "brightness": 50},
     ),
     (
@@ -191,7 +194,7 @@ SUCCESS_CASES = [
         0,
         "async_turn_on",
         {"brightness": 1},
-        [{"key": "dimValue", "value": "1"}],
+        [{"key": "dimValue", "value": "1"}, {"key": "rampingMode", "value": "switch"}],
         {"is_on": True, "brightness": 1},
     ),
     (
@@ -202,7 +205,7 @@ SUCCESS_CASES = [
         0,
         "async_turn_on",
         {"brightness": 0},
-        [{"key": "dimValue", "value": "0"}],
+        [{"key": "dimValue", "value": "0"}, {"key": "rampingMode", "value": "switch"}],
         {"is_on": False, "brightness": 0},
     ),
     (
@@ -213,7 +216,7 @@ SUCCESS_CASES = [
         0,
         "async_turn_off",
         {},
-        [{"key": "dimValue", "value": "0"}],
+        [{"key": "dimValue", "value": "0"}, {"key": "rampingMode", "value": "switch"}],
         {"is_on": False, "brightness": 0},
     ),
     (
@@ -224,8 +227,53 @@ SUCCESS_CASES = [
         0,
         "async_turn_on",
         {"brightness": 255},
-        [{"key": "channel", "value": "0"}, {"key": "dimValue", "value": "100"}],
+        [
+            {"key": "channel", "value": "0"},
+            {"key": "dimValue", "value": "100"},
+            {"key": "rampingMode", "value": "switch"},
+        ],
         {"is_on": True, "brightness": 100},
+    ),
+    # A transition keeps the dimmer's own fade (its first ramping time).
+    (
+        "dimmer-on-with-transition",
+        OpusGreenNetLight,
+        "D2-01-02",
+        DIMMER_SEED,
+        0,
+        "async_turn_on",
+        {"brightness": 128, "transition": 2},
+        [
+            {"key": "dimValue", "value": "50"},
+            {"key": "rampingMode", "value": "rampingTime1"},
+        ],
+        {"is_on": True, "brightness": 50},
+    ),
+    (
+        "dimmer-off-with-transition",
+        OpusGreenNetLight,
+        "D2-01-02",
+        {0: {"is_on": True, "brightness": 60}},
+        0,
+        "async_turn_off",
+        {"transition": 5},
+        [
+            {"key": "dimValue", "value": "0"},
+            {"key": "rampingMode", "value": "rampingTime1"},
+        ],
+        {"is_on": False, "brightness": 0},
+    ),
+    # Gateway dimming (A5-38-08) has no ramping mode in its profile.
+    (
+        "gateway-dimming-without-ramping-mode",
+        OpusGreenNetLight,
+        "A5-38-08",
+        DIMMER_SEED,
+        0,
+        "async_turn_on",
+        {"brightness": 128},
+        [{"key": "dimValue", "value": "50"}],
+        {"is_on": True, "brightness": 50},
     ),
     # Non-dimmable light ignores the requested brightness.
     (

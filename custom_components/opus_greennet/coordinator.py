@@ -49,9 +49,13 @@ from .const import (
     COVER_RECONCILIATION_DELAYS,
     DOMAIN,
     KEY_CHANNEL,
+    KEY_DIMMER,
     KEY_POSITION,
     KEY_QUERY,
+    KEY_RAMPING_MODE,
     KEY_STOP,
+    RAMPING_MODE_FADE,
+    RAMPING_MODE_SWITCH,
 )
 from .enocean_device import EnOceanDevice
 from .wire import JsonObject, WireFunction, WireMapping, as_object, object_items
@@ -1068,20 +1072,42 @@ class OpusGreenNetCoordinator:
             return [{"key": KEY_CHANNEL, "value": str(channel)}, *functions]
         return list(functions)
 
+    def _dim_functions(
+        self, device_id: str, dim_value: int, *, transition: bool
+    ) -> list[WireFunction]:
+        """Return a dim command, with the ramping mode where the device has one."""
+        functions: list[WireFunction] = [{"key": KEY_DIMMER, "value": str(dim_value)}]
+        device = self.get_device(device_id)
+        if device is not None and device.supports_ramping_mode:
+            functions.append(
+                {
+                    "key": KEY_RAMPING_MODE,
+                    "value": RAMPING_MODE_FADE if transition else RAMPING_MODE_SWITCH,
+                }
+            )
+        return functions
+
     async def async_turn_on(
         self,
         device_id: str,
         channel: int = 0,
         brightness: int | None = None,
         is_dimmable: bool = False,
+        *,
+        transition: bool = False,
     ) -> None:
-        """Turn on a switch or light."""
+        """Turn on a switch or light.
+
+        Dimmers use dimValue, not switch (OPUS reference section 5.3).
+        ``transition`` keeps the dimmer's own fade instead of switching at once.
+        """
         functions: list[WireFunction]
-        if brightness is not None:
-            functions = [{"key": "dimValue", "value": str(brightness)}]
-        elif is_dimmable:
-            # Dimmers use dimValue, not switch (OPUS reference section 5.3).
-            functions = [{"key": "dimValue", "value": "100"}]
+        if brightness is not None or is_dimmable:
+            functions = self._dim_functions(
+                device_id,
+                100 if brightness is None else brightness,
+                transition=transition,
+            )
         else:
             functions = [{"key": "switch", "value": "on"}]
         await self.async_send_command(
@@ -1093,12 +1119,13 @@ class OpusGreenNetCoordinator:
         device_id: str,
         channel: int = 0,
         is_dimmable: bool = False,
+        *,
+        transition: bool = False,
     ) -> None:
-        """Turn off a switch or light."""
+        """Turn off a switch or light (dimmers: dimValue 0)."""
         functions: list[WireFunction]
         if is_dimmable:
-            # Dimmers use dimValue 0, not switch off (OPUS reference 5.3).
-            functions = [{"key": "dimValue", "value": "0"}]
+            functions = self._dim_functions(device_id, 0, transition=transition)
         else:
             functions = [{"key": "switch", "value": "off"}]
         await self.async_send_command(

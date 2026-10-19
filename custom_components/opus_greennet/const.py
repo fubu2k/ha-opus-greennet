@@ -89,6 +89,12 @@ KEY_BATTERY_LOW_RWM: Final = "batteryLow"
 # Function keys used in EnOcean telegrams
 KEY_SWITCH: Final = "switch"
 KEY_DIMMER: Final = "dimValue"
+# D2-01 dimmers: without rampingMode the gateway uses the device's first dim
+# timer, a slow fade. "switch" sets the new value at once (like HomeKit);
+# rampingTime1 keeps the device's configured fade for HA transitions.
+KEY_RAMPING_MODE: Final = "rampingMode"
+RAMPING_MODE_SWITCH: Final = "switch"
+RAMPING_MODE_FADE: Final = "rampingTime1"
 KEY_POSITION: Final = "position"
 KEY_STOP: Final = "stop"
 KEY_ANGLE: Final = "angle"

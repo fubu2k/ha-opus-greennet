@@ -171,6 +171,12 @@ class EnOceanDevice:
         return False
 
     @property
+    def supports_ramping_mode(self) -> bool:
+        """Return whether dim commands accept a ramping mode (D2-01 dimmers)."""
+        eep = self.primary_eep
+        return self.is_dimmable and eep is not None and eep.startswith("D2-01-")
+
+    @property
     def is_cover(self) -> bool:
         """Check if this device is a cover/blind."""
         eep = self.primary_eep

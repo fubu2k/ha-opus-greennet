@@ -48,6 +48,11 @@ over IP REST API: no MQTT broker and no broker bridge are needed.
 | **Lock** | D2-06-40 | Read-only AutoLock status, unlock-request sensor and mechanics-fault binary sensor |
 | **Event** | F6-02-01, F6-02-02, F6-02-03, F6-03-01, F6-03-02 | Rocker switch press/release events, per button (`buttonA0_pressed`, `buttonA0_released`, …, `multipleButtons_released`) with `button` and `action` event attributes |
 
+D2-01 dimmers switch to the new brightness at once, like commands from Apple
+Home. An action with a `transition` (any duration) uses the dimmer's own
+configured fade instead; the requested duration itself cannot be passed to the
+device.
+
 Cover tilt controls are hidden when the bridge reports `rotationTime` as `0` or
 `noRotation`, as used for plain roller shutters. The integration uses the existing
 device discovery and state updates, without extra configuration queries. When no
