@@ -203,6 +203,16 @@ stays enabled; every `battery_level` sensor suggests display precision 0
 run locally (no package index in the authoring environment); CI pending, not
 merged. The full per-entity inventory of section 10 stays open.
 
+Status update 2026-10-19 (phase 12): base `main` `c1ac376` (includes the
+resumed phase 6 metadata fix, PR #10, merge `6ce8f38`). Phase 12 is an
+investigation on branch `test/opus-q12-late-responses`, report
+`phases/phase-12.md`: deterministic tests (`tests/test_late_responses.py`)
+reproduce and pin late-answer attribution without a wire request ID
+(protocol contract section 7.2). No production code, timeout, queue or traffic
+change. No mitigation is implemented; candidates and the hardware evidence
+they need are listed in the report for a separate maintainer decision. Tests
+ran locally only against a stub of Home Assistant; CI pending, not merged.
+
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
 phase 8 -> phase 9 -> resumed phase 6 -> phases 10, 11, 12 -> phase 13.

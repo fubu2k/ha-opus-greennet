@@ -308,6 +308,35 @@ States of a command, from intent to confirmation:
   command sets `last_command_error` for that device only. No silence-based
   offline rule exists (no documented heartbeat contract). **[Code][Test]**
 
+### 7.2 Late answers without a request identifier (phase 12)
+
+OPUS answers (`putAnswer/…`, `getAnswer/…`) carry `header.httpStatus` and,
+per the reference, `gateway` and `timestamp`. They contain no request ID and do
+not echo the request. The integration reads only `httpStatus` and the body;
+the header `timestamp` is not interpreted. **[Ref][Code]**
+
+Attribution rules (current behaviour, unchanged by phase 12):
+
+| Late answer of request A arrives … | Result |
+|------------------------------------|--------|
+| while no request owns A's answer topic | Request manager: dropped. `putAnswer/devices/<DEV>/state` only: the device-level listener still applies it to `last_command_error` (a negative answer sets it and cancels the device's pending status checks; a success clears it). No state change, no publish. **[Code][Test]** |
+| while request B on the same topic waits for its SUBACK or the send slot (not yet published) | dropped (`sent` is still false). **[Code][Test]** |
+| after B on the same topic was published | **taken as B's answer**. B's own answer then has no owner (dropped) or is taken by the next request C if C was already published. The shift ends at the first answer that arrives while no request owns the topic. **[Code][Test]** |
+| with `retain = true` | ignored by the request manager and by the device-level listener (A4). **[Code][Test]** |
+| on another answer topic (other device, uptime) | no effect on B; the global send queue is shared, attribution is not. **[Code][Test]** |
+
+- The same applies after a caller cancellation, `async_cancel_pending`
+  (reconnect, health failure) or a device removal: local generations
+  invalidate the local request, they cannot label an old wire answer. **[Code][Test]**
+- An answer to another MQTT client (MyOPUS app, a second integration) on the
+  same topic is indistinguishable and is taken by a waiting request. **[Code][Test]**
+- No delay, cooldown, drain or retry follows a timeout (A3); every scenario
+  publishes exactly the requests the callers issued (A1); gateway availability
+  is never changed by a late or misattributed command answer (A2). A late
+  uptime answer can complete the next health probe; it proves only that the
+  gateway answered, never any device state. **[Code][Test]**
+- Consequences, limits and the evaluated mitigations: `phases/phase-12.md`.
+
 ## 8. Entity inventory and identities (frozen by A5)
 
 Device identifier: `(opus_greennet, "<EAG>_<DEV>")`; gateway: `(opus_greennet, "<EAG>")`.
@@ -375,6 +404,10 @@ optional `config_entry_id`.
 - Whether the gateway publishes `stream/device/<DEV>/dbm` for rockers (relevance
   of finding F1) is **[unverified]**.
 - Whether the Mosquitto bridge status is published as retained is **[unverified]**.
+- Whether the gateway answers every request exactly once, in request order,
+  and how late an answer can arrive after the 10 s timeout, is **[unverified]**;
+  so is whether the header `timestamp` is present, monotonic and usable for
+  ordering on every firmware (section 7.2).
 - Which devices or profiles receive ACK `201`, and how the gateway handles a
   queued telegram that a newer command supersedes, is **[unverified]** on
   hardware (section 7.1).
