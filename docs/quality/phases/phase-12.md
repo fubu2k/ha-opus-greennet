@@ -1,14 +1,14 @@
 # Phase 12 - Late-response ambiguity investigation
 
-- **Status:** part A (investigation, tests and documentation) on branch
-  `test/opus-q12-late-responses`, CI green (run `39313178932`, section 9);
-  part B (option M6, diagnostic-only marker, approved by the maintainer on
-  2026-10-19 after part A) on branch `feat/opus-q12-late-answer-diagnostics`,
-  stacked on part A (section 13), CI green (run `39314655845`). Awaiting
-  review. Not merged, no PR. No
-  version change, no release, no CHANGELOG entry.
+- **Status:** completed. Part A (investigation, tests and documentation)
+  merged via PR #11 (merge `1be841e`); part B (option M6, diagnostic-only
+  marker, approved by the maintainer on 2026-10-19 after part A) merged via
+  PR #12 (merge `e57cbd2`). CI green on both branches and on `main`
+  (sections 9 and 13.4). CHANGELOG entry under "Unreleased". No version
+  change, no release.
 - **Branches:** `test/opus-q12-late-responses` (part A, head `dc0851f`),
-  `feat/opus-q12-late-answer-diagnostics` (part B, base `dc0851f`)
+  `feat/opus-q12-late-answer-diagnostics` (part B, head `14e5960`, base
+  `dc0851f`)
 - **Base SHA:** `c1ac37656198892f668cb9503ee18a3c508d8cf5` (`main`,
   2026-10-19 21:28 +0200, "docs: add unreleased changelog entry for phase 6
   metadata fix"; includes the resumed phase 6 merge `6ce8f38`, PR #10)
@@ -230,11 +230,11 @@ next device report.
 
 ## 12. Review status and next step
 
-Awaiting review of both branches; CI green on both (part A run
-`39313178932`, part B run `39314655845`). Merge
-and release authorisation remain separate. Part B depends on part A (stacked);
-merge part A first or review both together. Next planned phase: phase 13
-(final rule audit); the per-entity inventory of resumed phase 6 stays open.
+Completed: CI green on both branches (part A run `39313178932`, part B run
+`39314655845`) and on `main` after both merges (run `39315310796`, section
+13.4); merged via PR #11 and PR #12; CHANGELOG updated on `main`. Release
+authorisation remains separate. Next planned phase: phase 13 (final rule
+audit); the per-entity inventory of resumed phase 6 stays open.
 
 ## 13. Part B - option M6, late-answer diagnostics
 
@@ -314,3 +314,7 @@ identical with M6.
 | Same gates against the latest stable release | passed | CI, job "Home Assistant (latest stable)" `118272882027`, same run |
 | Hassfest built from core `8d7fd8b` and icon validation | passed | CI, job "Hassfest at Home Assistant 2026.10.2 (fixed reference)" `118272881825`, same run |
 | Hassfest `@master` (moving) | passed | CI, job "validate" `118272881888`, same run |
+| All four jobs on `main` after both merges (head `e57cbd2`, identical code) | passed | CI, run `39315310796` (push), 2026-10-19 21:58–22:07 +0200; jobs `118275399645` (reference), `118275399416` (latest stable), `118275399785` (reference Hassfest), `118275399403` (validate) |
+
+Run `39315178936` for the part A merge `1be841e` was cancelled by the
+workflow's per-branch concurrency when PR #12 was merged.

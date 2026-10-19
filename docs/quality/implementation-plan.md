@@ -211,12 +211,12 @@ reproduce and pin late-answer attribution without a wire request ID
 (protocol contract section 7.2). No production code, timeout, queue or traffic
 change. No mitigation is implemented; candidates and the hardware evidence
 they need are listed in the report for a separate maintainer decision. Tests
-ran locally against a stub of Home Assistant; CI green (run `39313178932`),
-not merged.
+ran locally against a stub of Home Assistant; CI green (run `39313178932`).
 Option M6 (diagnostic-only late-answer counters, no traffic or behaviour
-change) was approved by the maintainer and is implemented on branch
-`feat/opus-q12-late-answer-diagnostics`, stacked on the phase 12 branch
-(report section 13); CI green (run `39314655845`), not merged.
+change) was approved by the maintainer and implemented on branch
+`feat/opus-q12-late-answer-diagnostics` (report section 13; CI run
+`39314655845`). Completed: merged via PR #11 (`1be841e`) and PR #12
+(`e57cbd2`), CI green on `main` (run `39315310796`), CHANGELOG "Unreleased".
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
