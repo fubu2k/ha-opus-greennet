@@ -1,7 +1,8 @@
 # Phase 10 - Field-level freshness and replay
 
-- **Status:** implemented on the branch; **not executed in CI yet**; awaiting
-  review. Not merged, no PR. No version change, no release, no CHANGELOG entry.
+- **Status:** implemented; CI green on the branch (workflow_dispatch run
+  `39301425540`, head `e21a9bd`); awaiting review. Not merged, no PR. No
+  version change, no release, no CHANGELOG entry.
 - **Branch:** `fix/opus-q10-field-freshness` (new)
 - **Base SHA:** `e4bb5e9acb3a6aa293c40cccc85dbc04a5876365` (`main`,
   2026-10-19 19:45 +0200, merge of PR #7 `feat/opus-q09-quality-gaps`)
@@ -112,7 +113,11 @@ MQTT counts are not radio transmissions; no hardware claim is made.
 | Reproducer script (R1 x5, R2 x1) against `e4bb5e9` and the branch | 6/6 wrong on `e4bb5e9`, 6/6 correct on the branch | local, see note |
 | `pytest tests/test_field_freshness.py`, three repetitions | 42 passed each time | local, see note |
 | Full suite, differential: `e4bb5e9` versus branch | 1,108 passing cases unchanged; branch adds 42 passing cases; no case changed status | local, see note |
-| pip check, strict mypy, full pytest with real Home Assistant, coverage gates, hassfest, CI race repetitions | **not executed** | pending CI |
+| pip check, strict mypy, full pytest with real Home Assistant, coverage gates, hassfest, CI race repetitions | not executed locally (PyPI is blocked in this environment) | – |
+| pip check, Ruff, strict mypy, full pytest incl. `test_field_freshness.py`, total and per-module coverage gates, three race repetitions incl. `test_field_freshness.py` and `test_traffic_baseline.py`, traffic baseline summary | passed | CI, job "Home Assistant 2026.10.2 (fixed reference)" `118227328091`, run `39301425540` (workflow_dispatch on `fix/opus-q10-field-freshness`, head `e21a9bd`), 2026-10-19 20:18–20:27 +0200 |
+| Same gates against the latest stable release | passed | CI, job "Home Assistant (latest stable)" `118227328828`, same run |
+| Hassfest built from core `8d7fd8b` and `check_icons.py` against the reference MDI catalogue | passed | CI, job "Hassfest at Home Assistant 2026.10.2 (fixed reference)" `118227328151`, same run |
+| Hassfest `@master` (moving) | passed | CI, job "validate" `118227327708`, same run |
 
 **Note on local execution.** PyPI is blocked by the egress proxy in this
 environment, so Home Assistant, pytest-asyncio and mypy for Python 3.14 could
@@ -125,7 +130,16 @@ evaluated (among them `test_ha_lifecycle.py`, `test_retained_device_answers.py`,
 `test_upstream_backport.py`, `test_diagnostics.py`). `test_traffic_baseline.py`
 (17 cases) and `test_reconciliation_feedback.py` (51 cases) ran and passed
 unchanged. These results are evidence for the logic only; acceptance requires
-the CI jobs on the branch (workflow_dispatch), including per-module coverage.
+the CI jobs on the branch (workflow_dispatch), including per-module coverage;
+they passed (rows above).
+
+Because the traffic baseline asserts exact publish counts and was not changed,
+its CI success confirms that setup, health, reconnect and command traffic are
+unchanged. Evidence artifact: `reference-baseline-e21a9bd…` (artifact
+`12212013346`). Job logs and artifact contents (exact test count, coverage
+figures) could not be downloaded from this environment (log and artifact
+storage blocked by the egress proxy); they remain in the GitHub Actions UI for
+90 days. The commit that adds these results changes only this report.
 
 ## 6. Registry and identity compatibility
 
@@ -163,8 +177,6 @@ evidence matrix is unchanged because no rule status changed.
 
 ## 9. Review status and next step
 
-Awaiting review. Next step: push the branch, run the Tests workflow by manual
-dispatch on `fix/opus-q10-field-freshness`, and record the job IDs and results
-in section 5 (CI evidence is to be added in a follow-up commit to this report).
-Merge and release authorisation remain separate. Next planned phase: resumed
+CI passed on `fix/opus-q10-field-freshness` (run `39301425540`). Awaiting
+review and a PR decision. Merge and release authorisation remain separate. Next planned phase: resumed
 phase 6 (remaining metadata review, section 10), then phases 11 and 12.
