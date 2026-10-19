@@ -1,9 +1,9 @@
 # Phase 11 - ACK 201 and explicit device health
 
-- **Status:** implemented on the branch; **not yet executed** with Home
-  Assistant (see section 5). Awaiting CI and review. Not merged, no PR. No
-  version change, no release, no CHANGELOG entry.
-- **Branch:** `fix/opus-q11-ack-device-health` (new)
+- **Status:** completed. CI green on the branch and on `main` (section 5).
+  Merged via PR #9 (merge `e7c5248`); CHANGELOG entry in 0.7.0b2 (`07f75e9`).
+  No version change, no release.
+- **Branch:** `fix/opus-q11-ack-device-health`, head `4cd7359`
 - **Base SHA:** `1b36a945df79273e9d40a61730fed9e4a0d618b5` (`main`,
   2026-10-19 20:32 +0200, "docs: add phase 10 to the 0.7.0b2 changelog";
   includes the phase 10 merge `49004b7`, PR #8)
@@ -133,10 +133,16 @@ MQTT counts are not radio transmissions; no hardware claim is made.
 | `ruff check .` | passed | local, ruff 0.16.3 (pinned version, binary from the GitHub release) |
 | `ruff format --check .` | passed (92 files) | local, ruff 0.16.3 |
 | `python -m py_compile` on all integration modules and the new test module | passed | local, CPython 3.14.6 |
-| pip check, strict mypy, full pytest with real Home Assistant, coverage gates, hassfest, race repetitions | **not executed** (PyPI is not reachable from this environment) | – |
-| Same gates in CI (fixed reference 2026.10.2 and latest stable) | **pending**: to be run on the branch (`workflow_dispatch`) and recorded here | CI |
+| pip check, strict mypy, full pytest with real Home Assistant, coverage gates, hassfest, race repetitions | not executed locally (PyPI is not reachable from this environment) | – |
+| pip check, Ruff, strict mypy, full pytest incl. `test_ack_device_health.py`, total and per-module coverage gates, three race repetitions incl. `test_ack_device_health.py` and `test_traffic_baseline.py`, traffic baseline summary | passed | CI, job "Home Assistant 2026.10.2 (fixed reference)" `118245613416`, run `39306729854` (pull_request, PR #9, head `4cd7359`), 2026-10-19 20:56–21:05 +0200 |
+| Same gates against the latest stable release | passed | CI, job "Home Assistant (latest stable)" `118245613634`, same run |
+| Hassfest built from core `8d7fd8b` and icon validation against the reference MDI catalogue | passed | CI, job "Hassfest at Home Assistant 2026.10.2 (fixed reference)" `118245613500`, same run |
+| Hassfest `@master` (moving) | passed | CI, job "validate" `118245613771`, same run |
+| All four jobs on `main` after merge and CHANGELOG (`07f75e9`) | passed | CI, run `39306899304` (push), 2026-10-19 20:57–21:06 +0200; jobs `118246335941` (reference), `118246335986` (latest stable), `118246336342` (reference Hassfest), `118246335511` (validate) |
 
-No claim of passing tests is made until the CI run is recorded.
+Run `39306768512` for the merge commit `e7c5248` was cancelled by the
+workflow's per-branch concurrency when `07f75e9` was pushed; `07f75e9` contains
+the same code plus the CHANGELOG entry. Hardware was not tested.
 
 ## 6. Registry and identity compatibility
 
@@ -176,7 +182,7 @@ changes (45 done / 9 exempt / 0 todo).
 
 ## 9. Review status and next step
 
-Awaiting the CI run on `fix/opus-q11-ack-device-health` and review. Merge and
-release authorisation remain separate. Next planned phases: resumed phase 6
+Completed: CI green, merged via PR #9, CHANGELOG updated on `main`. Release
+authorisation remains separate. Next planned phases: resumed phase 6
 (remaining metadata review, section 10) and phase 12 (late-response
 ambiguity investigation).

@@ -189,8 +189,9 @@ changelog 0.7.0b2). Phase 11 is implemented on branch
 reported as deferred delivery (finding O1 resolved), applies no estimate,
 starts no cover travel estimate and schedules no status query; deferred values
 are listed in diagnostics; per-device health stays separate from gateway
-health (protocol contract section 7.1). Not merged; CI on the branch is
-pending. The remaining metadata review of resumed phase 6 stays open.
+health (protocol contract section 7.1). Completed: CI green (runs
+`39306729854` and `39306899304`), merged via PR #9 (`e7c5248`), CHANGELOG
+0.7.0b2 (`07f75e9`). The remaining metadata review of resumed phase 6 stays open.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
