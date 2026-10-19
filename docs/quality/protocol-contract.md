@@ -145,7 +145,11 @@ send it. **[Code][Test]**
   `channel`, `stop` only; `query` is ignored), start cover travel estimates and
   schedule status checks after 5 and 20 s (covers: 10 and 20 s after the
   estimate). While this integration's own command to a device awaits its
-  acknowledgement, `to` telegrams for that device are ignored. **[Code][Test]**
+  acknowledgement, `to` telegrams for that device are ignored; within 2 s after
+  the acknowledgement, a `to` telegram with the same target state (channel,
+  key and value) is recognised as the echo of that command and ignored as
+  well (the gateway's echo was observed ~40 ms after its HTTP answer).
+  **[HW][Code][Test]**
 - Value validation per key is unchanged (see `EnOceanDevice.update_from_telegram`
   and the former contract §4). **[Code][Test]**
 

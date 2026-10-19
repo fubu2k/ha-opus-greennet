@@ -267,3 +267,26 @@ def has_target_state(functions: Sequence[WireFunction]) -> bool:
         function.get("key") in KNOWN_STATE_KEYS or function.get("key") == KEY_STOP
         for function in functions
     )
+
+
+def command_signature(functions: Sequence[WireFunction]) -> frozenset[object]:
+    """Identify the target state of a command independent of value format.
+
+    The gateway echoes ``"0"`` as ``0.0``; numbers are compared by value.
+    """
+    default = channel_from_functions(functions)
+    signature: set[object] = set()
+    for function in outbound_state_functions(functions):
+        key = function.get("key")
+        if key == KEY_CHANNEL:
+            continue
+        value = function.get("value")
+        number = EnOceanDevice._parse_number(value)
+        signature.add(
+            (
+                function_channel(function, default),
+                key,
+                number if number is not None else str(value),
+            )
+        )
+    return frozenset(signature)

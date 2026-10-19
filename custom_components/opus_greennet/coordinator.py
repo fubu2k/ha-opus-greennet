@@ -80,6 +80,11 @@ STREAM_RETRY_DELAYS = (1.0, 2.0, 5.0, 10.0, 30.0, 60.0)
 # that device; failed lookups are retried after this many seconds.
 UNKNOWN_DEVICE_RETRY_SECONDS = 3600.0
 OUTBOUND_STATE_RECONCILIATION_DELAYS = (5.0, 20.0)
+# The gateway echoes every command it sends as a "to" telegram. The echo of
+# this integration's own command can arrive just after the HTTP
+# acknowledgement; within this time an echo with the same content is not
+# mistaken for a command from another controller.
+OWN_COMMAND_ECHO_SECONDS = 2.0
 # Internal reason for a background status check dropped before sending.
 SUPERSEDED = "superseded"
 
@@ -150,6 +155,7 @@ class OpusGreenNetCoordinator:
         self._outage_generation = 0
         self._unknown_devices: dict[str, float] = {}
         self._command_waiters: dict[str, int] = {}
+        self._sent_commands: dict[str, list[tuple[float, frozenset[object]]]] = {}
         self._cover_movements: dict[tuple[str, int], CoverMovement] = {}
         self._pending_reconciliation_queries: dict[
             tuple[str, int], list[Callable[[], None]]
@@ -568,6 +574,8 @@ class OpusGreenNetCoordinator:
             functions = protocol.outbound_state_functions(functions)
             if not protocol.has_target_state(functions):
                 return
+            if self._is_own_echo(device_id, functions, received_at):
+                return
         if not functions:
             return
 
@@ -614,6 +622,23 @@ class OpusGreenNetCoordinator:
                 self._schedule_reconciliation_queries(
                     device_id, channel_id, fields=fields
                 )
+
+    def _is_own_echo(
+        self, device_id: str, functions: Sequence[WireFunction], now: float
+    ) -> bool:
+        """Consume a recent own command whose echo these functions are."""
+        sent = [
+            entry for entry in self._sent_commands.get(device_id, []) if entry[0] > now
+        ]
+        signature = protocol.command_signature(functions)
+        match = next((entry for entry in sent if entry[1] == signature), None)
+        if match is not None:
+            sent.remove(match)
+        if sent:
+            self._sent_commands[device_id] = sent
+        else:
+            self._sent_commands.pop(device_id, None)
+        return match is not None
 
     def _mark_and_log_dispatch(
         self,
@@ -1054,6 +1079,12 @@ class OpusGreenNetCoordinator:
                     self._cancel_reconciliation_queries(device_id, channel_id)
             raise
         finally:
+            self._sent_commands.setdefault(device_id, []).append(
+                (
+                    monotonic() + OWN_COMMAND_ECHO_SECONDS,
+                    protocol.command_signature(functions),
+                )
+            )
             remaining = self._command_waiters[device_id] - 1
             if remaining:
                 self._command_waiters[device_id] = remaining

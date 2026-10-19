@@ -248,6 +248,34 @@ async def test_own_outbound_echo_is_ignored_while_acknowledging(
     assert coordinator.devices[SWITCH].channels[0].is_on is False
 
 
+async def test_own_echo_after_the_acknowledgement_is_ignored(
+    gateway: FakeGateway,
+    coordinator: OpusGreenNetCoordinator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gateway's echo can arrive after the PUT answer (seen on hardware)."""
+    await coordinator.async_turn_on(SWITCH)
+    await gateway.push(
+        telegram(SWITCH, [{"key": "switch", "value": "on"}], direction="to")
+    )
+    assert coordinator.devices[SWITCH].channels[0].is_on is False
+
+    # A different target, or the same one after the echo window, is a
+    # foreign command again.
+    await gateway.push(
+        telegram(SWITCH, [{"key": "switch", "value": "off"}], direction="to")
+    )
+    assert coordinator.devices[SWITCH].channels[0].is_on is False
+    monkeypatch.setattr(
+        "custom_components.opus_greennet.coordinator.OWN_COMMAND_ECHO_SECONDS", 0
+    )
+    await coordinator.async_turn_off(SWITCH)
+    await gateway.push(
+        telegram(SWITCH, [{"key": "switch", "value": "on"}], direction="to")
+    )
+    assert coordinator.devices[SWITCH].channels[0].is_on is True
+
+
 async def test_recom_services(
     gateway: FakeGateway, coordinator: OpusGreenNetCoordinator
 ) -> None:
