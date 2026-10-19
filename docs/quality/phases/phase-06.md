@@ -1,6 +1,7 @@
 # Phase 6 (resumed) - Handle diagnostics: category and safe default exposure
 
-- **Status:** implemented on branch, **pending review**. Not merged, not released.
+- **Status:** completed. CI green; approved by the maintainer on 2026-10-19 and
+  merged via PR #2. No version change, no release.
 - **Branch:** `feat/opus-q06-entity-metadata` (created for this phase)
 - **Base SHA:** `feabed53b5761104e9ed917c0dc44b2afb584df7` (`main`, 2026-10-19
   15:12 +0200, "Add files via upload")
@@ -124,15 +125,21 @@ installation) before discovery, so it still verifies the HOPPE `unlock` and
 | `ruff check .` | passed | local, ruff 0.16.3 |
 | `ruff format --check .` | passed (91 files) | local, ruff 0.16.3 |
 | Python 3.14 byte-compilation of changed files | passed | local |
-| `python -m mypy` | **not run** | PyPI unreachable in the authoring environment |
-| `pytest -v --cov ...`, `script/check_coverage.py` | **not run** | as above |
-| Three lifecycle/race repetitions | **not run** | as above |
-| hassfest | failed on the first PR run (root `manifest.json` from `feabed5`); root copies removed, rerun pending | CI |
+| `python -m mypy` | passed | CI run `39260406905`, job "Home Assistant (latest stable)" |
+| `pytest -v --cov ...`, `script/check_coverage.py` | passed | CI run `39260406905` |
+| Three lifecycle/race repetitions | passed | CI run `39260406905` |
+| hassfest | failed on run `39260088527` (root `manifest.json` from `feabed5`); passed on run `39260406905` after removing the root copies | CI, job "validate" |
 
-The test suite has not been executed for this phase. CI on the pull request
-(`.github/workflows/tests.yml`, latest stable HA) is the first actual run and
-its result must be recorded here before review is completed. A fixed
-2026.10.x reference job does not exist yet (phase 8).
+Tests were not executed locally for this phase. The authoritative run is CI
+run `39260406905` on the pull request at head
+`7797c0bc33eab3ece3a8e2431eaed90155ccf538`
+(`.github/workflows/tests.yml`): both jobs, "Home Assistant (latest stable)"
+and "validate" (hassfest), concluded `success`, confirmed by the maintainer.
+That job covers ruff, mypy, the full pytest suite with the total and
+per-module coverage gates, and the three lifecycle/race repetitions. The exact
+Home Assistant patch version and coverage figures are in the CI log, which was
+not retrievable from the authoring environment. A fixed 2026.10.x reference job
+does not exist yet (phase 8).
 
 ## Documentation updated
 
@@ -157,5 +164,8 @@ its result must be recorded here before review is completed. A fixed
 
 ## Review status
 
-Waiting for CI and maintainer review. Merge and release require separate
-approval; no version or CHANGELOG change was made.
+CI green and approved by the maintainer; merged into `main` via PR #2. Release
+and versioning remain separate; no version or CHANGELOG change was made.
+
+Next phase per plan order: phase 8 (reproducible baseline and traffic
+evidence). The remaining section 10 metadata review stays open.
