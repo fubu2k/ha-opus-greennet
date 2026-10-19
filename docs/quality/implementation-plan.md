@@ -183,6 +183,15 @@ maintainer's request; that review stays open. Phase 10 is implemented on branch
 field provenance for retained replays (protocol contract section 6.1) and live-only
 receipt times for the rediscovery rule. Not merged; CI on the branch is pending.
 
+Status update 2026-10-19 (phase 11): phase 10 is on `main` (head `1b36a94`,
+changelog 0.7.0b2). Phase 11 is implemented on branch
+`fix/opus-q11-ack-device-health`, report `phases/phase-11.md`: ACK 201 is
+reported as deferred delivery (finding O1 resolved), applies no estimate,
+starts no cover travel estimate and schedules no status query; deferred values
+are listed in diagnostics; per-device health stays separate from gateway
+health (protocol contract section 7.1). Not merged; CI on the branch is
+pending. The remaining metadata review of resumed phase 6 stays open.
+
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
 phase 8 -> phase 9 -> resumed phase 6 -> phases 10, 11, 12 -> phase 13.

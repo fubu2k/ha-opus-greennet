@@ -105,6 +105,7 @@ jobs:
               tests/test_binary_sensor_discovery.py \
               tests/test_transport_edge_cases.py \
               tests/test_field_freshness.py \
+              tests/test_ack_device_health.py \
               tests/test_traffic_baseline.py || exit 1
           done
 
@@ -203,7 +204,8 @@ jobs:
               tests/test_device_removal.py \
               tests/test_binary_sensor_discovery.py \
               tests/test_transport_edge_cases.py \
-              tests/test_field_freshness.py || exit 1
+              tests/test_field_freshness.py \
+              tests/test_ack_device_health.py || exit 1
           done
 
   validate-reference:

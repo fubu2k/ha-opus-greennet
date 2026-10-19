@@ -9,6 +9,7 @@ import re
 from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 from time import monotonic
 
 from homeassistant.components import mqtt
@@ -117,6 +118,14 @@ DEVICE_STREAM_FINALIZE_DELAY = 0.02
 TELEGRAM_FINALIZE_DELAY = 0.15
 RAW_MQTT_DEBUG_PAYLOAD_LIMIT = 500
 OUTBOUND_STATE_RECONCILIATION_DELAYS = (5, 20)
+# Gateway acknowledgement "SoftSmartAck" (vendor reference 3.3): the gateway
+# accepted the telegram for deferred delivery and transmits it later. It is
+# neither a radio transmission nor device feedback.
+ACK_STATUS_DEFERRED = 201
+# Command keys whose deferred value is compared numerically with feedback.
+NUMERIC_COMMAND_KEYS = frozenset(
+    {"dimValue", "position", "angle", "temperatureSetpoint"}
+)
 # Internal reason for a background status check dropped before publish.
 SUPERSEDED = "superseded"
 GATEWAY_HEALTH_INTERVAL = timedelta(seconds=60)
@@ -147,6 +156,19 @@ DEVICE_STREAM_TOPIC_PATTERN = re.compile(r"EnOcean/([^/]+)/stream/device/([^/]+)
 PUT_ANSWER_STATE_TOPIC_PATTERN = re.compile(
     r"EnOcean/([^/]+)/putAnswer/devices/([^/]+)/state"
 )
+
+
+class CommandDelivery(StrEnum):
+    """What a positive gateway acknowledgement says about one command.
+
+    Neither value confirms physical execution: only a device report (a radio
+    telegram or a device-model update) for the commanded field does that.
+    """
+
+    # httpStatus 200: the gateway transmitted the telegram.
+    SENT = "sent"
+    # httpStatus 201 (SoftSmartAck): queued by the gateway for later delivery.
+    DEFERRED = "deferred"
 
 
 @dataclass
@@ -915,7 +937,9 @@ class OpusGreenNetCoordinator:
             self._log_latency_finalized(
                 "stream/device", device_id, received_at, finalized_at, len(functions)
             )
-            if self._record_confirmed_feedback(device_id, functions):
+            if self._record_confirmed_feedback(
+                device_id, functions, live=not replay_window
+            ):
                 device.last_command_error = None
             telegram = {"functions": functions}
             device.update_from_telegram(telegram)
@@ -1246,7 +1270,7 @@ class OpusGreenNetCoordinator:
         _, device = device_entry
         value = self._parse_value(payload)
         if self._record_confirmed_feedback(
-            device_id, [{"key": state_key, "value": value}]
+            device_id, [{"key": state_key, "value": value}], live=not retained
         ):
             device.last_command_error = None
         device.update_from_telegram(
@@ -1945,9 +1969,19 @@ class OpusGreenNetCoordinator:
         return expected
 
     def _record_confirmed_feedback(
-        self, device_id: str, functions: Sequence[WireFunction]
+        self,
+        device_id: str,
+        functions: Sequence[WireFunction],
+        *,
+        live: bool = True,
     ) -> bool:
-        """Confirm only reported fields on their own channel, including during ACK."""
+        """Confirm only reported fields on their own channel, including during ACK.
+
+        ``live`` is False for retained values. They keep their reconciliation
+        accounting (A1) but cannot confirm delivery of a deferred command.
+        """
+        if live:
+            self._clear_delivered_deferred(device_id, functions)
         confirmed = self._confirmed_fields_by_channel(functions)
         for channel_id, fields in confirmed.items():
             if "position" in fields:
@@ -1962,6 +1996,136 @@ class OpusGreenNetCoordinator:
             if not expected:
                 self._cancel_reconciliation_queries(device_id, channel_id)
         return bool(confirmed)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Deferred delivery, ACK 201 (implementation plan, phase 11)
+    # ──────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _command_values_by_channel(
+        functions: Sequence[WireFunction],
+    ) -> dict[int, dict[str, object]]:
+        """Return the raw values of state keys and Stop, per channel."""
+        default = OpusGreenNetCoordinator._channel_from_functions(functions)
+        values: dict[int, dict[str, object]] = {}
+        for function in functions:
+            key, value = function.get("key"), function.get("value")
+            if not isinstance(key, str) or key in (KEY_CHANNEL, KEY_QUERY):
+                continue
+            if key not in KNOWN_STATE_KEYS and key != KEY_STOP:
+                continue
+            channel = EnOceanDevice._parse_number(
+                function.get("channel", default), minimum=0, integer=True
+            )
+            if channel is None or value is None:
+                continue
+            values.setdefault(int(channel), {})[key] = value
+        return values
+
+    @staticmethod
+    def _wire_value_matches(key: str, commanded: str, reported: object) -> bool:
+        """Return whether a reported value equals a commanded wire value."""
+        if key in NUMERIC_COMMAND_KEYS:
+            expected = EnOceanDevice._parse_number(commanded)
+            actual = EnOceanDevice._parse_number(reported)
+            return expected is not None and expected == actual
+        if isinstance(reported, bool):
+            reported = "true" if reported else "false"
+        return isinstance(reported, str) and reported == commanded
+
+    def _record_command_delivery(
+        self,
+        device: EnOceanDevice,
+        functions: Sequence[WireFunction],
+        delivery: CommandDelivery,
+        unconfirmed: dict[int, set[str]],
+    ) -> None:
+        """Track which commanded values are still queued at the gateway.
+
+        A transmitted (200) command supersedes an older deferred marker for the
+        same key; whether the gateway still delivers the older telegram later
+        cannot be observed (no request identifier). A deferred (201) command
+        records its values, except fields the device already reported while
+        the acknowledgement was awaited.
+        """
+        for channel_id, values in self._command_values_by_channel(functions).items():
+            markers = device.deferred_commands.get(channel_id, {})
+            if delivery is CommandDelivery.SENT:
+                for key in values:
+                    markers.pop(key, None)
+            else:
+                pending = unconfirmed.get(channel_id, set())
+                for key, value in values.items():
+                    if key == KEY_STOP or key in pending:
+                        # Outbound values are always wire strings.
+                        markers[key] = str(value)
+            if markers:
+                device.deferred_commands[channel_id] = markers
+            else:
+                device.deferred_commands.pop(channel_id, None)
+
+    def _clear_delivered_deferred(
+        self, device_id: str, functions: Sequence[WireFunction]
+    ) -> None:
+        """Clear deferred markers whose value the device or gateway reported.
+
+        Called for live device reports and for the gateway's outbound telegram,
+        which shows that a queued telegram was finally transmitted. A report
+        with a different value leaves the marker in place.
+        """
+        device = self.devices.get(device_id)
+        if device is None or not device.deferred_commands:
+            return
+        for channel_id, values in self._command_values_by_channel(functions).items():
+            markers = device.deferred_commands.get(channel_id)
+            if not markers:
+                continue
+            for key, reported in values.items():
+                commanded = markers.get(key)
+                if commanded is not None and self._wire_value_matches(
+                    key, commanded, reported
+                ):
+                    markers.pop(key)
+            if not markers:
+                device.deferred_commands.pop(channel_id, None)
+
+    def _handle_deferred_command(
+        self,
+        device: EnOceanDevice,
+        functions: Sequence[WireFunction],
+        unconfirmed: dict[int, set[str]],
+        started_movements: dict[int, CoverMovement],
+    ) -> None:
+        """Apply SoftSmartAck semantics without assuming or polling (finding O1).
+
+        The telegram has not reached the device yet, so no travel estimate
+        runs and no status query is scheduled for this command: a query would
+        itself wait for the device and add radio traffic without confirming
+        anything (A1). When the gateway finally transmits, its outbound
+        telegram follows the existing bridge-native path, which applies the
+        values optimistically and schedules the usual two status checks.
+        """
+        device_id = device.device_id
+        for channel_id, movement in started_movements.items():
+            key = (device_id, channel_id)
+            if self._cover_movements.get(key) is movement:
+                self._clear_cover_movement(device_id, channel_id)
+            # Starting the movement stopped the timers of fields still
+            # unconfirmed from earlier accepted commands. Restore them; this
+            # command's own fields are not added.
+            if self._pending_reconciliation_fields.get(
+                key
+            ) and not self._pending_reconciliation_queries.get(key):
+                self._schedule_reconciliation_queries(device_id, channel_id)
+        self._record_command_delivery(
+            device, functions, CommandDelivery.DEFERRED, unconfirmed
+        )
+        _LOGGER.debug(
+            "OPUS gateway deferred delivery of a command to %s (SoftSmartAck); "
+            "pending values: %s",
+            device_id,
+            device.deferred_commands,
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # Field provenance for retained replays (implementation plan, phase 10)
@@ -2084,6 +2248,7 @@ class OpusGreenNetCoordinator:
         if device is not None and self._record_confirmed_feedback(
             device_id,
             [{"channel": channel, "key": key, "value": self._parse_value(payload)}],
+            live=False,
         ):
             device.last_command_error = None
         _LOGGER.debug(
@@ -2337,6 +2502,10 @@ class OpusGreenNetCoordinator:
             )
         if not is_outbound_command:
             self._record_confirmed_feedback(device_id, functions)
+        else:
+            # The gateway transmitted the telegram now, e.g. a SoftSmartAck
+            # delivery: that value is no longer queued.
+            self._clear_delivered_deferred(device_id, functions)
 
         update_source = (
             "stream/telegram/to" if is_outbound_command else "stream/telegram/from"
@@ -2441,7 +2610,7 @@ class OpusGreenNetCoordinator:
         *,
         background: bool = False,
         still_needed: Callable[[], bool] | None = None,
-    ) -> None:
+    ) -> CommandDelivery:
         """Send a command to a device using JSON state message.
 
         All requests pass the transport's global send queue (one in flight).
@@ -2449,6 +2618,9 @@ class OpusGreenNetCoordinator:
         dispatched when no user command or interactive query is waiting.
         ``still_needed`` (background only) is checked right before publish; a
         superseded check is dropped without being sent.
+
+        Returns how the gateway accepted the command. ``DEFERRED`` (201) means
+        the telegram is queued: callers must not assume the commanded state.
         """
         topic = TOPIC_PUT_STATE.format(
             base=TOPIC_BASE, eag_id=self.eag_id, device_id=device_id
@@ -2502,7 +2674,7 @@ class OpusGreenNetCoordinator:
         self._command_waiters[device_id] = self._command_waiters.get(device_id, 0) + 1
         try:
             try:
-                await self._requests.async_request(
+                response = await self._requests.async_request(
                     topic,
                     f"{TOPIC_BASE}/{self.eag_id}/putAnswer/devices/{device_id}/state",
                     device_id,
@@ -2524,7 +2696,14 @@ class OpusGreenNetCoordinator:
                     "status query" if is_query else "command",
                 )
                 raise request_error("request_timeout", device_id) from err
+            # The transport accepted only 200 or 201 (decode_response).
+            delivery = (
+                CommandDelivery.DEFERRED
+                if response_status(response) == ACK_STATUS_DEFERRED
+                else CommandDelivery.SENT
+            )
             if device is not None:
+                unconfirmed_by_channel: dict[int, set[str]] = {}
                 for channel_id, fields in fields_by_channel.items():
                     unconfirmed = {
                         field
@@ -2535,13 +2714,24 @@ class OpusGreenNetCoordinator:
                         == revisions[channel_id, field]
                     }
                     if unconfirmed:
-                        self._schedule_reconciliation_queries(
-                            device_id, channel_id, fields=unconfirmed
-                        )
+                        unconfirmed_by_channel[channel_id] = unconfirmed
+                if delivery is CommandDelivery.DEFERRED:
+                    self._handle_deferred_command(
+                        device, functions, unconfirmed_by_channel, started_movements
+                    )
+                    return delivery
+                self._record_command_delivery(
+                    device, functions, delivery, unconfirmed_by_channel
+                )
+                for channel_id, unconfirmed in unconfirmed_by_channel.items():
+                    self._schedule_reconciliation_queries(
+                        device_id, channel_id, fields=unconfirmed
+                    )
                 for channel_id, movement in started_movements.items():
                     movement.accepted = True
                     if movement.elapsed:
                         self._finish_cover_movement(device_id, channel_id, movement)
+            return delivery
         except BaseException:
             for channel_id, movement in started_movements.items():
                 if self._cover_movements.get((device_id, channel_id)) is movement:
@@ -2573,7 +2763,7 @@ class OpusGreenNetCoordinator:
         channel: int = 0,
         brightness: int | None = None,
         is_dimmable: bool = False,
-    ) -> None:
+    ) -> CommandDelivery:
         """Turn on a switch or light."""
         functions: list[WireFunction]
         if brightness is not None:
@@ -2585,14 +2775,14 @@ class OpusGreenNetCoordinator:
             functions = [{"key": "switch", "value": "on"}]
 
         functions = self._with_channel_if_needed(device_id, functions, channel)
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
     async def async_turn_off(
         self,
         device_id: str,
         channel: int = 0,
         is_dimmable: bool = False,
-    ) -> None:
+    ) -> CommandDelivery:
         """Turn off a switch or light."""
         functions: list[WireFunction]
         if is_dimmable:
@@ -2601,37 +2791,39 @@ class OpusGreenNetCoordinator:
         else:
             functions = [{"key": "switch", "value": "off"}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
     async def async_set_cover_position(
         self,
         device_id: str,
         position: int,
         channel: int = 0,
-    ) -> None:
+    ) -> CommandDelivery:
         """Set OPUS position (0 = open, 100 = closed)."""
         functions: list[WireFunction] = [{"key": "position", "value": str(position)}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
     async def async_set_cover_tilt(
         self,
         device_id: str,
         tilt: int,
         channel: int = 0,
-    ) -> None:
+    ) -> CommandDelivery:
         """Set cover tilt angle."""
         functions: list[WireFunction] = [{"key": "angle", "value": str(tilt)}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
-    async def async_stop_cover(self, device_id: str, channel: int = 0) -> None:
+    async def async_stop_cover(
+        self, device_id: str, channel: int = 0
+    ) -> CommandDelivery:
         """Stop cover movement."""
         self._clear_cover_movement(device_id, channel)
         self._cancel_reconciliation_queries(device_id, channel)
         functions: list[WireFunction] = [{"key": KEY_STOP, "value": "true"}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
     async def async_query_device_status(
         self,
@@ -2640,16 +2832,17 @@ class OpusGreenNetCoordinator:
         *,
         background: bool = False,
         still_needed: Callable[[], bool] | None = None,
-    ) -> None:
+    ) -> CommandDelivery:
         """Query the current device status."""
         functions: list[WireFunction] = [{"key": KEY_QUERY, "value": "status"}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
         if still_needed is None:
-            await self.async_send_command(device_id, functions, background=background)
-        else:
-            await self.async_send_command(
-                device_id, functions, background=background, still_needed=still_needed
+            return await self.async_send_command(
+                device_id, functions, background=background
             )
+        return await self.async_send_command(
+            device_id, functions, background=background, still_needed=still_needed
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # Climate commands
@@ -2659,26 +2852,26 @@ class OpusGreenNetCoordinator:
         self,
         device_id: str,
         temperature: float,
-    ) -> None:
+    ) -> CommandDelivery:
         """Set the temperature setpoint for a climate device."""
         functions = [{"key": "temperatureSetpoint", "value": str(temperature)}]
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
     async def async_set_climate_mode(
         self,
         device_id: str,
         mode: str,
-    ) -> None:
+    ) -> CommandDelivery:
         """Set the heater mode for a climate device."""
         functions = [{"key": "heaterMode", "value": mode}]
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
     async def async_query_climate_status(
         self,
         device_id: str,
-    ) -> None:
+    ) -> CommandDelivery:
         """Query the current status of a climate device."""
-        await self.async_query_device_status(device_id)
+        return await self.async_query_device_status(device_id)
 
     # ──────────────────────────────────────────────────────────────────────
     # Device profile queries

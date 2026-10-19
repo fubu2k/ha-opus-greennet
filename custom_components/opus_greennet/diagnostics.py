@@ -170,6 +170,11 @@ async def async_get_config_entry_diagnostics(
                 "last_update_source": device.last_update_source,
                 "dbm": device.dbm,
                 "last_command_error": device.last_command_error,
+                # Values accepted with ACK 201 and not yet reported back.
+                "deferred_commands": {
+                    channel_id: dict(values)
+                    for channel_id, values in device.deferred_commands.items()
+                },
                 "channels": {
                     channel_id: asdict(channel)
                     for channel_id, channel in device.channels.items()

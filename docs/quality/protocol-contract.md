@@ -76,6 +76,10 @@ Unused constants in `const.py`: `TOPIC_STREAM_TELEGRAM`, `TOPIC_STREAM_DEVICE`,
   is present or `require_status=True`, `header.httpStatus` must be an integer
   (no `bool`, no non-integral `float`) equal to **200 or 201** (201 = SoftSmartAck
   per reference). **[Code][Test][Ref]**
+- State commands (`putAnswer/devices/<DEV>/state`) distinguish the two accepted
+  statuses since phase 11: `200` = `CommandDelivery.SENT`, `201` =
+  `CommandDelivery.DEFERRED` (section 7.1). Both clear `last_command_error`;
+  neither is device feedback. **[Code][Test][Ref]**
 - Uptime: `systemUptimeResponse.uptime` must be `str`, `int` or `float` (no `bool`),
   finite and ≥ 0; stored as `str(value)`. **[Code][Test]**
 - Bridge status: only payloads `"0"` and `"1"` are evaluated; anything else is ignored. **[Code][Test]**
@@ -174,7 +178,8 @@ RWM (F6-05-02): value-only slots in `transmitModes` are resolved as `smokeAlarm`
 - `to` (outbound) is discarded while a local command awaits its ACK
   (`_command_waiters`); otherwise it is applied optimistically (bridge-native or
   HomeKit commands), restricted to `KNOWN_STATE_KEYS`, `channel` and `stop`, and
-  reconciliation is scheduled afterwards.
+  reconciliation is scheduled afterwards. Since phase 11 a matching value also
+  clears the deferred marker of a SoftSmartAck command (section 7.1).
 - Unknown device with a telegram: a placeholder device is created; a discovery
   signal is only sent if an `entity_type` can be determined. **[Code][Test]**
 
@@ -258,7 +263,50 @@ at a time and exact topics afterwards (`_async_perform_subscriptions`, HA
 - Debounce times: discovery 2 s after the last message, delta finalisation 0.02 s,
   telegram finalisation 0.15 s.
 - Reconciliation after a command: 5 s and 20 s; covers with a movement estimate:
-  remaining travel incl. 5 s grace, then +10 s and +20 s.
+  remaining travel incl. 5 s grace, then +10 s and +20 s. Only after ACK `200`;
+  after ACK `201` see section 7.1.
+
+### 7.1 ACK 201 and explicit device health (phase 11)
+
+States of a command, from intent to confirmation:
+
+| State | Source | Shown in Home Assistant |
+|-------|--------|-------------------------|
+| desired / estimated | ACK `200` (`SENT`): the gateway transmitted the telegram | estimate applied by light, switch and cover entities (unchanged), travel estimate for covers, then the 5/20 s checks |
+| accepted / deferred | ACK `201` (`DEFERRED`, SoftSmartAck): the gateway queued the telegram | last reported state kept; no estimate, no travel estimate; value listed in diagnostics under `deferred_commands` |
+| delivered | outbound telegram `stream/telegram/<DEV>/to` with the same value | existing bridge-native path: value applied optimistically, then the 5/20 s checks |
+| device-confirmed | live device report (`stream/telegram/.../from`, `stream/device`, live `stream/devices`) for the field and channel | reported value; deferred marker cleared if the value matches |
+
+- **No query for a deferred command (A1).** `_handle_deferred_command`
+  schedules no status check for the command's fields. A status query would be
+  deferred as well and could not confirm a telegram that has not been sent.
+  Per command, at most the two existing checks follow, and only once the
+  gateway transmits (outbound telegram). **[Code][Test]**
+- **Cover travel.** A movement estimate started before publish is cleared on
+  `201`; fields of earlier accepted commands whose timers that start had
+  stopped get their two checks again (no additional field, no extra slot).
+  A deferred Stop schedules no final-position check. **[Code][Test]**
+- **Markers.** `EnOceanDevice.deferred_commands[channel][key] = value` for
+  confirmable keys (`switch`, `dimValue`, `position`, `angle`,
+  `temperatureSetpoint`, `heaterMode`) not yet reported during the ACK wait,
+  and for `stop`. Cleared by a matching live report (numeric keys compared
+  numerically), a matching outbound telegram, a newer `200` command for the
+  same key and channel, or device removal. Retained values never clear a
+  marker. A report with another value keeps it. Markers are diagnostic only
+  and never become an assumed state. **[Code][Test]**
+- **Residual risk [unverified].** OPUS answers carry no request identifier.
+  Whether the gateway discards a queued telegram when a newer command for the
+  same key is transmitted, and how long it keeps one, is not documented and
+  was not observed on hardware. An outbound telegram arriving while another
+  local command awaits its ACK is still discarded (section 5), so its marker
+  stays until a device report matches.
+- **Device health.** Profile-specific warnings and errors
+  (`actuatorNotResponding`, `missingTemperature`, `circuitInUse`,
+  `actuatorLowBattery`, `actuatorDeactivated`, `heaterMode: error`) are shown
+  on their own entities only. They never change `coordinator.available` or any
+  entity's availability, and they publish nothing. A rejected or timed-out
+  command sets `last_command_error` for that device only. No silence-based
+  offline rule exists (no documented heartbeat contract). **[Code][Test]**
 
 ## 8. Entity inventory and identities (frozen by A5)
 
@@ -319,6 +367,9 @@ optional `config_entry_id`.
 - Whether the gateway publishes `stream/device/<DEV>/dbm` for rockers (relevance
   of finding F1) is **[unverified]**.
 - Whether the Mosquitto bridge status is published as retained is **[unverified]**.
+- Which devices or profiles receive ACK `201`, and how the gateway handles a
+  queued telegram that a newer command supersedes, is **[unverified]** on
+  hardware (section 7.1).
 - Whether every firmware publishes a retained `stream/devices/<DEV>/friendlyId`
   leaf for each device (the discovery filter) is **[unverified]** on hardware;
   the evidence is a field report of a numeric `friendlyId` topic (CHANGELOG)
