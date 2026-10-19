@@ -142,7 +142,7 @@ Suggested branch names below do not imply existing branches.
 | 3 | `fix/opus-q03-event-lifecycle` | `16d9a45777cef8891fe8772963c8827b8a479798` | Completed |
 | 4 | `fix/opus-q04-background-efficiency` | `8ece6eaf7be8ce7ccdbf5c9cf54cb93449a10ea7` | Completed |
 | 5 | `feat/opus-q05-strict-typing` | `bf2ad417559cdaee3b695274a37455476a356e6c` | Completed |
-| 6 | No branch | Not applicable | Previously deferred; scoped resumption below |
+| 6 | `feat/opus-q06-entity-metadata` | `feabed53b5761104e9ed917c0dc44b2afb584df7` | Mandatory handle diagnostics implemented; pending review (see `phases/phase-06.md`); remaining metadata review open |
 | 7 | `feat/opus-quality-scale-evidence` | `f4008667c0d42b202554fb0849ee3226b81b011a` | Completed |
 
 Historical phase reports remain evidence of what actually ran. Do not imply

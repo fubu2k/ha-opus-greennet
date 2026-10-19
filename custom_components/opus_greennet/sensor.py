@@ -361,7 +361,15 @@ class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
 
 
 class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
-    """Handle position or the independent reported unlock request."""
+    """Handle position or the independent reported unlock request.
+
+    The unlock request (Entsperranfrage) serves troubleshooting rather than
+    everyday operation, so it is a diagnostic entity that is disabled by
+    default. The default only applies when Home Assistant creates a new
+    registry entry; existing entries keep their enablement, ID and
+    customisations. Hiding this push-based entity sends no request to the
+    device and is not a proven battery saving.
+    """
 
     def __init__(
         self,
@@ -379,6 +387,8 @@ class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
         elif suffix == "unlock_request":
             self._attr_device_class = SensorDeviceClass.ENUM
             self._attr_options = ["requested", "not_requested"]
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+            self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> str | None:

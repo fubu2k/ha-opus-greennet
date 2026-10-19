@@ -82,6 +82,18 @@ reporter's tested MQTT write path disrupted the gateway bridge, and control
 remains disabled pending manufacturer clarification. AutoLock configuration and
 reported lock state are separate; a closed handle does not imply a locked handle.
 
+The unlock-request sensor and the mechanics-fault binary sensor serve
+troubleshooting rather than everyday operation. Both are diagnostic entities
+and are disabled by default when Home Assistant registers them for the first
+time. Existing installations keep their current setting: an entity you already
+use stays enabled with its entity ID, name and icon. To activate them, open
+**Settings → Devices & services → Opus GreenNet Bridge → Devices**, select the
+handle, open the entity under **Diagnostic** and enable it. Home Assistant then
+reloads the integration. Enabling or hiding these entities sends no request to
+the handle; their values arrive only through the handle's own reports. Hiding
+them is not a proven battery saving. An unrecognised mechanics value stays
+unknown and is never shown as "no fault".
+
 ## Removing or replacing a device
 
 Use **Settings → Devices & services → Opus GreenNet Bridge → Devices**, open the
