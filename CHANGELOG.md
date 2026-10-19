@@ -13,33 +13,81 @@ Quality series (phases 1-7) plus the device support of upstream v0.7.0b1 (kegelm
 - Temperature, humidity and battery-level sensors for A5-04-01, A5-04-02 and A5-04-03 devices (upstream #64/#65), including Jaeger Direkt sensors. A5-04-02/03 accept -20 to +60 °C; A5-04-01 and HeatArea keep 0 to 40 °C.
 - Contact binary sensor (opening device class) for D5-00-01 single input contacts (upstream #70/#71): `open` is on, `closed` is off, missing or unrecognized values stay unknown.
 - Motion detection for OPUS motion detectors announcing F6-02-01 plus A5-04-01 (upstream #72): a `buttonAI` press reports motion, a `buttonA0` press reports no motion, releases keep the state. The existing rocker event entity is kept. Motion stays unknown after a restart until the next motion telegram.
-- English and German names for the new entities.
-
+- English and German names for the new motion and temperature entities.
+- Automatic MQTT gateway discovery from `EnOcean/+/stream/devices/+/friendlyId`, with a confirmation step before configuration. Receiving a discovery message publishes nothing.
+  Confirmation uses the same fresh gateway-uptime probe as manual setup.
+- Discovery deduplication per gateway. Already configured, disabled or ignored gateways are rejected without publishing requests, rewriting discovery keys or reloading an existing entry. Invalid discovery topics,
+  empty payloads and incompatible identifier casing are rejected.
+- State-dependent icons for HOPPE handle position, handle-closed state, unlock requests and mechanics faults, with neutral fallbacks for unknown or unavailable readings. Existing user-selected icons take
+  precedence. Standard device-class icons remain in use where appropriate.
+- Frontend icons for integration service actions.
+- A persistent Home Assistant Repairs warning when the existing migration removes a duplicate beta entity. The warning identifies the removed and preserved entity IDs so users can update affected dashboards and
+  automations. Confirming the repair dismisses it; removing the config entry removes only that entry's repair issues.
+- README use cases and examples for rocker control, handle-based heating automation, optional mechanics-fault diagnostics, smoke alarms and dashboards.
+  
 ### Fixed
 - Rocker switch events are no longer replayed by later updates of the same device (signal strength, battery, metadata, command acknowledgements, availability changes). Two identical real presses still produce two events.
+- Preserve the existing temperature and humidity readers when combining upstream device support with the quality refactoring.
+- Purely numeric device names received through flattened MQTT topics, such as `friendlyId = 123`, are stored as text.
 
 ### Changed
-- HOPPE D2-06-40 window handles: the unlock-request sensor and the mechanics-fault binary sensor are diagnostic entities and are disabled by default when Home Assistant registers them for the first time. Existing installations keep their current setting, entity IDs, names and icons. Enabling them sends no request to the handle. Handle position, open/tilted/closed sensors and the AutoLock state are unchanged.
-- Background status checks that are still waiting in the send queue are dropped before publishing when device feedback or a newer command has already superseded them. Delays (5 s / 20 s), timeouts and priorities are unchanged; user commands and Stop are never dropped.
-- Idle per-topic request locks are released after each gateway request instead of accumulating per device.
-- Entities skip a state write when a device update does not change their visible state or attributes, e.g. signal-strength-only updates for covers and switches. Commands and availability changes are always written.
-- Optimistic post-acknowledgement state for lights, switches and covers is handled in the device model instead of in each entity, with identical results.
-- MQTT/JSON payloads are validated per container and field at the integration boundary. Valid string and numeric representations, channel zero, `notAvailable` and the proprietary HeatArea profiles are accepted as before; malformed fields are ignored per field as before.
-- A purely numeric device name from a flattened MQTT topic (for example `friendlyId` = `123`) is now stored as text.
+- HOPPE D2-06-40 unlock-request and mechanics-fault entities are classified as diagnostics and disabled by default only when first registered. 
+  Existing entries retain their enabled/disabled setting, entity IDs,   names and user customizations. Enabling these diagnostics sends no request to the handle. Handle position, open/tilted/closed sensors and read-only AutoLock status are unchanged.
+- Superseded background status checks are discarded before publication while still waiting in the send queue. Matching device feedback or a newer command can make a queued check unnecessary. User commands and Stop commands are never discarded.
+- Idle per-answer-topic request locks are released instead of accumulating across devices.
+- Dispatch-driven entity updates skip redundant Home Assistant state writes when the visible state and attributes are unchanged. Command and availability write paths remain active; event delivery is unaffected.
+- Optimistic post-acknowledgement state updates for lights, switches and covers are centralized in the device model instead of mutating channel fields in individual entities. Existing revision guards,
+  feedback precedence and estimate semantics are preserved.
+- MQTT/JSON boundary handling uses explicit typed containers and field-level validation. Existing valid string and numeric representations, channel zero, `notAvailable` and proprietary HeatArea profiles remain supported.
+- Successful gateway responses with status 200 or 201 use a shared status parser without changing their existing acknowledgement semantics.
 
-### Development
-- All integration modules pass strict type checking (`mypy --strict`). `mypy` 2.4.0 is a test dependency and runs as a CI step.
-- Schema validation imports `probatio` directly; Home Assistant has used it in place of voluptuous since 2026.9, so runtime behaviour is unchanged.
-- Quality documentation in `docs/quality/` (implementation plan, protocol contract, per-phase reports, quality-scale evidence, upstream sync report `upstream-sync-v0.7.0b1.md`).
-- Guardrail tests for the new upstream profiles (`tests/test_upstream_backport.py`): no device requests, retained-answer protection, stable identities and registry defaults, no event replay, no redundant state writes.
-- Removed integration file copies that were accidentally uploaded to the repository root; they made hassfest fail.
+### Compatibility and upgrade notes
+- Restart Home Assistant after upgrading.
+- Existing entity IDs, unique IDs, device assignments, MQTT command routes, service names and wire payloads are preserved. Manual and discovered setup use the same gateway unique ID; no config-entry
+  version migration is introduced. 
+- The existing duplicate-beta migration can remove an obsolete duplicate entity while preserving the established fork entity. References to the removed entity ID still require manual correction; the new Repairs
+  warning makes that action visible.
+- Automatic discovery depends on the gateway publishing the expected device `friendlyId` topic. Manual setup remains available if discovery produces no offer or MQTT discovery is disabled.
+- While a discovery confirmation is open, manual setup for the same gateway is rejected as already in progress.
+- Receiving a retained discovery announcement does not establish gateway health and does not restore device state. Existing retained-answer protection and retained-stream handling are unchanged.
+- Gateway health checks, reconnect behavior, request serialization, timeouts, command priorities and existing reconciliation delays remain unchanged. No new periodic polling, retry loop or automatic
+  device-level query is introduced.
+- Gateway acknowledgement does not prove physical actuation. Cover movement and fallback positions remain estimates.
+- AutoLock control remains disabled pending manufacturer guidance. Handle position, unlock requests and reported lock state remain independent.
 
-### Validation
-- Phases 1-5: 1094 tests pass on Home Assistant 2026.10.1 with Ruff, mypy and dependency checks; coverage 92.8 %.
-- Combined state (phases 1-7, phase 6 and upstream v0.7.0b1): CI run 39267215141 passed on the latest stable Home Assistant, including Ruff, mypy, the full test suite with total and per-module coverage gates, three lifecycle/race repetitions and hassfest.
-- All tests use a mocked MQTT layer. No hardware test was performed for this combination; upstream reports community tests of the new sensors on its own builds.
+### Development and quality assurance
+- All integration modules pass strict type checking with `mypy --strict`. Typed config entries, callbacks, tasks, futures and OPUS wire-data helpers replace loosely typed boundary access.
+- `mypy` 2.4.0 is included in the test dependencies and enforced in CI.
+- Schema validation imports `probatio` directly, matching the supported Home Assistant runtime.
+- Added `quality_scale.yaml` covering all 54 referenced Home Assistant Integration Quality Scale rules, together with an implementation, test and documentation evidence matrix.
+- The phase-9 self-assessment records 45 rules as done, 9 as exempt and none as todo. This is a custom-integration self-assessment, not an official Home Assistant quality-tier award.
+- CI enforces at least 97% total coverage, more than 95% coverage for each integration module and 100% coverage for the config flow. Missing modules in the coverage report fail the gate.
+- Lifecycle and race-regression suites run three additional times in CI.
+- Expanded regression coverage for service actions, config-flow error recovery, translations, diagnostics, transport and platform edge cases, upstream device profiles, discovery, icons and repair issues.
+- Added a fixed Home Assistant 2026.10.2 reference job on Ubuntu 24.04, alongside the existing latest-stable compatibility job.
+- Reference CI records the Python version, resolved dependencies, JUnit results, coverage and MQTT publication counts as build artifacts.
+- Added a reference Hassfest build from home-assistant/core commit `8d7fd8b68677c2585be36ec86043308f403875b8` (2026.10.2), while retaining
+  the moving Hassfest check as an additional compatibility signal.
+- CI validates icon identifiers against the reference Material Design Icons catalogue.
+- Added an MQTT traffic baseline for setup, idle gateway-health checks, reconnect bursts, commands, reconciliation and incoming telegrams.
+  The tests assert that gateway setup, health checks and reconnects do not generate device commands, device-status queries or ReCom requests.
+- Added quality-phase reports, the protocol contract, a capability matrix, upstream synchronization evidence, removal instructions and troubleshooting documentation.
+- Removed accidentally uploaded integration copies from the repository root that caused Hassfest domain/directory validation failures.
+  The installed integration remains under `custom_components/opus_greennet/`.
+  
+### Validation and known limitations
+ Phase 7 passed 1,238 tests on Home Assistant 2026.10.1 with 97.67% total branch coverage. These figures describe that intermediate baseline, not the final phase-9 test count.
+- Phase 8 passed the fixed-reference and latest-stable test jobs, coverage gates, repeated lifecycle/race checks and both Hassfest checks.
+- Phase 9 passed the same gates in workflow run `39288963525` for implementation commit `0e09a3a`, including discovery, icon and repair regression tests and the unchanged MQTT traffic baseline.
+- The exact final test count and coverage percentage are not recorded here because the phase-9 report does not contain the downloaded artifact values.
+- Tests use a mocked MQTT boundary. No hardware validation was performed for the combined quality-series build.
+- Automatic discovery still requires hardware confirmation across gateway firmware versions. Its startup cost on large installations has not been measured.
+- Icon identifiers and backend metadata are validated; visual frontend rendering has not been checked.
+- MQTT publication counts are not EnOcean radio-transmission counts. Gateway cache behavior, firmware radio effects and the effect of status queries on linked HeatArea actuators remain unverified.
+- At the recorded branch state, phase 9 is implemented and CI-validated
+  but awaits review and a merge/release decision.
 
-Thanks to @florian-hartung and the upstream maintainer for the device support.
+Thanks to @fubu2k for the quality improvements, @nlsrchtr for the OPUS motion-detector implementation, and @florian-hartung and the upstream maintainer for the sensor support and integration work.
 
 ## [0.5.0] - 2026-10-11
 
