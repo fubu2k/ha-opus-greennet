@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0b1] - 2026-10-18
+
+Quality and reliability beta incorporating #74 and its included #75 quality evidence, while retaining the motion-detector features from v0.7.0b0 and all v0.6.0 sensor support. v0.6.0 remains stable.
+
+### Breaking requirement
+- **Home Assistant 2026.10.1 or newer is required**, including for manual installation. HACS metadata and test dependencies now enforce this minimum. Older installations should stay on stable v0.6.0 or upgrade HA first.
+- The higher minimum is deliberate: this release uses probatio and Home Assistant APIs unavailable in HA 2026.9.4.
+
+### Fixed
+- Stop replaying a cached rocker press when later battery, signal-strength or other device updates arrive; repeated real presses still produce separate events.
+- Preserve contact readings and profile-specific temperature ranges when integrating the refactored device model.
+
+### Changed
+- Drop superseded queued background status checks, release idle request locks and avoid redundant entity state writes.
+- Centralize optimistic light/switch/cover state updates in the device model and tighten MQTT payload validation.
+- Add strict typing, quality evidence, coverage gates and repeated lifecycle/race checks. No official Home Assistant Quality Scale rating is claimed.
+
+### Beta validation
+- Combined suite: 1,315 tests on HA 2026.10.1, plus lint, formatting, strict typing and dependency checks.
+- No physical-device validation has been performed for this combined quality beta. Please check repeated rocker presses, motion on/off, contacts, leak sensors, HeatArea readings, cover/light/switch commands, restart/reload and MQTT reconnect. Confirm entity IDs and automations remain intact.
+- Motion remains unknown after restart until a valid motion telegram arrives.
+- Enable prereleases in HACS and install v0.7.0b1. Report quality/regression feedback on #74 and motion-detector feedback on #72, with HA/gateway versions and redacted logs.
+
+## [0.7.0b0] - 2026-10-18
+
+Beta based on stable v0.6.0, adding the motion-detector support proposed in #72. v0.6.0 remains the stable release. The broader quality/refactoring changes in #74/#75 are not included.
+
+### Added
+- Motion detection for OPUS devices announcing F6-02-01 plus A5-04-01: buttonAI pressed means motion; buttonA0 pressed means no motion. Releases leave the motion state unchanged.
+- Temperature, humidity and battery entities for the motion detector, preserving existing rocker events and entity identities.
+- A5-04-01 and A5-04-02 temperature/humidity profile support with profile-specific temperature limits; A5-04-03 and HeatArea limits are preserved.
+
+### Fixed
+- Ignore malformed secondary EEP values when identifying motion and temperature/humidity profiles.
+
+### Validation and beta testing
+- 942 tests pass on HA 2026.9.4, including 16 contributed motion-detector cases and four additional malformed-profile regressions. Ruff lint and formatting pass.
+- The contributor reports two physical motion detectors on OPUS-GW v1.21.34, with motion transitions matching HomeKit and climate/battery readings matching the gateway. This combined beta has not yet been tested on hardware.
+- Motion remains unknown after restart until a valid motion telegram arrives; the gateway snapshot does not provide this state.
+- Enable prereleases in HACS, install v0.7.0b0, and restart HA. Verify motion on/off, release telegrams, temperature/humidity/battery readings, existing rocker automations, restart/reload and unchanged entity IDs. Also retest contacts, leak sensors and HeatArea devices.
+- Please report results on #72 with HA and gateway versions and redacted logs where needed.
+
+Thanks to @florian-hartung for the motion-detector implementation and hardware evidence.
+
 ## [0.6.0] - 2026-10-18
 
 Stable release of the sensor and contact support tested in v0.6.0b1, with the retained device-answer fix. Integration behavior is unchanged from that beta.

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from math import isfinite
-from typing import Any
 
 from .const import (
+    A5_04_TEMPERATURE_RANGES,
     BUTTON_KEYS,
     DEFAULT_CHANNEL,
     EEP_MAPPINGS,
@@ -14,6 +14,8 @@ from .const import (
     KEY_ACTUATOR_LOW_BATTERY,
     KEY_ACTUATOR_NOT_RESPONDING,
     KEY_ANGLE,
+    KEY_BUTTON_MOTION,
+    KEY_BUTTON_NO_MOTION,
     KEY_CHANNEL,
     KEY_CIRCUIT_IN_USE,
     KEY_CONTACT,
@@ -38,7 +40,15 @@ from .const import (
     KEY_THERMAL_MODE,
     KEY_VERTICAL_MOVEMENT_TIME,
     KEY_WINDOW_OPEN,
+    OPUS_MOTION_DETECTOR_EEPS,
     STATE_ON,
+)
+from .wire import (
+    JsonObject,
+    WireMapping,
+    as_object,
+    object_items,
+    string_key,
 )
 
 
@@ -94,13 +104,23 @@ class EnOceanChannel:
     last_button_action: str | None = None
 
 
+@dataclass(frozen=True, eq=False)
+class ChannelStateSnapshot:
+    """Channel identity and revision captured before a command is awaited."""
+
+    channel_id: int
+    channel: EnOceanChannel | None
+    revision: int
+
+
 @dataclass
 class EnOceanDevice:
     """Represents an EnOcean device from the gateway."""
 
     device_id: str
     friendly_id: str
-    eeps: list[dict[str, Any]] = field(default_factory=list)
+    # EEP entries keep their wire representation; unknown fields are preserved.
+    eeps: list[JsonObject] = field(default_factory=list)
     manufacturer: str = ""
     physical_device: str = ""
     first_seen: str = ""
@@ -118,13 +138,13 @@ class EnOceanDevice:
     dbm: int | None = None
     last_command_error: str | None = None
     channels: dict[int, EnOceanChannel] = field(default_factory=dict)
-    profile: dict[str, Any] | None = None
+    profile: JsonObject | None = None
 
     @property
     def primary_eep(self) -> str | None:
         """Get the primary EEP for this device."""
         if self.eeps:
-            return self.eeps[0].get("eep")
+            return string_key(self.eeps[0], "eep")
         return None
 
     @property
@@ -186,9 +206,30 @@ class EnOceanDevice:
         return self.primary_eep in ("A5-07-01", "A5-07-03")
 
     @property
+    def _eep_names(self) -> set[str]:
+        """Return all announced EEPs, not only the primary one."""
+        return {
+            name
+            for eep in self.eeps
+            if isinstance(eep, dict) and (name := string_key(eep, "eep")) is not None
+        }
+
+    @property
+    def is_opus_motion_detector(self) -> bool:
+        """Return whether this is an OPUS motion detector (F6-02-01 + A5-04-01)."""
+        return OPUS_MOTION_DETECTOR_EEPS <= self._eep_names
+
+    @property
+    def _a5_04_eep(self) -> str | None:
+        """Return the announced A5-04 temperature/humidity profile, if any."""
+        return next(
+            (eep for eep in A5_04_TEMPERATURE_RANGES if eep in self._eep_names), None
+        )
+
+    @property
     def is_temperature_humidity_sensor(self) -> bool:
-        """Return whether this is an A5-04-03 temperature/humidity sensor."""
-        return self.primary_eep == "A5-04-03"
+        """Return whether the device announces an A5-04 temperature/humidity profile."""
+        return self._a5_04_eep is not None
 
     @property
     def is_contact_sensor(self) -> bool:
@@ -222,7 +263,7 @@ class EnOceanDevice:
             "D1-4B-06": "cositherm",
             "D1-4B-07": "electro",
         }
-        return eep_type_map.get(eep)
+        return eep_type_map.get(eep) if eep is not None else None
 
     @property
     def setpoint_step(self) -> float:
@@ -268,9 +309,79 @@ class EnOceanDevice:
             self.channels[channel_id] = EnOceanChannel(channel_id=channel_id)
         return self.channels[channel_id]
 
+    # Command estimates ------------------------------------------------------
+    #
+    # An accepted command acknowledgement is not device feedback. After the
+    # acknowledgement the commanded value is assumed, but only if the channel
+    # received no newer update while the command was awaited: the same channel
+    # object must still be in place and its ``state_revision`` must be
+    # unchanged. Feedback, discovery state and the coordinator's cover travel
+    # estimate all advance the revision, so they always win over an estimate.
+    # Estimates deliberately do not advance the revision themselves.
+
+    def snapshot_channel_state(self, channel_id: int) -> ChannelStateSnapshot:
+        """Capture a channel before awaiting a command acknowledgement."""
+        channel = self.channels.get(channel_id)
+        return ChannelStateSnapshot(
+            channel_id=channel_id,
+            channel=channel,
+            revision=channel.state_revision if channel is not None else 0,
+        )
+
+    def channel_state_unchanged(self, snapshot: ChannelStateSnapshot) -> bool:
+        """Return whether no newer channel update arrived since the snapshot."""
+        channel = self.channels.get(snapshot.channel_id)
+        return channel is snapshot.channel and (
+            channel is None or channel.state_revision == snapshot.revision
+        )
+
+    def _estimate_channel(
+        self, snapshot: ChannelStateSnapshot
+    ) -> EnOceanChannel | None:
+        if not self.channel_state_unchanged(snapshot):
+            return None
+        return self.get_or_create_channel(snapshot.channel_id)
+
+    def apply_switch_estimate(
+        self, snapshot: ChannelStateSnapshot, is_on: bool
+    ) -> bool:
+        """Assume an acknowledged switch command; return whether it applied."""
+        if (channel := self._estimate_channel(snapshot)) is None:
+            return False
+        channel.is_on = is_on
+        return True
+
+    def apply_dim_estimate(
+        self, snapshot: ChannelStateSnapshot, dim_value: int
+    ) -> bool:
+        """Assume an acknowledged ``dimValue`` (0-100); return whether it applied."""
+        if (channel := self._estimate_channel(snapshot)) is None:
+            return False
+        channel.brightness = dim_value
+        channel.is_on = dim_value > 0
+        return True
+
+    def apply_cover_position_estimate(
+        self, snapshot: ChannelStateSnapshot, position: int
+    ) -> bool:
+        """Assume an acknowledged OPUS position (0 = open); return whether applied."""
+        if (channel := self._estimate_channel(snapshot)) is None:
+            return False
+        channel.position = position
+        return True
+
+    def apply_cover_tilt_estimate(
+        self, snapshot: ChannelStateSnapshot, angle: int
+    ) -> bool:
+        """Assume an acknowledged tilt angle; return whether it applied."""
+        if (channel := self._estimate_channel(snapshot)) is None:
+            return False
+        channel.angle = angle
+        return True
+
     @staticmethod
     def _parse_number(
-        value: Any,
+        value: object,
         *,
         minimum: float | None = None,
         maximum: float | None = None,
@@ -292,34 +403,66 @@ class EnOceanDevice:
             return None
         return int(number) if integer else number
 
-    def _parse_channel_id(self, value: Any) -> int | None:
-        """Reject malformed channel selectors instead of updating channel zero."""
-        parsed = self._parse_number(value, minimum=0, integer=True)
-        return int(parsed) if parsed is not None else None
+    @classmethod
+    def _parse_integer(
+        cls,
+        value: object,
+        *,
+        minimum: float | None = None,
+        maximum: float | None = None,
+    ) -> int | None:
+        """Parse a finite integral protocol number (e.g. "50", 50, 50.0)."""
+        number = cls._parse_number(
+            value, minimum=minimum, maximum=maximum, integer=True
+        )
+        return int(number) if number is not None else None
 
-    def _update_numeric_field(
-        self,
-        channel: EnOceanChannel,
-        attr: str,
-        value: Any,
+    @classmethod
+    def _parse_float(
+        cls,
+        value: object,
+        *,
+        minimum: float | None = None,
+        maximum: float | None = None,
+    ) -> float | None:
+        """Parse a finite protocol number as float."""
+        number = cls._parse_number(value, minimum=minimum, maximum=maximum)
+        return float(number) if number is not None else None
+
+    def _parse_channel_id(self, value: object) -> int | None:
+        """Reject malformed channel selectors instead of updating channel zero."""
+        return self._parse_integer(value, minimum=0)
+
+    @classmethod
+    def _float_reading(
+        cls,
+        current: float | None,
+        value: object,
         minimum: float | None = None,
         maximum: float | None = None,
         *,
-        integer: bool = False,
         allow_unavailable: bool = False,
-    ) -> None:
-        """Clear an explicitly unavailable reading and ignore malformed values."""
+    ) -> float | None:
+        """Return the new reading: None for notAvailable, current if malformed."""
         if allow_unavailable and value == "notAvailable":
-            setattr(channel, attr, None)
-        elif (
-            number := self._parse_number(
-                value, minimum=minimum, maximum=maximum, integer=integer
-            )
-        ) is not None:
-            setattr(channel, attr, number)
+            return None
+        number = cls._parse_float(value, minimum=minimum, maximum=maximum)
+        return current if number is None else number
+
+    @classmethod
+    def _integer_reading(
+        cls,
+        current: int | None,
+        value: object,
+        minimum: float | None = None,
+        maximum: float | None = None,
+    ) -> int | None:
+        """Return the new integral reading, or current if malformed."""
+        number = cls._parse_integer(value, minimum=minimum, maximum=maximum)
+        return current if number is None else number
 
     @staticmethod
-    def _parse_boolean(value: Any) -> bool | None:
+    def _parse_boolean(value: object) -> bool | None:
         """Parse an explicit boolean without guessing from malformed values."""
         if isinstance(value, bool):
             return value
@@ -332,7 +475,7 @@ class EnOceanDevice:
         return None
 
     @staticmethod
-    def _parse_enum_boolean(value: Any, on: str, off: str) -> bool | None:
+    def _parse_enum_boolean(value: object, on: str, off: str) -> bool | None:
         """Keep missing or unrecognized detector states unknown."""
         if value == on:
             return True
@@ -341,7 +484,9 @@ class EnOceanDevice:
         return None
 
     @staticmethod
-    def _parse_detector_boolean(value: Any, active: str, inactive: str) -> bool | None:
+    def _parse_detector_boolean(
+        value: object, active: str, inactive: str
+    ) -> bool | None:
         """Accept explicit detector enums or booleans, never arbitrary truthiness."""
         if isinstance(value, str):
             value = value.strip()
@@ -349,28 +494,37 @@ class EnOceanDevice:
         return parsed if parsed is not None else EnOceanDevice._parse_boolean(value)
 
     @staticmethod
-    def _normalize_battery_level(value: Any) -> Any:
+    def _normalize_battery_level(value: object) -> object:
         """Accept an optional percent suffix before the shared numeric validation."""
         if isinstance(value, str):
             return value.strip().removesuffix("%").strip()
         return value
 
-    def update_from_telegram(self, telegram: dict[str, Any]) -> None:
-        """Update device state from a telegram message."""
-        functions = telegram.get("functions", [])
-        if isinstance(functions, dict):
-            functions = [functions]
-        if not isinstance(functions, list):
-            functions = []
-        functions = [func for func in functions if isinstance(func, dict)]
+    def clear_button_occurrence(self) -> None:
+        """Forget the transient button press carried by the last telegram.
 
-        # Button fields describe only this telegram, including metadata-only updates.
+        Button fields describe a single telegram occurrence. They must not be
+        observed again by later dispatches (RSSI, metadata, PUT answers, ...).
+        """
         for channel in self.channels.values():
             channel.last_button = None
             channel.last_button_action = None
 
+    def update_from_telegram(self, telegram: WireMapping) -> None:
+        """Update device state from a telegram message.
+
+        Only ``functions`` entries that are JSON objects are applied; entries
+        of other types and unknown keys are ignored.
+        """
+        raw_functions = telegram.get("functions", [])
+        single = as_object(raw_functions)
+        functions = [single] if single is not None else object_items(raw_functions)
+
+        # Button fields describe only this telegram, including metadata-only updates.
+        self.clear_button_occurrence()
+
         # Determine default channel from telegram-level channel function.
-        default_channel_id = DEFAULT_CHANNEL
+        default_channel_id: int | None = DEFAULT_CHANNEL
         for func in functions:
             if func.get("key") == KEY_CHANNEL:
                 default_channel_id = self._parse_channel_id(
@@ -395,6 +549,12 @@ class EnOceanDevice:
                 if value in ("pressed", "released"):
                     channel.last_button = key
                     channel.last_button_action = value
+                # Release telegrams carry no button, so only presses set motion.
+                if value == "pressed" and self.is_opus_motion_detector:
+                    if key == KEY_BUTTON_MOTION:
+                        channel.motion = True
+                    elif key == KEY_BUTTON_NO_MOTION:
+                        channel.motion = False
 
             elif key == KEY_SWITCH:
                 if value in ("on", "off"):
@@ -409,18 +569,16 @@ class EnOceanDevice:
                     channel.is_on = brightness > 0
 
             elif key == KEY_POSITION:
-                self._update_numeric_field(
-                    channel, "position", value, 0, 100, integer=True
+                channel.position = self._integer_reading(
+                    channel.position, value, 0, 100
                 )
 
             elif key == KEY_ANGLE:
-                self._update_numeric_field(
-                    channel, "angle", value, 0, 100, integer=True
-                )
+                channel.angle = self._integer_reading(channel.angle, value, 0, 100)
 
             elif key == KEY_VERTICAL_MOVEMENT_TIME:
-                self._update_numeric_field(
-                    channel, "vertical_movement_time", value, minimum=0
+                channel.vertical_movement_time = self._float_reading(
+                    channel.vertical_movement_time, value, minimum=0
                 )
 
             elif key == KEY_ROTATION_TIME:
@@ -443,10 +601,10 @@ class EnOceanDevice:
                     channel.local_control = value == STATE_ON
 
             elif key == KEY_ENERGY:
-                self._update_numeric_field(channel, "energy", value)
+                channel.energy = self._float_reading(channel.energy, value)
 
             elif key == KEY_POWER:
-                self._update_numeric_field(channel, "power", value)
+                channel.power = self._float_reading(channel.power, value)
 
             elif key == KEY_LIQUID_DETECTED:
                 liquid_detected = self._parse_boolean(value)
@@ -466,9 +624,8 @@ class EnOceanDevice:
             elif key == "batteryLow":
                 channel.battery_low = self._parse_detector_boolean(value, "low", "ok")
             elif key == "batteryLevel":
-                self._update_numeric_field(
-                    channel,
-                    "battery_level",
+                channel.battery_level = self._float_reading(
+                    channel.battery_level,
                     self._normalize_battery_level(value),
                     0,
                     100,
@@ -485,13 +642,14 @@ class EnOceanDevice:
             elif key in ("illuminance", "supplyVoltage") or (
                 key == "illumination" and self.is_presence_detector
             ):
-                self._update_numeric_field(
-                    channel,
-                    "supply_voltage" if key == "supplyVoltage" else "illuminance",
-                    value,
-                    minimum=0,
-                    allow_unavailable=True,
-                )
+                if key == "supplyVoltage":
+                    channel.supply_voltage = self._float_reading(
+                        channel.supply_voltage, value, minimum=0, allow_unavailable=True
+                    )
+                else:
+                    channel.illuminance = self._float_reading(
+                        channel.illuminance, value, minimum=0, allow_unavailable=True
+                    )
 
             elif key == "handleState" or (key == "handle" and self.is_window_handle):
                 if value == "tilt":
@@ -517,27 +675,17 @@ class EnOceanDevice:
 
             # Climate keys
             elif key == KEY_TEMPERATURE:
-                # A5-04-03 covers -20..+60 degC; heating profiles stay at 0..40.
-                minimum, maximum = (
-                    (-20, 60) if self.is_temperature_humidity_sensor else (0, 40)
+                # Preserve the profile-specific ranges from the sensor beta.
+                minimum, maximum = A5_04_TEMPERATURE_RANGES.get(
+                    self._a5_04_eep or "", (0, 40)
                 )
-                self._update_numeric_field(
-                    channel,
-                    "temperature",
-                    value,
-                    minimum,
-                    maximum,
-                    allow_unavailable=True,
+                channel.temperature = self._float_reading(
+                    channel.temperature, value, minimum, maximum, allow_unavailable=True
                 )
 
             elif key == KEY_TEMPERATURE_SETPOINT:
-                self._update_numeric_field(
-                    channel,
-                    "temperature_setpoint",
-                    value,
-                    0,
-                    40,
-                    allow_unavailable=True,
+                channel.temperature_setpoint = self._float_reading(
+                    channel.temperature_setpoint, value, 0, 40, allow_unavailable=True
                 )
 
             elif key == KEY_HEATER_MODE:
@@ -552,8 +700,8 @@ class EnOceanDevice:
                     channel.heater_mode = value
 
             elif key == KEY_HUMIDITY:
-                self._update_numeric_field(
-                    channel, "humidity", value, 0, 100, allow_unavailable=True
+                channel.humidity = self._float_reading(
+                    channel.humidity, value, 0, 100, allow_unavailable=True
                 )
 
             elif key == KEY_WINDOW_OPEN:
@@ -565,8 +713,8 @@ class EnOceanDevice:
                     channel.summer_mode = parsed
 
             elif key == KEY_FEED_TEMPERATURE:
-                self._update_numeric_field(
-                    channel, "feed_temperature", value, 0, 80, allow_unavailable=True
+                channel.feed_temperature = self._float_reading(
+                    channel.feed_temperature, value, 0, 80, allow_unavailable=True
                 )
 
             elif key == KEY_THERMAL_MODE:
@@ -574,8 +722,8 @@ class EnOceanDevice:
                     channel.thermal_mode = value
 
             elif key == KEY_ENERGY_CONSUMPTION:
-                self._update_numeric_field(
-                    channel, "energy_consumption", value, 0, 10, allow_unavailable=True
+                channel.energy_consumption = self._float_reading(
+                    channel.energy_consumption, value, 0, 10, allow_unavailable=True
                 )
 
             elif key == KEY_POWER_STATE:
@@ -608,26 +756,33 @@ class EnOceanDevice:
                     channel.circuit_in_use = value
 
         # Update last seen from telegram
-        if isinstance(telegram.get("timestamp"), str):
-            self.last_seen = telegram["timestamp"]
-        if isinstance(telegram.get("telegramInfo"), dict):
-            dbm = self._parse_number(telegram["telegramInfo"].get("dbm"), integer=True)
+        if (timestamp := string_key(telegram, "timestamp")) is not None:
+            self.last_seen = timestamp
+        if (info := as_object(telegram.get("telegramInfo"))) is not None:
+            dbm = self._parse_integer(info.get("dbm"))
             if dbm is not None:
-                self.dbm = int(dbm)
+                self.dbm = dbm
 
     @classmethod
-    def from_device_object(cls, device_data: dict[str, Any]) -> EnOceanDevice:
-        """Create an EnOceanDevice from a device JSON object."""
-        device = device_data.get("device", device_data)
-        dbm = cls._parse_number(device.get("dbm"), integer=True)
+    def from_device_object(cls, device_data: JsonObject) -> EnOceanDevice:
+        """Create an EnOceanDevice from a device JSON object.
+
+        Accepts the bare device object or a ``{"device": {...}}`` wrapper.
+        Fields of an unexpected type fall back to their empty default.
+        """
+        device = as_object(device_data.get("device", device_data)) or {}
+        dbm = cls._parse_integer(device.get("dbm"))
+
+        def text(key: str) -> str:
+            return string_key(device, key) or ""
 
         return cls(
-            device_id=device.get("deviceId", ""),
-            friendly_id=device.get("friendlyId", ""),
-            eeps=device.get("eeps", []),
-            manufacturer=device.get("manufacturer", ""),
-            physical_device=device.get("physicalDevice", ""),
-            first_seen=device.get("firstSeen", ""),
-            last_seen=device.get("lastSeen", ""),
-            dbm=int(dbm) if dbm is not None else None,
+            device_id=text("deviceId"),
+            friendly_id=text("friendlyId"),
+            eeps=object_items(device.get("eeps", [])),
+            manufacturer=text("manufacturer"),
+            physical_device=text("physicalDevice"),
+            first_seen=text("firstSeen"),
+            last_seen=text("lastSeen"),
+            dbm=dbm,
         )
