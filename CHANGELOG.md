@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.7.0b2] - 2026-10-19
 
-Quality series (phases 1-9) plus the device support of upstream v0.7.0b1 (kegelmeier/ha-opus-greennet), integrated into this fork's architecture. Existing entity IDs, unique IDs, device assignments, topics, services and wire payloads are unchanged.
+Quality series (phases 1-10) plus the device support of upstream v0.7.0b1 (kegelmeier/ha-opus-greennet), integrated into this fork's architecture. Existing entity IDs, unique IDs, device assignments, topics, services and wire payloads are unchanged.
 
 ### Breaking requirement
 - **Home Assistant 2026.10.1 or newer is required**, including for manual installation (HACS metadata and test dependencies enforce it). The integration uses `probatio` and Home Assistant APIs that are not available in 2026.9.4.
@@ -29,6 +29,8 @@ Quality series (phases 1-9) plus the device support of upstream v0.7.0b1 (kegelm
 - Rocker switch events are no longer replayed by later updates of the same device (signal strength, battery, metadata, command acknowledgements, availability changes). Two identical real presses still produce two events.
 - Preserve the existing temperature and humidity readers when combining upstream device support with the quality refactoring.
 - Purely numeric device names received through flattened MQTT topics, such as `friendlyId = 123`, are stored as text.
+- An older retained device-model value (`stream/devices` or `stream/device`) no longer overwrites a field that was already updated live during the same uninterrupted connection, for example by a radio telegram, a live device-model change, a battery or signal reading, or the answer to the integration's own device-list request. The check is per device, channel and field. The stale value is also kept out of the cached device model, so a later rediscovery cannot reapply it.
+- A retained replay that arrives after a device-list resync was requested no longer suppresses the fresh device-list answer. Retained replays no longer count as live updates.
 
 ### Changed
 - HOPPE D2-06-40 unlock-request and mechanics-fault entities are classified as diagnostics and disabled by default only when first registered. 
@@ -40,6 +42,7 @@ Quality series (phases 1-9) plus the device support of upstream v0.7.0b1 (kegelm
   feedback precedence and estimate semantics are preserved.
 - MQTT/JSON boundary handling uses explicit typed containers and field-level validation. Existing valid string and numeric representations, channel zero, `notAvailable` and proprietary HeatArea profiles remain supported.
 - Successful gateway responses with status 200 or 201 use a shared status parser without changing their existing acknowledgement semantics.
+- Device diagnostics label updates applied from retained messages as `<source> (retained)`; the receipt age refers to the last live update.
 
 ### Compatibility and upgrade notes
 - Restart Home Assistant after upgrading.
@@ -49,7 +52,8 @@ Quality series (phases 1-9) plus the device support of upstream v0.7.0b1 (kegelm
   warning makes that action visible.
 - Automatic discovery depends on the gateway publishing the expected device `friendlyId` topic. Manual setup remains available if discovery produces no offer or MQTT discovery is disabled.
 - While a discovery confirmation is open, manual setup for the same gateway is rejected as already in progress.
-- Receiving a retained discovery announcement does not establish gateway health and does not restore device state. Existing retained-answer protection and retained-stream handling are unchanged.
+- Receiving a retained discovery announcement does not establish gateway health and does not restore device state. Existing retained-answer protection is unchanged.
+- Retained device snapshots still restore state after a restart and initialize newly discovered devices, other fields and other channels. After a broker or bridge outage, retained values apply again, because they can be newer than the last value received live. The freshness check sends no MQTT request and does not change reconciliation behavior.
 - Gateway health checks, reconnect behavior, request serialization, timeouts, command priorities and existing reconciliation delays remain unchanged. No new periodic polling, retry loop or automatic
   device-level query is introduced.
 - Gateway acknowledgement does not prove physical actuation. Cover movement and fallback positions remain estimates.
@@ -64,6 +68,7 @@ Quality series (phases 1-9) plus the device support of upstream v0.7.0b1 (kegelm
 - CI enforces at least 97% total coverage, more than 95% coverage for each integration module and 100% coverage for the config flow. Missing modules in the coverage report fail the gate.
 - Lifecycle and race-regression suites run three additional times in CI.
 - Expanded regression coverage for service actions, config-flow error recovery, translations, diagnostics, transport and platform edge cases, upstream device profiles, discovery, icons and repair issues.
+- Added field-freshness regression tests for retained replays versus live fields per channel, including reconnect, bridge outage, device removal and unload; they also run in the repeated race suites.
 - Added a fixed Home Assistant 2026.10.2 reference job on Ubuntu 24.04, alongside the existing latest-stable compatibility job.
 - Reference CI records the Python version, resolved dependencies, JUnit results, coverage and MQTT publication counts as build artifacts.
 - Added a reference Hassfest build from home-assistant/core commit `8d7fd8b68677c2585be36ec86043308f403875b8` (2026.10.2), while retaining
@@ -79,13 +84,14 @@ Quality series (phases 1-9) plus the device support of upstream v0.7.0b1 (kegelm
  Phase 7 passed 1,238 tests on Home Assistant 2026.10.1 with 97.67% total branch coverage. These figures describe that intermediate baseline, not the final phase-9 test count.
 - Phase 8 passed the fixed-reference and latest-stable test jobs, coverage gates, repeated lifecycle/race checks and both Hassfest checks.
 - Phase 9 passed the same gates in workflow run `39288963525` for implementation commit `0e09a3a`, including discovery, icon and repair regression tests and the unchanged MQTT traffic baseline.
-- The exact final test count and coverage percentage are not recorded here because the phase-9 report does not contain the downloaded artifact values.
+- Phase 10 passed the same gates in workflow run `39301425540` for implementation commit `e21a9bd`, including the field-freshness tests and the unchanged MQTT traffic baseline.
+- The exact final test count and coverage percentage are not recorded here because the phase-9 and phase-10 reports do not contain the downloaded artifact values.
+- The retained-replay orderings fixed in phase 10 were reproduced in tests, not observed on hardware. A bridge reconnect forwards the gateway's retained topics as live messages, which the freshness check cannot distinguish.
 - Tests use a mocked MQTT boundary. No hardware validation was performed for the combined quality-series build.
 - Automatic discovery still requires hardware confirmation across gateway firmware versions. Its startup cost on large installations has not been measured.
 - Icon identifiers and backend metadata are validated; visual frontend rendering has not been checked.
 - MQTT publication counts are not EnOcean radio-transmission counts. Gateway cache behavior, firmware radio effects and the effect of status queries on linked HeatArea actuators remain unverified.
-- At the recorded branch state, phase 9 is implemented and CI-validated
-  but awaits review and a merge/release decision.
+- Phases 9 and 10 are merged (PR #7 and PR #8) after the `0.7.0.b2` pre-release tag (`b4f6abf`). They are not part of that tag; no release including them has been created yet.
 
 Thanks to @fubu2k for the quality improvements, @nlsrchtr for the OPUS motion-detector implementation, and @florian-hartung and the upstream maintainer for the sensor support and integration work.
 
