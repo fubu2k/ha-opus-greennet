@@ -595,6 +595,8 @@ tests/
 ├── test_config_flow_recovery.py # Recovery after every config flow error
 ├── test_translations.py         # Translation, exception key and service consistency
 ├── test_quality_scale.py        # quality_scale.yaml schema and rule evidence
+├── test_reference_baseline.py   # Fixed reference release, core commit and CI evidence
+├── test_traffic_baseline.py     # MQTT publish baseline per endpoint and trigger
 └── test_coverage_gate.py        # Per-module coverage gate
 script/
 └── check_coverage.py            # Per-module coverage gate used by CI
@@ -603,7 +605,7 @@ script/
 ### Testing
 
 ```bash
-python -m pip install -r requirements_test.txt
+python -m pip install -r requirements_test_reference.txt  # fixed reference
 ruff check .
 ruff format --check .
 python -m mypy
@@ -626,12 +628,18 @@ Motion starts unknown until a valid telegram arrives after restart.
 The v0.7.0b1 quality beta requires HA 2026.10.1 or newer, including for manual installation.
 Its combined suite contains 1,315 tests, with strict typing and per-module coverage gates.
 Users on older HA versions should keep stable v0.6.0 or upgrade HA first.
-CI resolves the latest stable Home Assistant release from PyPI on each run and
-tests that exact version, recorded in the workflow summary. It runs on pull
-requests, pushes to main, every Monday at 06:17 UTC, and manual dispatch. Beta
-releases and older HA versions are excluded from the test matrix. If a future
-stable release requires a newer Python version, CI fails explicitly until the
-runner is updated rather than silently testing an older HA release. CI enforces
+CI runs two test jobs. The fixed reference job installs
+`requirements_test_reference.txt` (Home Assistant 2026.10.2) on a pinned runner
+image, records Python, `pip freeze`, JUnit results, coverage and the MQTT
+publish baseline as a workflow artifact, and validates metadata with hassfest
+built from the matching home-assistant/core commit. The second job resolves the
+latest stable Home Assistant release from PyPI on each run and tests that exact
+version, recorded in the workflow summary; `hassfest@master` remains an
+additional moving signal. MQTT publish counts are not radio transmission counts.
+CI runs on pull requests, pushes to main, every Monday at 06:17 UTC, and manual
+dispatch. Beta releases and older HA versions are excluded from the test matrix.
+If a future stable release requires a newer Python version, CI fails explicitly
+until the runner is updated rather than silently testing an older HA release. CI enforces
 Ruff, dependency compatibility, strict mypy typing, Hassfest, a total coverage of
 at least 97 %, more than 95 % for every integration module and 100 % for the
 config flow (`script/check_coverage.py`). Lifecycle and race regression suites
