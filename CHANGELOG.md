@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.7.0b2] - 2026-10-19
 
-Quality series (phases 1-7) plus the device support of upstream v0.7.0b1 (kegelmeier/ha-opus-greennet), integrated into this fork's architecture. Existing entity IDs, unique IDs, device assignments, topics, services and wire payloads are unchanged.
+Quality series (phases 1-9) plus the device support of upstream v0.7.0b1 (kegelmeier/ha-opus-greennet), integrated into this fork's architecture. Existing entity IDs, unique IDs, device assignments, topics, services and wire payloads are unchanged.
 
 ### Breaking requirement
 - **Home Assistant 2026.10.1 or newer is required**, including for manual installation (HACS metadata and test dependencies enforce it). The integration uses `probatio` and Home Assistant APIs that are not available in 2026.9.4.
