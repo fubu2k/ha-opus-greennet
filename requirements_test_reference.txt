@@ -1,0 +1,7 @@
+# Fixed reference environment (implementation-plan.md, phase 8).
+# Change only in a reviewed phase; update REFERENCE_HA_VERSION and
+# REFERENCE_HA_CORE_SHA in .github/workflows/tests.yml and
+# tests/test_reference_baseline.py together.
+# home-assistant/core tag 2026.10.2 = commit 8d7fd8b68677c2585be36ec86043308f403875b8
+-r requirements_test.txt
+homeassistant==2026.10.2
