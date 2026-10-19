@@ -4,7 +4,8 @@
   `test/opus-q12-late-responses`, CI green (run `39313178932`, section 9);
   part B (option M6, diagnostic-only marker, approved by the maintainer on
   2026-10-19 after part A) on branch `feat/opus-q12-late-answer-diagnostics`,
-  stacked on part A (section 13). Awaiting review. Not merged, no PR. No
+  stacked on part A (section 13), CI green (run `39314655845`). Awaiting
+  review. Not merged, no PR. No
   version change, no release, no CHANGELOG entry.
 - **Branches:** `test/opus-q12-late-responses` (part A, head `dc0851f`),
   `feat/opus-q12-late-answer-diagnostics` (part B, base `dc0851f`)
@@ -229,7 +230,8 @@ next device report.
 
 ## 12. Review status and next step
 
-Awaiting review of both branches; part A CI green, part B CI pending. Merge
+Awaiting review of both branches; CI green on both (part A run
+`39313178932`, part B run `39314655845`). Merge
 and release authorisation remain separate. Part B depends on part A (stacked);
 merge part A first or review both together. Next planned phase: phase 13
 (final rule audit); the per-entity inventory of resumed phase 6 stays open.
@@ -307,4 +309,8 @@ identical with M6.
 | `pytest tests/test_late_answer_diagnostics.py tests/test_late_responses.py`, three repetitions | 37 passed each time | local smoke run with the stand-in described in section 9, **not authoritative** |
 | Branch coverage of `mqtt_transport.py` (smoke run, transport and diagnostics suites only, coverage.py 7.13.0 from source) | 98 %; every new line and branch covered; the 6 missed lines are pre-existing and covered by other suites in CI | local |
 | Whole test directory under the stand-in, base `7c9c67c` (part A code) versus part B | identical set of failing and erroring cases (all caused by the stand-in: light/cover constants, real-HA fixtures); 1201 passed on part B | local |
-| Strict mypy, full pytest with real Home Assistant, coverage gates, hassfest | not executed locally (PyPI unreachable; local mypy cannot parse Python 3.14 syntax) | CI pending |
+| Strict mypy, full pytest with real Home Assistant, coverage gates, hassfest | not executed locally (PyPI unreachable; local mypy cannot parse Python 3.14 syntax) | – |
+| pip check, Ruff, strict mypy, full pytest incl. both phase 12 suites, total and per-module coverage gates, three race repetitions incl. `test_late_responses.py`, `test_late_answer_diagnostics.py` and `test_traffic_baseline.py`, traffic baseline summary | passed | CI, job "Home Assistant 2026.10.2 (fixed reference)" `118272881525`, run `39314655845` (workflow_dispatch, head `14e5960`), 2026-10-19 21:53–22:02 +0200 |
+| Same gates against the latest stable release | passed | CI, job "Home Assistant (latest stable)" `118272882027`, same run |
+| Hassfest built from core `8d7fd8b` and icon validation | passed | CI, job "Hassfest at Home Assistant 2026.10.2 (fixed reference)" `118272881825`, same run |
+| Hassfest `@master` (moving) | passed | CI, job "validate" `118272881888`, same run |
