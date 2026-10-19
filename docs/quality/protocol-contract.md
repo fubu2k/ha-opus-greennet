@@ -118,7 +118,9 @@ without their own valid channel are then dropped (`_parse_channel_id`). **[Code]
 | `lock` | `locked`/`unlocked` | – | **sets `None`** |
 | `unlockRequest`, AutoLock `unlock` | `requested`/`notRequested`, bool | – | **sets `None`** |
 | `mechanicsFault`, AutoLock `mechanics` | `error`/`ok`, bool | – | **sets `None`** |
-| `temperature`, `temperatureSetpoint` | 0–40 | **sets `None`** | ignored |
+| `temperature`, `temperatureSetpoint` | 0–40 (HeatArea, A5-04-01) | **sets `None`** | ignored |
+| `temperature` on A5-04-02/03 | −20–60 | **sets `None`** | ignored |
+| `contact` (D5-00-01 only) | `open` → on / `closed` → off | – | **sets `None`** |
 | `humidity` | 0–100 | **sets `None`** | ignored |
 | `feedTemperature` | 0–80 | **sets `None`** | ignored |
 | `energyConsumption` | 0–10 | **sets `None`** | ignored |
@@ -132,6 +134,7 @@ without their own valid channel are then dropped (`_parse_channel_id`). **[Code]
 | `missingTemperature` | `info` / `warning` / `error` / `reset` | ignored | ignored |
 | `circuitInUse` | `error` / `reset` | ignored | ignored |
 | `buttonA0`, `buttonAI`, `buttonB0`, `buttonBI`, `multipleButtons` | `pressed` / `released` | – | ignored |
+| OPUS motion detector (F6-02-01 + A5-04-01): `buttonAI` / `buttonA0` | `pressed` → motion on / off; `released` keeps the state | – | ignored |
 
 Profile-bound aliases (IQ-DOT 1.21.30): `alarm` only for F6-05-02,
 `motionDetected`/`illumination` only for A5-07-01/03, `handle` only for handle
@@ -211,8 +214,10 @@ Device identifier: `(opus_greennet, "<EAG>_<DEV>")`; gateway: `(opus_greennet, "
 | lock | D2-06-40 | `<EAG>_<DEV>_autolock` (read-only) | enabled |
 | sensor | HeatArea: `humidity`; D1-4B-05: `feed_temperature`; D1-4B-07: `energy_consumption`; SMS: `illuminance`, `supply_voltage`, `battery_level`; handle: `handle_state` | `<EAG>_<DEV>_<suffix>` | enabled |
 | sensor | D2-06-40: `unlock_request` (diagnostic, phase 6) | `<EAG>_<DEV>_unlock_request` | **disabled for new registry entries**; existing entries unchanged |
+| sensor | A5-04-01/02/03 and OPUS motion detector (F6-02-01 + A5-04-01): `temperature`, `humidity`, `battery_level` (upstream v0.6.0/v0.7.0b0) | `<EAG>_<DEV>_<suffix>` | enabled |
 | sensor | **every** discovered device: `signal_strength` | `<EAG>_<DEV>_signal_strength` | **disabled** |
 | binary_sensor | SMS: `motion`; handle: `handle_open`, `handle_tilt`, `handle_closed`; RWM: `smoke_alarm`, `battery_low`; descriptions: `liquid_detected` (F6-05-01), `window_open`, `actuator_not_responding`, `missing_temperature` (HeatArea), `actuator_low_battery`, `actuator_deactivated` (D1-4B-05), `circuit_in_use` (D1-4B-06) | `<EAG>_<DEV>_<key>` | enabled |
+| binary_sensor | D5-00-01: `contact` (description, opening); OPUS motion detector: `motion` (upstream v0.6.0/v0.7.0b0) | `<EAG>_<DEV>_<key>` | enabled |
 | binary_sensor | D2-06-40: `mechanics_fault` (diagnostic, phase 6) | `<EAG>_<DEV>_mechanics_fault` | **disabled for new registry entries**; existing entries unchanged |
 
 Registry migrations (existing, unchanged): legacy multi-channel
