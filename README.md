@@ -42,7 +42,7 @@ A custom Home Assistant integration for the Opus GreenNet Bridge, enabling contr
 | **Switch** | D2-01-00, D2-01-01, D2-01-04, D2-01-05, D2-01-08, D2-01-09, D2-01-0C, D2-01-0D, D2-01-0E, D2-01-11 | On/Off switches and actuators |
 | **Cover** | D2-05-00, D2-05-01, D2-05-02 | Blinds, shades, and shutters |
 | **Climate** | D1-4B-05, D1-4B-06, D1-4B-07 | OPUS HeatArea thermostats (Valve, CosiTherm, Electro Heating) |
-| **Sensor** | A5-04-01, A5-04-02, A5-04-03, A5-07-01, A5-07-03, _(from climate devices)_ | Temperature and humidity (A5-04-01/02/03, including the OPUS motion detector), illuminance, supply voltage, battery level, humidity, feed temperature, power consumption, signal strength |
+| **Sensor** | A5-04-01, A5-04-02, A5-04-03, A5-07-01, A5-07-03, _(from climate devices)_ | Temperature and humidity (A5-04-01/02/03, including the OPUS motion detector), illuminance, supply voltage (SMS, diagnostic), battery level (shown in whole percent), humidity, feed temperature, power consumption, signal strength |
 | **Binary Sensor** | D5-00-01, F6-05-01, F6-05-02, A5-07-01, A5-07-03, F6-02-01 + A5-04-01, _(from climate devices)_ | Contact open/closed state, SMS motion detection, OPUS motion detector (`buttonAI` = motion, `buttonA0` = no motion), water leak detection, RWM smoke alarm and low battery, window open, actuator errors, battery low |
 | **Handle sensors** | D2-06-40, F6-10-00, D2-03-10 | Handle position plus separate open, tilted and closed binary sensors |
 | **Lock** | D2-06-40 | Read-only AutoLock status, unlock-request sensor and mechanics-fault binary sensor |
@@ -102,6 +102,20 @@ mechanics fault. Unknown or unavailable values show neutral icons (a question
 mark or a plain cog) and never a closed window, a lock or a healthy state.
 The Open and Tilted binary sensors keep Home Assistant's window icons. Icons
 you selected yourself for an entity take precedence and are not changed.
+
+### Supply voltage and battery level
+
+The supply voltage of SMS presence detectors (A5-07-01/03) is device
+telemetry and appears under **Diagnostic** on the device page. It stays
+enabled; an existing entity keeps its entity ID, name, icon and enablement, so
+automations that use it continue to work.
+
+Battery levels of all OPUS devices that report one (SMS presence detectors,
+A5-04 temperature/humidity sensors and the OPUS motion detector) are shown in
+whole percent, for example `88 %` instead of `87.5 %`. Only the display is
+rounded: the entity state, history and long-term statistics keep the reported
+value. A display precision you set yourself in the entity settings takes
+precedence. Neither change sends a request to the device.
 
 ## Removing or replacing a device
 
@@ -890,6 +904,7 @@ tests/
 ├── test_scalar_telemetry.py      # Immediate battery and signal-strength updates
 ├── test_window_handles.py        # Handle positions and protected AutoLock actions
 ├── test_handle_diagnostics.py    # Unlock request / mechanics fault diagnostic defaults
+├── test_sensor_metadata.py       # SMS voltage diagnostic, whole-percent battery display
 ├── test_opus_motion_detector.py  # OPUS motion detector (F6-02-01 + A5-04-01)
 ├── test_upstream_backport.py     # New profiles under the fork guardrails (A1/A4/A5)
 ├── test_device_removal.py        # Child removal, rediscovery and request isolation

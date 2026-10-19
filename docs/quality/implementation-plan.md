@@ -142,7 +142,8 @@ Suggested branch names below do not imply existing branches.
 | 3 | `fix/opus-q03-event-lifecycle` | `16d9a45777cef8891fe8772963c8827b8a479798` | Completed |
 | 4 | `fix/opus-q04-background-efficiency` | `8ece6eaf7be8ce7ccdbf5c9cf54cb93449a10ea7` | Completed |
 | 5 | `feat/opus-q05-strict-typing` | `bf2ad417559cdaee3b695274a37455476a356e6c` | Completed |
-| 6 | `feat/opus-q06-entity-metadata` | `feabed53b5761104e9ed917c0dc44b2afb584df7` | Completed: mandatory handle diagnostics (PR #2, see `phases/phase-06.md`); remaining metadata review open |
+| 6 | `feat/opus-q06-entity-metadata` | `feabed53b5761104e9ed917c0dc44b2afb584df7` | Completed: mandatory handle diagnostics (PR #2, see `phases/phase-06.md`) |
+| 6 (metadata) | `fix/opus-q06-metadata` | `8001d8b2cfe657dddfee8eaaa5eae68bd4b15149` | Implemented, awaiting CI and review: SMS supply voltage diagnostic, whole-percent battery display (see `phases/phase-06.md`) |
 | 7 | `feat/opus-quality-scale-evidence` | `f4008667c0d42b202554fb0849ee3226b81b011a` | Completed |
 
 Historical phase reports remain evidence of what actually ran. Do not imply
@@ -192,6 +193,15 @@ are listed in diagnostics; per-device health stays separate from gateway
 health (protocol contract section 7.1). Completed: CI green (runs
 `39306729854` and `39306899304`), merged via PR #9 (`e7c5248`), CHANGELOG
 0.7.0b2 (`07f75e9`). The remaining metadata review of resumed phase 6 stays open.
+
+Status update 2026-10-19 (resumed phase 6, metadata review): implemented on
+branch `fix/opus-q06-metadata` from `main` `8001d8b`, report
+`phases/phase-06.md` section "Metadata review". Maintainer decisions: the SMS
+(A5-07-01/03) `supply_voltage` sensor becomes `EntityCategory.DIAGNOSTIC` and
+stays enabled; every `battery_level` sensor suggests display precision 0
+(whole percent, display only). No new entity, request or wire change. Tests not
+run locally (no package index in the authoring environment); CI pending, not
+merged. The full per-entity inventory of section 10 stays open.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
@@ -302,6 +312,25 @@ phase. Recheck category/class/default/translation/icon rules across all entities
 
 Acceptance: both required diagnostics correctly classified and disabled for NEW
 entries, existing user settings preserved, no extra radio communication.
+
+### Metadata decisions (added 2026-10-19, branch `fix/opus-q06-metadata`)
+
+| Entity | Decision | New-entry default | Rationale |
+|--------|----------|-------------------|-----------|
+| SMS (A5-07-01/03) `supply_voltage` sensor | `EntityCategory.DIAGNOSTIC` | enabled (unchanged) | Device telemetry, not everyday operation; voltage class, unit and unique ID unchanged. |
+| Every `battery_level` sensor (SMS, A5-04-01/02/03, OPUS motion detector) | `suggested_display_precision = 0` | enabled (unchanged), no category | Whole-percent display. State, history and statistics are not rounded; a user `display_precision` wins. |
+
+- The category is integration-owned registry metadata: existing entries take
+  it on the next setup but keep `disabled_by`, entity ID, name, icon and area
+  (A5). The suggested precision is stored as a sensor registry option and is
+  overridden by a user-set display precision.
+- Supply voltage is not disabled by default: this review is not an automatic
+  disablement decision. Battery levels stay ordinary (non-diagnostic) readings.
+- No parsing, coordinator, transport, timing, topic, translation or icon
+  change; no new publish (A1). Tests: `tests/test_sensor_metadata.py`.
+- Still open: the complete per-entity inventory (purpose, class, state class,
+  category, translation key, icon, default, update frequency), RSSI and the
+  overlapping handle projections.
 
 ## 11. Concrete icon policy and implementation guide (added in revision 3)
 

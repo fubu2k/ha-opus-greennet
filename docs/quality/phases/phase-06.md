@@ -1,4 +1,14 @@
-# Phase 6 (resumed) - Handle diagnostics: category and safe default exposure
+# Phase 6 (resumed) - Handle diagnostics and entity metadata review
+
+This report has two deliveries:
+
+1. **Handle diagnostics** (part 1):
+   completed, merged via PR #2.
+2. **Metadata review** (section "Part 2 - Metadata review"): SMS supply
+   voltage diagnostic and whole-percent battery display. Implemented on branch
+   `fix/opus-q06-metadata`, awaiting CI and review, not merged.
+
+# Part 1 - Mandatory handle diagnostics
 
 - **Status:** completed. CI green; approved by the maintainer on 2026-10-19 and
   merged via PR #2. No version change, no release.
@@ -7,8 +17,8 @@
   15:12 +0200, "Add files via upload")
 - **Plan:** `implementation-plan.md` revision 3, section 10 "Mandatory
   window-handle diagnostics". The remaining metadata review of section 10 and
-  the icon work of section 11 are **not** part of this delivery.
-
+  the icon work of section 11 were **not** part of this delivery (icons were
+  delivered in phase 9; the metadata review is continued in part 2).
 ## Changes since the reference baseline
 
 Reviewed main HEAD in the plan: `63c7380`. Commits since then:
@@ -155,17 +165,166 @@ does not exist yet (phase 8).
   `entity-disabled-by-default` comment extended. No rule status changed.
 - `docs/quality/implementation-plan.md`: phase 6 status row.
 
-## Not done / residual risks
+## Not done / residual risks (part 1, as recorded at merge)
 
 - Remaining section 10 metadata review (RSSI, voltage, overlapping handle
-  projections, full per-entity inventory) is open.
-- Icon policy (section 11) is not implemented; no `icons.json`.
+  projections, full per-entity inventory) was open; see part 2.
+- Icon policy (section 11) was not implemented in part 1; delivered later in
+  phase 9 (`phases/phase-09.md`).
 - No hardware or frontend visual check; backend tests do not prove rendering.
 
-## Review status
+## Review status (part 1)
 
 CI green and approved by the maintainer; merged into `main` via PR #2. Release
 and versioning remain separate; no version or CHANGELOG change was made.
 
-Next phase per plan order: phase 8 (reproducible baseline and traffic
-evidence). The remaining section 10 metadata review stays open.
+# Part 2 - Metadata review: SMS supply voltage and battery display
+
+- **Status:** implemented, **awaiting CI and review, not merged**.
+- **Branch:** `fix/opus-q06-metadata` (created for this delivery)
+- **Base SHA:** `8001d8b2cfe657dddfee8eaaa5eae68bd4b15149` (`main`,
+  "docs: record phase 11 CI evidence"). Phases 8, 9, 10 and 11 are on `main`
+  at this base; nothing in them is changed here.
+- **Plan:** `implementation-plan.md` section 10 "Remaining metadata review",
+  new subsection "Metadata decisions (added 2026-10-19)".
+
+## Verification of part 1 at the new base
+
+Re-checked on `main` `8001d8b` before editing:
+
+| Requirement (plan section 10) | Evidence at `8001d8b` | Result |
+|-------------------------------|-----------------------|--------|
+| `unlock_request` diagnostic, disabled for new entries | `sensor.py` `OpusGreenNetHandleSensor` | present |
+| `mechanics_fault` diagnostic, disabled for new entries | `binary_sensor.py` (`entity_category=DIAGNOSTIC`, `enabled_by_default=False`) | present |
+| Tests for categories, new-entry defaults, preserved enabled/disabled entries, no request on activation | `tests/test_handle_diagnostics.py` (4 tests) | present |
+| README, protocol inventory, evidence, `quality_scale.yaml` | README "HOPPE window handles"; contract section 8; evidence rows `entity-category`, `entity-disabled-by-default` | present |
+| Icons (section 11) | `icons.json` (phase 9) | present |
+
+Part 1 is fully on `main`. Open from section 10 was only the metadata review.
+
+## Scope and authorised behaviour change (maintainer request, 2026-10-19)
+
+| Entity | Profiles | Change | New-entry default |
+|--------|----------|--------|-------------------|
+| `supply_voltage` sensor ("Versorgungsspannung") | SMS presence detectors A5-07-01, A5-07-03 | `EntityCategory.DIAGNOSTIC` | enabled (unchanged) |
+| `battery_level` sensor ("Batteriestand") | every device that has one: SMS A5-07-01/03, A5-04-01/02/03 temperature/humidity sensors, OPUS motion detector (F6-02-01 + A5-04-01) | `suggested_display_precision = 0` (whole percent) | enabled, no category (unchanged) |
+
+Verified before editing: `supply_voltage` is created only in the
+`device.is_presence_detector` branch (A5-07-01/03); `battery_level` is created
+only by `OpusGreenNetMeasurementSensor` (SMS branch and the A5-04 branch, which
+also covers the OPUS motion detector). No other platform exposes a numeric
+battery level (RWM `battery_low` and HeatArea `actuator_low_battery` are binary
+sensors and unaffected).
+
+### Code
+
+- `sensor.py`:
+  - `OpusGreenNetMeasurementSensor` gains keyword-only `entity_category`
+    (default `None`). Only the SMS `supply_voltage` construction passes
+    `EntityCategory.DIAGNOSTIC`; illuminance and battery level pass `None`.
+  - New constant `MEASUREMENT_DISPLAY_PRECISION = {"battery_level": 0}`; the
+    sensor sets `_attr_suggested_display_precision` from it. Keyed by suffix,
+    so every battery level sensor is covered, whichever device creates it.
+- Unchanged: unique IDs, translation keys, device classes, units, state
+  classes, parsing in `enocean_device.py`, coordinator fast path for
+  `batteryLevel`, transport, timing, topics, services, translations, icons.
+
+## Registry and display semantics (A5)
+
+Checked against Home Assistant source, tag `2026.10.2`
+(`8d7fd8b68677c2585be36ec86043308f403875b8`), `components/sensor/__init__.py`:
+
+- `entity_category` is integration-owned: an existing `supply_voltage` entry
+  takes `DIAGNOSTIC` on the next setup (same mechanism as part 1), while
+  `disabled_by`, entity ID, name, icon, area and labels stay as the user set
+  them. Nothing is disabled or deleted.
+- `_update_suggested_precision` stores `suggested_display_precision` as a
+  `sensor` registry option. `_display_precision` / `async_rounded_state` use a
+  user-set `display_precision` first, so a user choice wins.
+- The precision is presentation only: the state machine value (for example
+  `87.5`), recorder history and long-term statistics are not rounded.
+  Automations with numeric triggers are unaffected.
+
+## Guardrails A1-A5
+
+| ID | Effect |
+|----|--------|
+| A1 | No new publish, query, poller, interval or retry. Category and display precision are registry metadata. Tests assert no topic addressed to the device on creation and on rediscovery with existing entries. |
+| A2 | Availability logic untouched. |
+| A3 | No timeout, queue or cooldown change. |
+| A4 | Retain handling untouched. |
+| A5 | Unique IDs, entity IDs, device assignment, enablement and user customisations (name, icon, display precision) preserved; see tests. |
+
+Battery: the category and display changes are **not** a battery saving and do
+not change device traffic. No hardware observation was made.
+
+## Tests
+
+New `tests/test_sensor_metadata.py`:
+
+- `test_measurement_metadata_is_scoped`: `supply_voltage` is diagnostic and
+  enabled by default with unchanged unique ID/device class and no precision;
+  battery levels (SMS and A5-04) suggest precision 0, no category, enabled;
+  illuminance unchanged.
+- `test_new_sms_registers_voltage_diagnostic_and_whole_battery`
+  (A5-07-01, A5-07-03): new `supply_voltage` entry is diagnostic, enabled and
+  shows the reported value; `battery_level` registry option
+  `suggested_display_precision == 0`, state stays `87.5`, rounded presentation
+  `88`; illuminance and motion keep their metadata; no request to the device.
+- `test_every_battery_level_suggests_whole_percent`
+  (temperature/humidity A5-04-03, OPUS motion detector): precision 0, no
+  category, enabled, no request to the device.
+- `test_existing_sms_entries_keep_user_settings` (enabled, user-disabled):
+  a pre-existing `supply_voltage` entry keeps entity ID, enablement, custom
+  name and icon, becomes diagnostic and is not duplicated; a pre-existing
+  `battery_level` entry with a user `display_precision` of 1 keeps it and is
+  presented as `87.5`; no request to the device.
+
+Existing tests are unchanged. `test_upstream_backport.py` still asserts that
+A5-04 and OPUS motion `battery_level` entries are enabled and uncategorised,
+and `test_device_removal.py` still sees the unrounded state `85.0`.
+
+## Gate results
+
+| Gate | Result | Origin |
+|------|--------|--------|
+| `ruff check .` | passed | local, ruff 0.16.9 (CI pins 0.16.3) |
+| `ruff format --check .` | passed (94 files) | local, ruff 0.16.9 |
+| `python -m mypy` | **not run locally** | pending CI |
+| `pytest -v --cov ...`, `script/check_coverage.py` | **not run locally** | pending CI |
+| Three lifecycle/race repetitions | **not run locally** | pending CI |
+| hassfest | **not run locally** | pending CI |
+
+The authoring environment had no access to the Python package index, so
+Home Assistant, pytest and mypy could not be installed. No test result is
+claimed for part 2 until the CI run on the pull request (fixed reference
+2026.10.2 and latest stable jobs) is green. Record the run ID here after CI.
+
+## Documentation updated
+
+- `README.md`: supported device table and new subsection "Supply voltage and
+  battery level" (diagnostic placement, whole-percent display, display-only
+  rounding, user precision wins, no device request).
+- `docs/quality/protocol-contract.md` section 8: separate inventory row for
+  the SMS `supply_voltage` diagnostic; display precision paragraph.
+- `docs/quality/quality-scale-evidence.md`: `entity-category` row extended.
+- `docs/quality/implementation-plan.md`: section 6 row, section 7 status,
+  section 10 subsection "Metadata decisions".
+- `quality_scale.yaml`: no change (no rule status changes).
+
+## Not done / residual risks
+
+- Full per-entity inventory of section 10 (purpose, class, state class,
+  category, translation key, icon, default, update frequency) is still open,
+  as are the RSSI and overlapping handle projection reviews.
+- No frontend visual check: tests verify the registry option and HA's
+  `async_rounded_state`, not the rendered dashboard.
+- Dashboards: auto-generated dashboards list diagnostic entities separately;
+  manually built dashboards that reference the voltage entity are unaffected.
+- No hardware observation.
+
+## Review status
+
+Implemented on `fix/opus-q06-metadata`; awaiting CI and maintainer review.
+Merge, versioning and CHANGELOG remain separate and are not part of this
+change.
