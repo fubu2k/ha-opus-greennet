@@ -461,10 +461,14 @@ zone does not by itself prove that it is currently heating.
 Entries on the REST transport keep one HTTP event stream to the gateway open
 (`GET /devices/stream`). Every stream starts with the complete device list,
 which resynchronises all state, and then delivers each telegram as the gateway
-handles it. If the stream ends, it is reopened immediately; if the gateway
-cannot be reached, entities become unavailable and the connection is retried
-with increasing pauses (1 to 60 seconds). A stream without any data for 15
-minutes is reopened.
+handles it. If the stream ends, it is reopened after a short pause; if the
+gateway cannot be reached, entities become unavailable. The pause starts at 1
+second, doubles after every attempt up to 60 seconds and is lengthened by a
+random share of up to 25 %. A stream that closes within 10 seconds of
+connecting counts as a failed attempt, so a gateway that closes every
+connection at once cannot cause a reconnect loop; a stream that stayed open
+longer starts the pauses again at 1 second. Rejected credentials are not
+retried. A stream without any data for 15 minutes is reopened.
 
 The health check reads the gateway uptime about every 60 seconds, as with MQTT.
 It marks entities unavailable when the gateway stops answering, and reopens the
@@ -1075,6 +1079,7 @@ tests/
 ├── test_rest_devices.py         # REST device lists, resynchronisation and refresh
 ├── test_rest_requests.py        # REST health probe, reauth and request priorities
 ├── test_rest_stream.py          # REST event stream lifecycle and reconnects
+├── test_rest_stream_backoff.py  # REST stream backoff with jitter, short-lived streams, connection generation
 ├── test_rest_telegrams.py       # REST telegrams, foreign commands and own echoes
 ├── test_rest_edge_cases.py      # REST coordinator edge cases
 ├── test_rest_lifecycle.py       # End-to-end REST lifecycle through Home Assistant

@@ -517,7 +517,14 @@ never repeated and are dropped when superseded or queued before an outage.
   device object (`content = "device"`) is live feedback. Other content types
   are ignored. **[HW-upstream][Code][Test]**
 - Documents are written back to back without delimiters; `JsonDocumentSplitter`
-  cuts them (maximum 8 MB per document). **[HW-upstream][Code][Test]**
+  cuts them. Every document is limited to 8 MB (8 388 608 characters), whether
+  it arrives in one chunk or grows across several (phase 18/R4, finding B-3);
+  a larger document fails the stream, which is reopened with the backoff of
+  12.4. **[HW-upstream][Code][Test]**
+- One reader per entry. Each started reader gets a new connection
+  generation; a reader replaced by a restart (failed probe, falling uptime)
+  applies no further document, changes no availability and closes its HTTP
+  response at once (`contextlib.aclosing`). **[Code][Test]**
 - Battery level is not streamed; it comes from the device list. Status replies
   that do not change state are not streamed. **[HW-upstream]**
 - There are no retained messages on REST. Section 6 (A4) therefore does not
@@ -530,8 +537,14 @@ never repeated and are dropped when superseded or queued before an outage.
 - `available` = not unloaded and gateway available. Available after setup and
   whenever a stream connects; unavailable when a stream connection attempt or
   the health check fails, or the credentials are rejected. A stream that ends
-  after it connected is reopened immediately without becoming unavailable;
-  retry pauses after failed attempts 1, 2, 5, 10, 30, 60 s. **[Code][Test]**
+  after it connected does not make the gateway unavailable. Every stream end
+  is followed by a pause (phase 18/R4, finding B-2): nominal 1, 2, 4, 8, 16,
+  32, 60 s (bounded exponential), each lengthened by a random 0–25 % (jitter),
+  so never shorter than nominal and never longer than 75 s. A stream that
+  delivered its device list but ended within 10 s counts as a failed attempt;
+  only a stream open for at least 10 s resets the schedule to 1 s. Rejected
+  credentials (401/403) end the reader without another attempt.
+  **[Code][Test]**
 - The health check describes the gateway only and never confirms or changes a
   device state. A falling uptime (gateway restart) or a failed check replaces
   the stream. **[Code][Test]**

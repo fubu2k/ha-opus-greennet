@@ -33,7 +33,9 @@ import asyncio
 import heapq
 import itertools
 import logging
+import random
 from collections.abc import Callable, Coroutine, Sequence
+from contextlib import aclosing
 from datetime import datetime, timedelta
 from time import monotonic, time
 from typing import Final
@@ -92,9 +94,21 @@ _LOGGER = logging.getLogger(__name__)
 # a read of the gateway's device model and causes no radio telegram (protocol
 # contract section 12.2).
 DEVICE_LIST_REFRESH_INTERVAL = timedelta(minutes=30)
-# Pause before the next stream attempt after consecutive failures (seconds).
-# A stream that ended after it had connected is reopened immediately.
-STREAM_RETRY_DELAYS = (1.0, 2.0, 5.0, 10.0, 30.0, 60.0)
+# Reconnecting the event stream (phase R4, finding B-2). Every new stream
+# starts with the complete device list, so each attempt is a full download
+# from the gateway (no radio telegram). The pause before the next attempt
+# grows exponentially from STREAM_BACKOFF_INITIAL to STREAM_BACKOFF_MAX
+# seconds and is lengthened by a random share of up to STREAM_BACKOFF_JITTER,
+# so it is never shorter than the nominal value. A pause is taken after every
+# stream, also after one that connected: a stream that ended within
+# STREAM_MIN_HEALTHY_SECONDS of its first document counts as a failure, so a
+# gateway that closes every connection right after the device list cannot
+# cause a tight reconnect loop. Only a stream that stayed open longer resets
+# the backoff.
+STREAM_BACKOFF_INITIAL = 1.0
+STREAM_BACKOFF_MAX = 60.0
+STREAM_BACKOFF_JITTER = 0.25
+STREAM_MIN_HEALTHY_SECONDS = 10.0
 # A telegram from a device missing in the device list triggers one lookup of
 # that device; failed lookups are retried after this many seconds.
 UNKNOWN_DEVICE_RETRY_SECONDS = 3600.0
@@ -112,6 +126,24 @@ OWN_COMMAND_ECHO_SECONDS = 2.0
 PRIORITY_COMMAND: Final = 0
 PRIORITY_QUERY: Final = 10
 PRIORITY_BACKGROUND: Final = 20
+
+
+def stream_retry_delay(failures: int, random_share: float | None = None) -> float:
+    """Return the pause in seconds before the next event stream attempt.
+
+    ``failures`` counts the stream attempts since the last healthy stream.
+    The nominal pause doubles with every failure up to ``STREAM_BACKOFF_MAX``;
+    a random share (0 to 1, drawn when ``random_share`` is None) adds up to
+    ``STREAM_BACKOFF_JITTER`` of it, so several Home Assistant instances that
+    lost the same gateway do not reconnect in lockstep.
+    """
+    nominal = min(
+        STREAM_BACKOFF_MAX,
+        STREAM_BACKOFF_INITIAL * 2.0 ** min(max(failures, 0), 32),
+    )
+    share = random.random() if random_share is None else random_share
+    share = min(max(share, 0.0), 1.0)
+    return nominal * (1.0 + STREAM_BACKOFF_JITTER * share)
 
 
 class PriorityLock:
@@ -193,6 +225,10 @@ class OpusGreenNetRestCoordinator:
         self._gateway_available = False
         self._stream_connected = False
         self._stream_task: asyncio.Task[None] | None = None
+        # Incremented for every new stream reader. A replaced reader may still
+        # hold documents it parsed before its cancellation takes effect; it
+        # drops them instead of applying stale state (phase R4).
+        self._stream_generation = 0
         self._probe_task: asyncio.Task[None] | None = None
         self._refresh_task: asyncio.Task[None] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
@@ -334,7 +370,10 @@ class OpusGreenNetRestCoordinator:
     def _start_stream(self) -> None:
         if self._unloaded or self._auth_failed:
             return
-        self._stream_task = self._create_task(self._async_run_stream(), "stream")
+        self._stream_generation += 1
+        self._stream_task = self._create_task(
+            self._async_run_stream(self._stream_generation), "stream"
+        )
 
     @callback
     def _restart_stream(self) -> None:
@@ -344,36 +383,67 @@ class OpusGreenNetRestCoordinator:
         self._stream_connected = False
         self._start_stream()
 
-    async def _async_run_stream(self) -> None:
-        """Keep the event stream open until unload."""
+    def _is_current_stream(self, generation: int) -> bool:
+        """Return whether ``generation`` is the reader that may apply state."""
+        return not self._unloaded and generation == self._stream_generation
+
+    async def _async_run_stream(self, generation: int) -> None:
+        """Keep the event stream open until unload or replacement.
+
+        Only the reader of the current ``generation`` applies documents and
+        changes availability. A pause from ``stream_retry_delay`` follows every
+        stream; ``failures`` is reset only by a stream that stayed open for at
+        least ``STREAM_MIN_HEALTHY_SECONDS``. Rejected credentials end the
+        reader without another attempt.
+        """
         failures = 0
-        while not self._unloaded:
-            connected = False
+        while self._is_current_stream(generation):
+            connected_at: float | None = None
             try:
-                async for document in self.client.async_stream():
-                    if not connected:
-                        connected = True
-                        failures = 0
-                        self._stream_connected = True
-                        _LOGGER.debug("OPUS event stream connected for %s", self.eag_id)
-                    self._handle_document(document)
-                    if not self._gateway_available:
-                        self._set_gateway_available(True)
+                # ``aclosing`` releases the HTTP response as soon as a replaced
+                # reader leaves the loop, not only when the generator is
+                # garbage collected.
+                async with aclosing(self.client.async_stream()) as stream:
+                    async for document in stream:
+                        if not self._is_current_stream(generation):
+                            return
+                        if connected_at is None:
+                            connected_at = monotonic()
+                            self._stream_connected = True
+                            _LOGGER.debug(
+                                "OPUS event stream connected for %s", self.eag_id
+                            )
+                        self._handle_document(document)
+                        if not self._gateway_available:
+                            self._set_gateway_available(True)
                 _LOGGER.debug("OPUS event stream for %s ended", self.eag_id)
             except OpusAuthError:
-                self._stream_connected = False
-                self._handle_auth_failure()
+                if self._is_current_stream(generation):
+                    self._stream_connected = False
+                    self._handle_auth_failure()
                 return
             except OpusApiError as err:
                 _LOGGER.debug("OPUS event stream for %s failed: %s", self.eag_id, err)
             except Exception:
                 _LOGGER.exception("Unexpected error in the OPUS event stream")
+            if not self._is_current_stream(generation):
+                return
             self._stream_connected = False
-            if connected:
-                # Reconnect immediately; the next stream resynchronises state.
-                continue
-            self._set_gateway_available(False)
-            delay = STREAM_RETRY_DELAYS[min(failures, len(STREAM_RETRY_DELAYS) - 1)]
+            if connected_at is None:
+                # No document arrived: the gateway cannot be used right now.
+                self._set_gateway_available(False)
+            elif monotonic() - connected_at >= STREAM_MIN_HEALTHY_SECONDS:
+                failures = 0
+            else:
+                # The gateway answers but closed the stream right away. The
+                # entities stay available (the device list just arrived); the
+                # attempt still counts towards the backoff (finding B-2).
+                _LOGGER.debug(
+                    "OPUS event stream for %s closed after less than %s s",
+                    self.eag_id,
+                    STREAM_MIN_HEALTHY_SECONDS,
+                )
+            delay = stream_retry_delay(failures)
             failures += 1
             await asyncio.sleep(delay)
 

@@ -394,14 +394,14 @@ auf unbekannt. Zustandsverantwortung: genau ein Speicher je Eintrag
 
 | Anforderung | Ist [Code] | Soll / Phase |
 |-------------|-----------|--------------|
-| Ein Reader je Gateway, an den Eintrag gebunden | ein `_stream_task` über `hass.async_create_background_task`, beim Unload abgebrochen und abgewartet | bleibt; Verbindungsgeneration gegen Rückläufer eines ersetzten Streams (R4) |
+| Ein Reader je Gateway, an den Eintrag gebunden | ein `_stream_task` über `hass.async_create_background_task`, beim Unload abgebrochen und abgewartet | bleibt; Verbindungsgeneration gegen Rückläufer eines ersetzten Streams (R4, **umgesetzt** Phase 18) |
 | Nachrichten ≠ Chunks, UTF-8-Grenzen | `JsonDocumentSplitter` mit inkrementellem UTF-8-Decoder, Zustand über Chunks | bleibt |
 | Leere/fehlerhafte/unbekannte Nachrichten | Nicht-Objekte übersprungen, unbekannte Typen ignoriert, Fremdzeichen → Fehler → Neuverbindung | bleibt |
-| Übergroße Nachrichten | Grenze 8 MB nur für über Chunks wachsende Reste (B-3) | auch vollständige Dokumente prüfen (R4) |
-| EOF/Abbruch | Neuverbindung | Mindestpause und Backoff auch nach kurzlebigen Verbindungen (B-2, R4) |
+| Übergroße Nachrichten | Grenze 8 MB nur für über Chunks wachsende Reste (B-3) | auch vollständige Dokumente prüfen (R4, **umgesetzt** Phase 18) |
+| EOF/Abbruch | Neuverbindung | Mindestpause und Backoff auch nach kurzlebigen Verbindungen (B-2, R4, **umgesetzt** Phase 18: Stream < 10 s = Fehlschlag) |
 | Auth vs. Netz | 401/403 → `OpusAuthError` → Reauth, keine Neuversuche; sonst Backoff | bleibt |
-| Backoff mit Jitter | fest 1, 2, 5, 10, 30, 60 s, ohne Jitter | begrenzt exponentiell mit Jitter (R4) |
-| Cancellation, Response-Freigabe | `async with session.get(...)`; Unload bricht Tasks ab und wartet | bleibt; Test „kein offener Reader nach Reload“ (R4) |
+| Backoff mit Jitter | fest 1, 2, 5, 10, 30, 60 s, ohne Jitter | begrenzt exponentiell mit Jitter (R4, **umgesetzt** Phase 18: nominal 1–60 s, +0–25 %) |
+| Cancellation, Response-Freigabe | `async with session.get(...)`; Unload bricht Tasks ab und wartet | bleibt; Test „kein offener Reader nach Reload“ (R4, **umgesetzt** Phase 18, zusätzlich `aclosing`) |
 | Gateway-Neustart | fallende Uptime → Stream ersetzen | bleibt |
 | Stiller Stream | nach 900 s ohne Daten neu öffnen (`STREAM_IDLE_TIMEOUT`); kein Heartbeat dokumentiert; Stille ≠ Fehler (keine Nichtverfügbarkeit) | bleibt; Verfügbarkeit nur über Verbindungsfehler und Uptime-Probe |
 
@@ -545,6 +545,14 @@ unverändert (Begründung im Bericht, Abschnitt 2). MQTT-Pfad unverändert.
   Doppelausführung am Aktor, Funkverkehr vorher/nachher).
 
 ### R4 – Stream-Lebenszyklus
+
+**Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r4-stream-lifecycle`
+(Basis `feature/rest-api-integration` `e5b609e`), Bericht `phases/phase-18.md`;
+noch nicht gemergt, CI ausstehend. B-2 behoben (begrenzter exponentieller
+Backoff 1–60 s mit 0–25 % Jitter nach oben, Pause nach jedem Stream-Ende,
+Stream < 10 s zählt als Fehlschlag), B-3 behoben (Größenprüfung auch für
+vollständige Dokumente), Verbindungsgeneration und `aclosing` gegen
+Rückläufer eines ersetzten Readers. MQTT-Pfad unverändert.
 
 - Begrenzter exponentieller Backoff mit Jitter; kurzlebige Verbindungen
   (z. B. < 10 s) zählen als Fehlschlag (B-2).
