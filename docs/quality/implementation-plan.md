@@ -353,8 +353,9 @@ Status update 2026-10-20 (phase 21 = REST plan R5): base
 setup: the stream's first device list replaces `GET /devices` at setup and
 reload (B-8, one device list fewer per start), 30 s deadline, measured time
 in diagnostics; the 30 min list keeps newer telegram metadata (B-5). REST
-behaviour changes disclosed under D3; MQTT path untouched (A1–A5). Not yet
-merged; CI pending.
+behaviour changes disclosed under D3; MQTT path untouched (A1–A5). Merged
+into `feature/rest-api-integration` via PR #25 (`2d3cf9c`); CI run
+`39458477903` green.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
