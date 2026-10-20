@@ -1036,7 +1036,8 @@ custom_components/opus_greennet/
 ├── config_flow.py        # UI configuration (MQTT or REST), reauth, reconfigure, MQTT discovery
 ├── discovery.py          # Validation of discovered gateway candidates
 ├── const.py              # Constants, EEP mappings, and MQTT topics
-├── transport.py          # Transport selection and the common coordinator type
+├── transport.py          # Transport selection and the common coordinator protocol
+├── domain.py             # Transport-neutral command results, signals and timing
 ├── coordinator.py        # MQTT transport: communication, discovery, and commands
 ├── mqtt_transport.py     # Confirmed subscriptions, requests, and gateway probing
 ├── rest_coordinator.py   # REST transport: event stream, health probe, and commands
@@ -1078,6 +1079,7 @@ tests/
 ├── test_rest_cover_stop.py      # REST cover stop and follow-up queries
 ├── test_rest_config_flow.py     # REST user, reauth and reconfigure flows with recovery
 ├── test_transport_selection.py  # Transport selection, switching, ACK 201 and dimmer ramping
+├── test_rest_only_decoupling.py # REST-only entries without the MQTT integration, import boundaries
 ├── test_enocean_device.py       # Device model tests
 ├── test_coordinator_helpers.py  # Pure helper and command tests
 ├── test_coordinator_mqtt.py     # MQTT finalization tests
