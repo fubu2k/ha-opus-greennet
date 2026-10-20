@@ -50,15 +50,15 @@ def _switch(value: str = "off", **fields: object) -> dict:
 # ── Stream first with a real HTTP gateway ─────────────────────────────────
 
 
-async def test_setup_takes_devices_from_the_stream_only(
+async def test_setup_takes_state_from_the_stream(
     hass: HomeAssistant, gateway: FakeGateway
 ) -> None:
-    """B-8: one device list fewer per start; state is current at once."""
+    """State comes from the stream's list; one GET /devices adds configuration."""
     gateway.devices = [_switch("on")]
     entry = await setup_rest_bridge(hass, gateway)
     entity_id = await wait_for_entity(hass, "switch", f"AABB0011_{SWITCH}")
     assert hass.states.get(entity_id).state == "on"
-    assert gateway.requests_to("GET", "/devices") == []
+    await wait_until(lambda: len(gateway.requests_to("GET", "/devices")) == 1)
     assert len(gateway.requests_to("GET", "/devices/stream")) == 1
     coordinator = entry.runtime_data.coordinator
     assert coordinator.devices[SWITCH].last_update_source == "device list"
@@ -66,7 +66,7 @@ async def test_setup_takes_devices_from_the_stream_only(
     assert 0 <= coordinator.first_device_list_seconds < FIRST_DEVICE_LIST_TIMEOUT
 
 
-async def test_reload_reads_no_separate_device_list(
+async def test_each_start_reads_the_device_list_once(
     hass: HomeAssistant, gateway: FakeGateway
 ) -> None:
     gateway.devices = [_switch()]
@@ -74,8 +74,38 @@ async def test_reload_reads_no_separate_device_list(
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.LOADED
-    assert gateway.requests_to("GET", "/devices") == []
+    await wait_until(lambda: len(gateway.requests_to("GET", "/devices")) == 2)
     assert len(gateway.requests_to("GET", "/devices/stream")) >= 2
+
+
+async def test_cover_movement_times_without_configuration_in_the_stream(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    """Phase 21 hardware finding: the stream list has no configuration block."""
+    cover = device_object(
+        "0507C89C",
+        "D2-05-02",
+        states=[{"key": "position", "value": 10}],
+        configuration={
+            "parameters": [
+                {"key": "verticalMovementTime", "value": 25.42},
+                {"key": "rotationTime", "value": 0.0},
+            ]
+        },
+    )
+    gateway.devices = [cover]
+    gateway.stream_without_configuration = True
+    entry = await setup_rest_bridge(hass, gateway)
+    channel = entry.runtime_data.coordinator.devices["0507C89C"].channels[0]
+    await wait_until(lambda: channel.vertical_movement_time == 25.42)
+    assert channel.rotation_time == 0.0
+    # Live state stays with the stream; the list only added configuration.
+    assert channel.position == 10
+    # A reconnect snapshot without configuration keeps the movement times.
+    await gateway.close_streams()
+    await gateway.wait_for_stream()
+    await hass.async_block_till_done()
+    assert channel.vertical_movement_time == 25.42
 
 
 async def test_setup_waits_for_a_late_device_list(
@@ -157,7 +187,8 @@ async def test_reconnect_starts_with_a_snapshot_and_no_button_event(
     await gateway.close_streams()
     await wait_until(lambda: hass.states.get(switch_id).state == "on")
     assert hass.states.get(event_id).state == "unknown"
-    assert gateway.requests_to("GET", "/devices") == []
+    # A reconnect reads no extra device list; only the one after setup.
+    assert len(gateway.requests_to("GET", "/devices")) == 1
 
 
 # ── Setup sequence with a scripted stream (no network) ────────────────────
@@ -176,6 +207,7 @@ async def coord() -> AsyncIterator[OpusGreenNetRestCoordinator]:
         side_effect=lambda path, **_: {
             "/system/info": {"systemInfo": {"eurid": "AABB0011"}},
             "/system/uptime": {"systemUptimeResponse": {"uptime": 10}},
+            "/devices": {"devices": []},
         }[path]
     )
     with (

@@ -497,7 +497,7 @@ without a readable gateway document reports its HTTP status instead of
 |-----------------|---------|-------|
 | `GET /system/info` | Config flow, setup | Gateway (EURID, version, base ID, HomeKit setup code and HomeKit QR payload; the latter three redacted in diagnostics) |
 | `GET /system/uptime` | Setup, health check every 60 s (`GATEWAY_HEALTH_INTERVAL`, same as MQTT) | Gateway |
-| `GET /devices` | Device list refresh every 30 min (`DEVICE_LIST_REFRESH_INTERVAL`); no longer at setup (phase 21/R5) | Gateway device model, no radio telegram **[HW-upstream]** |
+| `GET /devices` | Once right after setup (configuration and battery only; the stream's list has no `configuration` block **[HW]**), then every 30 min (`DEVICE_LIST_REFRESH_INTERVAL`) | Gateway device model, no radio telegram **[HW-upstream]** |
 | `GET /devices/stream` | Setup (its first document is the setup snapshot, phase 21/R5); long-lived, reopened after it ends or after 15 min without data | Gateway |
 | `GET /devices/{id}` | A telegram from a device missing in the device list; at most once per hour per device | Gateway device model |
 | `PUT /devices/{id}/state` | User commands; status queries 5/20 s after unconfirmed commands (covers 10/20 s after the travel estimate) | Potentially radio |
@@ -531,8 +531,13 @@ never repeated and are dropped when superseded or queued before an outage.
   and the same reader continues. No list in time, or a first attempt that
   fails or ends before the list, fails setup (`ConfigEntryNotReady`; HTTP
   401/403 → reauthentication). The measured time is logged at debug level and
-  shown in diagnostics (`gateway.first_device_list_seconds`).
-  **[Code][Test]**
+  shown in diagnostics (`gateway.first_device_list_seconds`; 0.076 s on
+  OPUS-IQ-DOT 1.21.30 with 53 devices **[HW]**). **[Code][Test]**
+- The stream's device list carries states and battery but **no
+  `configuration` block** (cover movement and rotation times) **[HW]**.
+  Setup therefore runs the non-authoritative metadata refresh (`GET
+  /devices`) once right after the first list; it applies configuration and
+  battery only. **[Code][Test]**
 - The 30 min list never replaces the signal strength or last-seen time of a
   telegram received after its request started (finding B-5). Stream
   snapshots are ordered with the telegrams on the same connection and always

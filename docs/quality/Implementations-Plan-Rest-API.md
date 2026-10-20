@@ -447,7 +447,8 @@ kommt; Entscheidung in R5 nach Messung.
 /system/uptime` bleibt beim Setup (Ausgangswert der Neustarterkennung). Die
 Messung auf Hardware erfolgt über `gateway.first_device_list_seconds` in der
 Diagnose; liegt sie nahe an 30 s, wird die Frist angepasst oder die
-Alternative gewählt.
+Alternative gewählt. **Ergebnis:** 0,076 s (Frist bleibt); wegen R5-H1 folgt
+nach dem Setup einmal `GET /devices` nur für Konfiguration und Batterie.
 
 ## 8. Phasenplan
 
@@ -576,15 +577,24 @@ Rückläufer eines ersetzten Readers. MQTT-Pfad unverändert.
 gemergt über PR #25 (`2d3cf9c`), CI-Lauf `39458477903` grün. Stream-first nach 7.2 (B-8 behoben: kein
 `GET /devices` mehr beim Start), Frist 30 s für die erste Liste
 (`FIRST_DEVICE_LIST_TIMEOUT`), gemessene Dauer in Log und Diagnose; B-5
-behoben (Telegramm nach Anfragebeginn behält `dbm`/`lastSeen`). Die
-Hardware-Messung der Frist steht aus (Wert aus der Diagnose ablesen).
+behoben (Telegramm nach Anfragebeginn behält `dbm`/`lastSeen`).
+
+**Hardware-Prüfung 2026-10-20 (Phase 21, Abschnitt 7):** erste Liste nach
+0,076 s, Frist 30 s bestätigt. Befund R5-H1: Die Stream-Liste enthält auf
+OPUS-IQ-DOT 1.21.30 **keinen `configuration`-Block**, Rollläden hatten nach
+dem Start keine Fahrzeiten (0 von 10). Korrektur auf Branch
+`fix/opus-r5-movement-times`: einmal `GET /devices` direkt nach dem Setup
+(nicht autoritativ, wie die 30-min-Liste). Das Ziel „eine Geräteliste weniger
+je Start“ ist auf dieser Firmware nicht erreichbar und entfällt; Zustand und
+Verfügbarkeit kommen weiter nur aus dem Stream.
 
 - Stream-first nach Abschnitt 7.2 (E7); Frist für das erste Dokument messen.
 - B-5: Metadaten der 30-min-Liste nur übernehmen, wenn kein neueres Telegramm
   seit Anfragebeginn kam.
 - Tests: Rennen Anfrage/Telegramm, Neuverbindung mit Snapshot, kein
   Tasterereignis aus Snapshots, Setup-Fehler ohne erstes Dokument.
-- Messbar: eine Geräteliste weniger je Start und Reload.
+- Messbar: eine Geräteliste weniger je Start und Reload (**entfällt** nach
+  Hardware-Befund R5-H1: die Stream-Liste trägt keine Konfiguration).
 
 ### R6 – Fachmodell
 

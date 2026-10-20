@@ -105,7 +105,7 @@ replaced `dbm`/`lastSeen`); 9 of 12 fail, the 3 B-5 control cases pass.
 | Traffic | Before | After |
 |---------|--------|-------|
 | MQTT | baseline | identical |
-| Per REST setup or reload | 3 GETs + stream; the device list transferred **twice** | 2 GETs + stream; the device list transferred **once** |
+| Per REST setup or reload | 3 GETs + stream; the device list transferred **twice** | 2 GETs + stream; the device list transferred **once** (R5); **after the follow-up fix (7.2): 3 GETs + stream again**, `GET /devices` once right after setup for the configuration the stream lacks |
 | Periodic | uptime 60 s, `GET /devices` 30 min | identical |
 | Radio | user commands, status checks, ReCom | identical |
 
@@ -135,8 +135,54 @@ setting changed. Diagnostics gain one key.
 
 ## 7. Hardware observations, unknowns and residual risks
 
-- Time to the first device list on the real gateway: **[unverified]**; read
-  `gateway.first_device_list_seconds` from the diagnostics after a restart.
+### 7.1 Hardware check after the merge (2026-10-20, maintainer diagnostics)
+
+Gateway OPUS-IQ-DOT v1.21.30 (API 2.6.12.0), 53 devices, Home Assistant
+2026.10.2. Two diagnostics files: before R5 (0.7.0b2 build without R5) and
+after R5 (merge `2d3cf9c`).
+
+| Observation | Before R5 | After R5 |
+|-------------|-----------|----------|
+| `gateway.first_device_list_seconds` | – | **0.076 s** **[HW]** |
+| `config_entry_setup` (Home Assistant) | 0.23 s | 2.42 s (platform setup included; not attributable to the stream) |
+| Covers with `vertical_movement_time` / `rotation_time` | 10 of 10 (25.42–33.0 s / 0.0) | **0 of 10** |
+| Channels with a battery level | 20 | 20 |
+
+Conclusions:
+
+1. **Deadline confirmed:** the first device list arrives in 76 ms; 30 s
+   leaves a margin of about 400×. `FIRST_DEVICE_LIST_TIMEOUT` stays 30 s.
+2. **Finding R5-H1 (regression, fixed in the follow-up below):** the device
+   list in the stream carries **no `configuration` block** on this firmware
+   **[HW]**; only `GET /devices` does. The setup code path is identical for
+   both lists, so the missing movement and rotation times come from the
+   stream content. With R5 alone, covers had no travel estimate after every
+   start until the 30 min refresh. The assumption "stream list = `GET
+   /devices`" of plan section 7.1 does not hold for configuration.
+
+### 7.2 Follow-up fix (branch `fix/opus-r5-movement-times`)
+
+- Setup stays stream first (state, availability and the 30 s deadline
+  unchanged). Right after setup, the non-authoritative metadata refresh runs
+  once (`GET /devices`, the same code as the 30 min tick): it adds
+  configuration and battery, never live state, and keeps newer telegram
+  metadata (B-5).
+- Traffic per start: back to **one** `GET /devices` per start and reload, as
+  before R5 (no increase); the device list is no longer applied twice as
+  authoritative state, so the snapshot race of section 7.1 of the plan stays
+  removed. The measurable goal "one device list fewer per start" is **not
+  reachable** on this firmware and is withdrawn.
+- Reconnect snapshots without configuration keep the stored movement times
+  (a missing field changes nothing).
+- Tests: `test_cover_movement_times_without_configuration_in_the_stream`
+  (fake gateway option `stream_without_configuration`), request counts
+  adjusted (`test_setup_takes_state_from_the_stream`,
+  `test_each_start_reads_the_device_list_once`).
+
+### 7.3 Other notes
+
+- `homekitQR` was still unredacted in the second file: that build predates
+  the redaction fix (PR #27, merged afterwards).
 - A gateway that delays the list by more than 30 s would now fail setup and
   be retried by Home Assistant, where before the separate `GET /devices`
   succeeded. The log line "not ready, Home Assistant will retry: The event
@@ -148,7 +194,7 @@ setting changed. Diagnostics gain one key.
 
 - Merged via PR #25 (`2d3cf9c`) into `feature/rest-api-integration`, not into
   `main`; CI run `39458477903` green.
-- Open: read `gateway.first_device_list_seconds` from the diagnostics after a
-  restart on the real gateway and confirm the 30 s deadline.
+- Hardware check done (section 7.1): deadline confirmed (0.076 s); finding
+  R5-H1 fixed on `fix/opus-r5-movement-times` (section 7.2).
 - Next REST phase: R6 (domain model) or R1, each with its own approval.
 - No release permission is implied.
