@@ -573,7 +573,7 @@ Rückläufer eines ersetzten Readers. MQTT-Pfad unverändert.
 
 **Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r5-stream-first-start`
 (Basis `feature/rest-api-integration` `bcb6276`), Bericht `phases/phase-21.md`;
-noch nicht gemergt, CI ausstehend. Stream-first nach 7.2 (B-8 behoben: kein
+gemergt über PR #25 (`2d3cf9c`), CI-Lauf `39458477903` grün. Stream-first nach 7.2 (B-8 behoben: kein
 `GET /devices` mehr beim Start), Frist 30 s für die erste Liste
 (`FIRST_DEVICE_LIST_TIMEOUT`), gemessene Dauer in Log und Diagnose; B-5
 behoben (Telegramm nach Anfragebeginn behält `dbm`/`lastSeen`). Die

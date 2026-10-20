@@ -1,7 +1,8 @@
 # Phase 21 – REST plan R5: stream-first start and fresh list metadata
 
-- **Status:** implemented on branch `feat/opus-r5-stream-first-start`, not yet
-  merged. CI pending (section 5). No version change, no CHANGELOG entry, no
+- **Status:** completed. Branch `feat/opus-r5-stream-first-start` (`a9e8517`)
+  merged by the maintainer into `feature/rest-api-integration` via PR #25
+  (merge commit `2d3cf9c`, 2026-10-20). CI green (section 5). No version change, no CHANGELOG entry, no
   release; `main` untouched (branch policy of 2026-10-20).
 - **Plan:** `Implementations-Plan-Rest-API.md` phase R5 (section 8), section
   7 (start and resynchronisation, design decision E7), findings B-8 and B-5
@@ -122,7 +123,10 @@ Hassfest. CI is the evidence.
 
 | Run | Head | Result |
 |-----|------|--------|
-| pending | – | – |
+| `39458477903` (workflow_dispatch) | `feat/opus-r5-stream-first-start` `a9e8517` (merged unchanged as PR #25, `2d3cf9c`) | **success**: `validate`, `Hassfest at Home Assistant 2026.10.2 (fixed reference)`, `Home Assistant 2026.10.2 (fixed reference)`, `Home Assistant (latest stable)` |
+
+The merge was done while the two test jobs were still running; both finished
+green on the merged code afterwards.
 
 ## 6. Registry and identity compatibility
 
@@ -142,8 +146,9 @@ setting changed. Diagnostics gain one key.
 
 ## 8. Review status and next step
 
-- PR base `feature/rest-api-integration`, never `main`.
-- After the merge: record CI and merge here and in both plans; read the
-  measured time from a hardware restart.
+- Merged via PR #25 (`2d3cf9c`) into `feature/rest-api-integration`, not into
+  `main`; CI run `39458477903` green.
+- Open: read `gateway.first_device_list_seconds` from the diagnostics after a
+  restart on the real gateway and confirm the 30 s deadline.
 - Next REST phase: R6 (domain model) or R1, each with its own approval.
 - No release permission is implied.
