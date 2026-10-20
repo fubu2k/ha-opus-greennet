@@ -1,679 +1,699 @@
-# OPUS GreenNet – Implementations-Plan REST-API
+# OPUS GreenNet – REST API implementation plan
 
-Revision 2, 2026-10-20 (Revision 1 ergänzt um die Erkenntnis zum Aktor-Nachlauf,
-Abschnitt 3.3). **Nur Bestandsaufnahme und Plan.** Durch dieses
-Dokument wurde nichts implementiert. Jede Phase braucht eine eigene Freigabe
-des Maintainers (Plan `implementation-plan.md`, Abschnitte 4 und 5).
+Revision 3, 2026-10-20: English translation of revision 2 (the German
+original is in the Git history of this file), updated with the status of
+phases R0–R5, R4.2/R4.3 and the R5 hardware check. Revision 2 added the
+actuator overrun finding (section 3.3) to revision 1.
 
-| Angabe | Wert |
-|--------|------|
-| Geprüfter Branch | `feature/rest-api-integration` (fubu2k/ha-opus-greennet) |
-| Geprüfter Commit | `2010d2f` („docs: record phase 14 CI evidence“), identisch mit `origin/feature/rest-api-integration` |
-| Hauptzweig | `main` = `39b4c66`; **enthält den REST-Stand nicht** (nicht gemergt) |
-| Herkunft des REST-Codes | upstream `kegelmeier/ha-opus-greennet`, Branch `feat/rest-transport` (`20b34c9`), integriert in Phase 14 (`phases/phase-14.md`) |
-| CI-Nachweis des geprüften Stands | Workflow „Tests“, Lauf `39384621424` auf `e04245f` (Code identisch mit `2010d2f`), grün |
-| Verbindliche Regeln | Guardrails A1–A5 aus `implementation-plan.md` Abschnitt 2 gelten ab Entscheidung D3 (Abschnitt 0.1) **nur für den MQTT-Transport**; REST wird nach Best Practices und Home-Assistant-Vorgaben entwickelt |
-| Ablageort | `docs/quality/` (das Repository hat kein Verzeichnis `/Quality`; die Qualitätsdokumente liegen dort) |
+This document started as an **inventory and plan only**; the phases were
+implemented later, each on its own branch with its own report and the
+maintainer's approval (plan `implementation-plan.md`, sections 4 and 5).
 
-Kennzeichnung der Aussagen:
-**[Code]** aus dem Quellcode am geprüften Commit gelesen,
-**[Test]** durch einen vorhandenen Test abgedeckt,
-**[Doku]** aus Repository-Dokumentation,
-**[Praxis]** vom Maintainer berichtete Beobachtung (nicht unabhängig verifiziert),
-**[HW-upstream]** Hardwarebeobachtung des Upstream-Projekts,
-**[Upstream-Mitteilung]** schriftliche Auskunft aus dem Upstream-Projekt mit
-Messwerten einer dortigen Installation (an den Maintainer weitergegeben, hier
-nicht nachgemessen),
-**[Annahme]** offene, noch zu prüfende Annahme,
-**[Entwurf]** Entwurfsentscheidung dieses Plans.
+| Item | Value |
+|------|-------|
+| Reviewed branch | `feature/rest-api-integration` (fubu2k/ha-opus-greennet) |
+| Reviewed commit (revision 1/2) | `2010d2f` ("docs: record phase 14 CI evidence"), identical with `origin/feature/rest-api-integration` at that time |
+| Main branch | `main` = `39b4c66`; **does not contain the REST work** (not merged) |
+| Origin of the REST code | upstream `kegelmeier/ha-opus-greennet`, branch `feat/rest-transport` (`20b34c9`), integrated in phase 14 (`phases/phase-14.md`) |
+| CI evidence of the reviewed state | workflow "Tests", run `39384621424` on `e04245f` (code identical with `2010d2f`), green |
+| Binding rules | Since decision D3 (section 0.1), guardrails A1–A5 of `implementation-plan.md` section 2 apply **to the MQTT transport only**; REST is developed according to best practices and Home Assistant requirements |
+| Location | `docs/quality/` (the repository has no `/Quality` directory; the quality documents live here) |
 
-## 0. Entscheidungen des Maintainers
+Labels used for statements:
+**[Code]** read from the source code at the reviewed commit,
+**[Test]** covered by an existing test,
+**[Doc]** from repository documentation,
+**[Field]** observation reported by the maintainer (not independently verified),
+**[HW]** measured on the maintainer's hardware (diagnostics),
+**[HW-upstream]** hardware observation of the upstream project,
+**[Upstream note]** written information from the upstream project with
+measurements of an installation there (passed on to the maintainer, not
+re-measured here),
+**[Assumption]** open assumption still to be checked,
+**[Design]** design decision of this plan.
 
-| ID | Datum | Entscheidung | Folge |
-|----|-------|--------------|-------|
-| D1 | 2026-10-20 | REST wird als **zusätzlicher** Transport neben MQTT integriert; MQTT bleibt unverändert, bestehende Einträge bleiben auf MQTT. | Umgesetzt in Phase 14. |
-| D2 | 2026-10-20 | **Die Geräteliste wird bei REST alle 30 Minuten vom Gateway gelesen.** Dieser neue Hintergrundverkehr wird für die REST-API benötigt (Batteriestand, Signalstärke und Fahrzeiten kommen nicht über den Stream). | Die in `implementation-plan.md` Abschnitt 3 als „requires maintainer review“ eingetragene Ergänzung ist damit **genehmigt**. Dokumentationsnachzug in Phase R0. |
-| D3 | 2026-10-20 | **Die Guardrails A1–A5 gelten nur für den MQTT-Transport.** Der REST-Transport wird in allen weiteren Phasen (ab R1) nach Best Practices und den Vorgaben von Home Assistant neu entwickelt. | Gilt für alle folgenden Phasen; Regeln in Abschnitt 0.1. Die bisherigen, aus A1–A5 abgeleiteten Einschränkungen für REST in diesem Plan sind ersetzt. |
+## 0. Maintainer decisions
 
-Zu D2: `GET /devices` liest das Gerätemodell des Gateways und löst nach der
-Upstream-Beobachtung kein Funktelegramm aus **[HW-upstream]**. Das Intervall
-von 30 min ist der aktuelle Stand. Die ursprüngliche Festlegung „fest, nach A1
-nicht verkürzbar“ ist durch D3 aufgehoben; eine Änderung folgt Abschnitt 0.1.
+| ID | Date | Decision | Consequence |
+|----|------|----------|-------------|
+| D1 | 2026-10-20 | REST is integrated as an **additional** transport next to MQTT; MQTT stays unchanged, existing entries stay on MQTT. | Implemented in phase 14. |
+| D2 | 2026-10-20 | **REST reads the device list from the gateway every 30 minutes.** This new background traffic is needed for the REST API (battery level, signal strength and movement times are not streamed). | The addition listed as "requires maintainer review" in `implementation-plan.md` section 3 is **approved**. Documentation follow-up in phase R0. |
+| D3 | 2026-10-20 | **Guardrails A1–A5 apply to the MQTT transport only.** In all further phases (from R1), the REST transport is developed anew according to best practices and Home Assistant requirements. | Applies to all following phases; rules in section 0.1. The REST restrictions previously derived from A1–A5 in this plan are replaced. |
+| D4 | 2026-10-20 | **New gateways are set up over REST only** (R4.3, after R4.2 put REST first in the menu). | MQTT stays for existing entries and as a choice in the reconfigure flow; existing entries are never switched automatically. |
 
-### 0.1 Geltungsbereich der Guardrails ab D3 (verbindlich für alle weiteren Phasen)
+On D2: `GET /devices` reads the gateway's device model and, according to the
+upstream observation, sends no radio telegram **[HW-upstream]**. The interval
+of 30 min is the current state. The original rule "fixed, may not be
+shortened under A1" is lifted by D3; a change follows section 0.1.
 
-**MQTT-Transport – Guardrails A1–A5 unverändert verbindlich.** Gilt für jeden
-Eintrag ohne `transport: rest` und für allen Code, den der MQTT-Pfad ausführt:
+### 0.1 Scope of the guardrails since D3 (binding for all further phases)
 
-- Keine Verhaltens-, Timing-, Wire- oder Verkehrsänderung. Keine neuen
-  Abfragen, keine Retries, keine Cooldowns.
-- Unique IDs, Entity-IDs, Gerätezuordnungen, Registry-Einstellungen und der
-  Transport bestehender Einträge bleiben unverändert. Kein automatischer
-  Transportwechsel.
-- Retained-Schutz (Phase 10) unverändert.
-- Ein Re-Export ist keine Verhaltensänderung. Jede darüber hinausgehende
-  Änderung am MQTT-Pfad braucht die Freigabe des Maintainers.
+**MQTT transport – guardrails A1–A5 remain binding unchanged.** This applies
+to every entry without `transport: rest` and to all code the MQTT path runs:
 
-**REST-Transport – Neuentwicklung nach Best Practices und Home-Assistant-Vorgaben.**
-A1–A5 sind für REST kein Bestandsschutz mehr. Maßstab sind:
+- No change of behaviour, timing, wire format or traffic. No new queries, no
+  retries, no cooldowns.
+- Unique IDs, entity IDs, device assignments, registry settings and the
+  transport of existing entries stay unchanged. No automatic transport switch.
+- Retained-message protection (phase 10) unchanged.
+- A re-export is not a behaviour change. Any further change to the MQTT path
+  needs the maintainer's approval.
 
-- die Home Assistant Integration Quality Scale (Ziel: alle anwendbaren Regeln
-  erfüllt) und die Home-Assistant-Entwicklerdokumentation (u. a. Config Flow,
-  Entity-Modell, Verfügbarkeit, `inject-websession`, Fehlerbehandlung,
-  Diagnose, Reauth/Reconfigure, strikte Typisierung),
-- anerkannte Praxis für HTTP-Clients und Streams (getrennte Fehlerklassen,
-  Timeouts, begrenzter Backoff mit Jitter, sauberer Lebenszyklus),
-- Tests zuerst; Coverage-Gates, ruff, strict mypy und Hassfest werden nicht
-  abgesenkt.
+**REST transport – new development according to best practices and Home
+Assistant requirements.** A1–A5 no longer protect the REST status quo. The
+yardsticks are:
 
-Verhalten, Timing, Abfragen, Entity-Modell und Code-Struktur des
-REST-Transports dürfen geändert werden, wenn die Phase das begründet. Jede
-Änderung wird im Phasenbericht offengelegt (Abschnitt 20 von
-`implementation-plan.md`): Funk- und Gateway-Verkehr vorher/nachher sowie
-Auswirkungen auf bestehende REST-Einträge und Entity-IDs.
+- the Home Assistant Integration Quality Scale (goal: all applicable rules
+  met) and the Home Assistant developer documentation (among others config
+  flow, entity model, availability, `inject-websession`, error handling,
+  diagnostics, reauth/reconfigure, strict typing),
+- accepted practice for HTTP clients and streams (separate error classes,
+  timeouts, bounded backoff with jitter, a clean lifecycle),
+- tests first; coverage gates, ruff, strict mypy and Hassfest are not
+  lowered.
 
-**Gemeinsamer Code.** Module, die auch der MQTT-Pfad nutzt
-(`enocean_device.py`, `entity.py`, die Plattformen, `const.py`, `wire.py`,
-`domain.py` sobald vorhanden), stehen für den MQTT-Pfad weiter unter A1–A5.
-Eine REST-Änderung an diesen Modulen muss transportgebunden sein (eigener
-Wert, eigener Codepfad oder `isinstance`-Prüfung) und ist durch die
-unveränderten MQTT-Tests zu belegen. Beispiel: `COVER_MOVEMENT_GRACE_SECONDS`
-liegt in `const.py` und gilt für beide Koordinatoren; eine andere Karenz für
-REST braucht eine eigene REST-Konstante.
+Behaviour, timing, queries, entity model and code structure of the REST
+transport may change when the phase justifies it. Every change is disclosed
+in the phase report (`implementation-plan.md` section 20): radio and gateway
+traffic before/after, and the effect on existing REST entries and entity IDs.
 
-## 1. Zielbild und Prioritäten (aus dem Auftrag)
+**Shared code.** Modules that the MQTT path also uses (`enocean_device.py`,
+`entity.py`, the platforms, `const.py`, `wire.py`, `domain.py`) stay under
+A1–A5 for the MQTT path. A REST change to these modules must be bound to the
+transport (its own value, its own code path or an `isinstance` check) and be
+backed by the unchanged MQTT tests. Example: `COVER_MOVEMENT_GRACE_SECONDS`
+lives in `const.py` and applies to both coordinators; a different grace period
+for REST needs its own REST constant.
 
-1. REST für Befehle und gezielte Abfragen.
-2. HTTP-Stream als primärer Eingang für Zustände und Ereignisse.
-3. MQTT als optionaler, sauber gekapselter Fallback.
-4. Voll funktionsfähiger REST-only-Betrieb ohne eingerichtete
-   Home-Assistant-MQTT-Integration.
-5. Spätere Entfernung von MQTT ohne fachliche Änderungen an Gerätemodell und
-   Entity-Plattformen.
+## 1. Target picture and priorities (from the assignment)
 
-Prioritäten bei Zielkonflikten: korrekte Zustände und unverfälschte
-Ereignisse → Erhalt des getesteten Verhaltens und bestehender Installationen →
-robuste Fehlerbehandlung und Lebenszyklus → schlanke Architektur → messbare
-Performance. Kein neuer Abstraktionslayer ohne konkretes bestehendes Problem.
+1. REST for commands and targeted queries.
+2. The HTTP stream as the primary input for states and events.
+3. MQTT as an optional, cleanly encapsulated fallback.
+4. Fully working REST-only operation without a configured Home Assistant MQTT
+   integration.
+5. Later removal of MQTT without functional changes to the device model and
+   the entity platforms.
 
-Die Home Assistant Integration Quality Scale ist Maßstab. Das Repository führt
-eine **Selbsteinschätzung** einer Custom Integration (`quality_scale.yaml`,
-`quality-scale-evidence.md`), keine offiziell vergebene Core-Einstufung.
+Priorities when goals conflict: correct states and undistorted events →
+preserving tested behaviour and existing installations → robust error
+handling and lifecycle → a lean architecture → measurable performance. No new
+abstraction layer without a concrete existing problem.
 
-## 2. Ist-Analyse
+The Home Assistant Integration Quality Scale is the yardstick. The repository
+keeps a **self-assessment** of a custom integration (`quality_scale.yaml`,
+`quality-scale-evidence.md`), not an officially granted core rating.
 
-### 2.1 Datenflüsse am geprüften Commit
+## 2. Analysis of the reviewed state
 
-**REST-Eintrag (`transport: rest`)** – `rest_coordinator.OpusGreenNetRestCoordinator`:
+### 2.1 Data flows at the reviewed commit
 
-| Fluss | Ablauf | Beleg |
-|-------|--------|-------|
-| Setup | `async_setup`: `GET /system/info` (EURID-Prüfung, `GatewayMismatchError`) → `GET /system/uptime` → `GET /devices` (autoritativ) → verfügbar → Timer 60 s (Uptime) und 30 min (Geräteliste) → Stream-Task | [Code] [Test] `test_rest_stream.py::test_setup_reads_identity_uptime_and_devices` |
-| Stream | `api.OpusGatewayClient.async_stream` (`GET /devices/stream`, ohne Query-Parameter) → `JsonDocumentSplitter` → `_handle_document`: `devices` (autoritative Liste), `device` (Einzelgerät = Live-Rückmeldung), `telegram`; andere Typen werden ignoriert | [Code] [Test] `test_rest_stream.py::test_stream_document_types` |
-| Befehl | Entity → `async_turn_on`/`async_set_cover_position`/… → `async_send_command` → `_async_radio_request` (eine Funkanfrage gleichzeitig, `PriorityLock` 0/10/20) → `PUT /devices/{id}/state`; Antwort = Quittung (`200` → `CommandDelivery.SENT`, `201` → `DEFERRED`) | [Code] [Test] `test_rest_commands.py`, `test_rest_requests.py` |
-| Rückmeldung | `from`-Telegramm → `_record_confirmed_feedback` (Feldrevisionen, Abbruch ausstehender Statusprüfungen, Ende der Fahrschätzung bei gültiger Position) → `update_from_telegram` → Dispatcher | [Code] [Test] `test_rest_telegrams.py` |
-| Fremdbefehl | `to`-Telegramm (HomeKit, Gateway-Logik) → nur Zielzustand optimistisch übernehmen → Statusprüfungen nach 5/20 s; eigenes Echo innerhalb 2 s nach `200` wird ignoriert | [Code] [Test] `test_rest_telegrams.py::test_homekit_command_is_applied_then_verified`, `test_rest_requests.py::test_own_echo_after_the_acknowledgement_is_ignored` |
-| Tasterereignis | `from`-Telegramm mit `buttonA0`… → `EnOceanDevice.update_from_telegram` setzt das Ereignis → synchroner Dispatch → Event-Entity verbraucht → `clear_button_occurrence()`; Gerätelisten setzen nie Tasterfelder | [Code] [Test] `test_rest_telegrams.py::test_fast_press_release_keeps_both_events`, `test_rest_devices.py::test_new_rocker_from_list_has_no_button_occurrence`, `test_rest_stream.py::test_device_list_snapshot_does_not_replay_button_presses` |
-| 30-min-Liste | `_async_refresh_device_list` → `_apply_device_list(authoritative=False)` → nur Konfiguration, Batterie, Metadaten | [Code] [Test] `test_rest_stream.py::test_periodic_device_list_refresh_updates_metadata_only` |
+**REST entry (`transport: rest`)** – `rest_coordinator.OpusGreenNetRestCoordinator`:
 
-**MQTT-Eintrag (ohne `transport`)** – `coordinator.OpusGreenNetCoordinator`
-mit `mqtt_transport.MQTTRequestManager`: unverändert seit Phase 13
-(Retained-Schutz Phase 10, ACK 201 Phase 11, Late-Answer-Diagnose Phase 12)
-**[Code] [Doku]** `protocol-contract.md` Abschnitte 1–11.
+| Flow | Sequence | Evidence |
+|------|----------|----------|
+| Setup | `async_setup`: `GET /system/info` (EURID check, `GatewayMismatchError`) → `GET /system/uptime` → `GET /devices` (authoritative) → available → timers 60 s (uptime) and 30 min (device list) → stream task. **Changed in R5** (section 7.2). | [Code] [Test] `test_rest_stream.py::test_setup_reads_identity_uptime_and_devices` |
+| Stream | `api.OpusGatewayClient.async_stream` (`GET /devices/stream`, no query parameters) → `JsonDocumentSplitter` → `_handle_document`: `devices` (authoritative list), `device` (single device = live feedback), `telegram`; other types are ignored | [Code] [Test] `test_rest_stream.py::test_stream_document_types` |
+| Command | Entity → `async_turn_on`/`async_set_cover_position`/… → `async_send_command` → `_async_radio_request` (one radio request at a time, `PriorityLock` 0/10/20) → `PUT /devices/{id}/state`; the answer is the acknowledgement (`200` → `CommandDelivery.SENT`, `201` → `DEFERRED`) | [Code] [Test] `test_rest_commands.py`, `test_rest_requests.py` |
+| Feedback | `from` telegram → `_record_confirmed_feedback` (field revisions, cancel pending status checks, end of the travel estimate on a valid position) → `update_from_telegram` → dispatcher | [Code] [Test] `test_rest_telegrams.py` |
+| Foreign command | `to` telegram (HomeKit, gateway logic) → apply only the target state optimistically → status checks after 5/20 s; the integration's own echo within 2 s after `200` is ignored | [Code] [Test] `test_rest_telegrams.py::test_homekit_command_is_applied_then_verified`, `test_rest_requests.py::test_own_echo_after_the_acknowledgement_is_ignored` |
+| Button event | `from` telegram with `buttonA0`… → `EnOceanDevice.update_from_telegram` sets the event → synchronous dispatch → the event entity consumes it → `clear_button_occurrence()`; device lists never set button fields | [Code] [Test] `test_rest_telegrams.py::test_fast_press_release_keeps_both_events`, `test_rest_devices.py::test_new_rocker_from_list_has_no_button_occurrence`, `test_rest_stream.py::test_device_list_snapshot_does_not_replay_button_presses` |
+| 30 min list | `_async_refresh_device_list` → `_apply_device_list(authoritative=False)` → configuration, battery and metadata only | [Code] [Test] `test_rest_stream.py::test_periodic_device_list_refresh_updates_metadata_only` |
 
-**Plattformen** greifen nur über `transport.OpusCoordinator`
-(`OpusGreenNetCoordinator | OpusGreenNetRestCoordinator`), Dispatcher-Signale
-und `EnOceanDevice`/`EnOceanChannel` zu **[Code]**.
+**MQTT entry (without `transport`)** – `coordinator.OpusGreenNetCoordinator`
+with `mqtt_transport.MQTTRequestManager`: unchanged since phase 13
+(retained protection phase 10, ACK 201 phase 11, late-answer diagnostics
+phase 12) **[Code] [Doc]** `protocol-contract.md` sections 1–11.
 
-### 2.2 Vorhandene Zustands-, Revisions-, Aktualitäts- und Deduplizierungsmechanismen
+**Platforms** access only `transport.OpusCoordinator`
+(`OpusGreenNetCoordinator | OpusGreenNetRestCoordinator`; a `Protocol` since
+R2), dispatcher signals and `EnOceanDevice`/`EnOceanChannel` **[Code]**.
 
-Diese Mechanismen werden **weiterverwendet**; der Plan führt keine parallelen
-Ersatzmechanismen ein.
+### 2.2 Existing state, revision, freshness and deduplication mechanisms
 
-| Mechanismus | Ort | Zweck |
-|-------------|-----|-------|
-| `EnOceanChannel.state_revision` + `ChannelStateSnapshot` | `enocean_device.py` | Schätzung nach Quittung nur, wenn seit dem Senden keine neuere Information kam (Phase 2) |
-| `_feedback_revisions` | beide Koordinatoren | Rückmeldung während der Quittung bestätigt den Befehl, ohne Zusatzabfrage |
-| `_pending_reconciliation_fields`, `_reconcile_needed`, `SUPERSEDED` | beide Koordinatoren | höchstens 2 Statusprüfungen je Kanal, überholte Prüfungen werden vor dem Senden verworfen (Phase 4) |
-| `CommandDelivery`, `deferred_commands` | `coordinator.py`, `rest_coordinator.py`, `enocean_device.py` | ACK 201: keine Annahme, keine Abfrage (Phase 11) |
-| `_sent_commands` / `OWN_COMMAND_ECHO_SECONDS` | `rest_coordinator.py` | Echo eigener gesendeter Befehle ignorieren |
-| `_command_waiters` | beide Koordinatoren | `to`-Telegramme während eigener Quittung ignorieren |
-| `clear_button_occurrence()` | `enocean_device.py`, Aufrufer in beiden Koordinatoren | kein Wiederholen von Tasterereignissen |
-| `_device_generations`, `_outage_generation` | `rest_coordinator.py` | Anfragen eines entfernten Geräts oder aus der Zeit vor einem Ausfall werden nicht gesendet |
-| `_live_fields`, Replay-Guard | nur `coordinator.py` | Retained-Replays überschreiben keine Live-Felder (Phase 10) |
-| Projektion `_dispatched_projection` | `entity.py` | keine redundanten State-Writes (Phase 4) |
-| Lesewerte: ungültig → alter Wert, `notAvailable` → `None` | `EnOceanDevice._integer_reading`/`_float_reading` | partielle Updates löschen keine Felder; „unknown“-Positionen überschreiben die letzte Position nicht |
+These mechanisms are **reused**; the plan introduces no parallel replacement.
 
-### 2.3 Kopplungen, die REST-only verhindern
+| Mechanism | Location | Purpose |
+|-----------|----------|---------|
+| `EnOceanChannel.state_revision` + `ChannelStateSnapshot` | `enocean_device.py` | estimate after an acknowledgement only if no newer information arrived since sending (phase 2) |
+| `_feedback_revisions` | both coordinators | feedback during the acknowledgement confirms the command without an extra query |
+| `_pending_reconciliation_fields`, `_reconcile_needed`, `SUPERSEDED` | both coordinators | at most 2 status checks per channel; superseded checks are dropped before sending (phase 4) |
+| `CommandDelivery`, `deferred_commands` | `coordinator.py`, `rest_coordinator.py`, `enocean_device.py` | ACK 201: no assumption, no query (phase 11) |
+| `_sent_commands` / `OWN_COMMAND_ECHO_SECONDS` | `rest_coordinator.py` | ignore the echo of the integration's own transmitted commands |
+| `_command_waiters` | both coordinators | ignore `to` telegrams during the integration's own acknowledgement |
+| `clear_button_occurrence()` | `enocean_device.py`, callers in both coordinators | no replay of button events |
+| `_device_generations`, `_outage_generation` | `rest_coordinator.py` | requests of a removed device or from before an outage are not sent |
+| `_live_fields`, replay guard | `coordinator.py` only | retained replays do not overwrite live fields (phase 10) |
+| projection `_dispatched_projection` | `entity.py` | no redundant state writes (phase 4) |
+| readings: invalid → old value, `notAvailable` → `None` | `EnOceanDevice._integer_reading`/`_float_reading` | partial updates delete no fields; "unknown" positions do not overwrite the last position |
 
-| Nr. | Kopplung | Beleg | Wirkung |
-|-----|----------|-------|---------|
-| K1 | `manifest.json`: `"dependencies": ["mqtt"]` und `"mqtt": [...]` (Discovery) | [Code] | Home Assistant lädt für jeden Eintrag die MQTT-Komponente. Ob der Start ohne eingerichtete MQTT-Integration sauber funktioniert, ist **nicht getestet** [Annahme]. |
-| K2 | `rest_coordinator.py` importiert `coordinator.py` (Signale, `CommandDelivery`, `CoverMovement`, Konstanten) und `mqtt_transport.request_error` | [Code] | Jeder REST-Import lädt `homeassistant.components.mqtt`. |
-| K3 | `__init__.py`, `transport.py`, `entity.py`, alle Plattformen importieren aus `coordinator.py` | [Code] | Plattformen hängen formal am MQTT-Modul; beim Entfernen von MQTT müssten alle Plattformen geändert werden (verletzt Ziel 5). |
-| K4 | `config_flow.py` importiert `homeassistant.components.mqtt`, `mqtt_transport` und `discovery` auf Modulebene | [Code] | Auch der REST-Pfad des Flows lädt MQTT. |
-| K5 | `tests/conftest.py`: Fixture `hass` fügt immer `"mqtt"` zu `hass.config.components` hinzu | [Code] | Kein Test prüft einen REST-Eintrag ohne MQTT-Komponente. |
-| K6 | `transport.OpusCoordinator` ist eine Union beider Klassen | [Code] | Entfernen von MQTT ändert den Typ aller Plattform-Signaturen. |
-| K7 | Qualitätsregel `discovery` ist nur über MQTT erfüllt | [Code] [Doku] | Nach einer MQTT-Entfernung fiele die Regel auf `todo`, solange REST keine Discovery hat. |
+### 2.3 Couplings that prevented REST-only operation
 
-### 2.4 Bereits sauber getrennt – erhalten
+All resolved in R2 except K7 (open for R8).
 
-- `api.py` importiert nur Standardbibliothek, `aiohttp` und `wire.py`; **keine
-  Home-Assistant-Importe** [Code]. Session wird injiziert und nie geschlossen;
-  Basic-Auth-Header entsteht einmalig im Konstruktor und wird nicht geloggt;
-  typisierte Ausnahmen `OpusAuthError`, `OpusConnectionError`,
-  `OpusTimeoutError`, `OpusResponseError` [Code] [Test] `test_rest_api.py`.
-- `wire.py` (JSON-Grenze, ohne HA) und `protocol.py` (reine Funktionen) [Code].
-- `EnOceanDevice`/`EnOceanChannel` enthalten keine MQTT-Topics, HTTP-Objekte
-  oder Entity-Objekte [Code].
-- Keine automatische Wiederholung von Schreibbefehlen; Timeout ändert die
-  Gateway-Verfügbarkeit nicht (A2, A3) [Code] [Test]
+| No. | Coupling | Evidence | Effect |
+|-----|----------|----------|--------|
+| K1 | `manifest.json`: `"dependencies": ["mqtt"]` and `"mqtt": [...]` (discovery) | [Code] | Home Assistant loads the MQTT component for every entry. Whether startup works without a configured MQTT integration was **not tested** [Assumption]. |
+| K2 | `rest_coordinator.py` imports `coordinator.py` (signals, `CommandDelivery`, `CoverMovement`, constants) and `mqtt_transport.request_error` | [Code] | Every REST import loads `homeassistant.components.mqtt`. |
+| K3 | `__init__.py`, `transport.py`, `entity.py` and all platforms import from `coordinator.py` | [Code] | Platforms formally depend on the MQTT module; removing MQTT would change every platform (violates goal 5). |
+| K4 | `config_flow.py` imports `homeassistant.components.mqtt`, `mqtt_transport` and `discovery` at module level | [Code] | The REST path of the flow loads MQTT too. |
+| K5 | `tests/conftest.py`: fixture `hass` always adds `"mqtt"` to `hass.config.components` | [Code] | No test checks a REST entry without the MQTT component. |
+| K6 | `transport.OpusCoordinator` is a union of both classes | [Code] | Removing MQTT changes the type of every platform signature. |
+| K7 | Quality rule `discovery` is met only through MQTT | [Code] [Doc] | After removing MQTT the rule would fall to `todo` as long as REST has no discovery. |
+
+### 2.4 Already cleanly separated – keep
+
+- `api.py` imports only the standard library, `aiohttp` and `wire.py`; **no
+  Home Assistant imports** [Code]. The session is injected and never closed;
+  the Basic auth header is built once in the constructor and never logged;
+  typed exceptions `OpusAuthError`, `OpusConnectionError`, `OpusTimeoutError`,
+  `OpusResponseError` [Code] [Test] `test_rest_api.py`.
+- `wire.py` (JSON boundary, no HA) and `protocol.py` (pure functions) [Code].
+- `EnOceanDevice`/`EnOceanChannel` contain no MQTT topics, HTTP objects or
+  entity objects [Code].
+- No automatic repetition of write commands; a timeout does not change gateway
+  availability (A2, A3) [Code] [Test]
   `test_rest_commands.py::test_command_timeout_keeps_gateway_available`.
-- Transportwahl pro Eintrag, Wechsel nur über „Neu konfigurieren“ (A5) [Code]
+- Transport chosen per entry, switched only through "Reconfigure" (A5) [Code]
   [Test] `test_transport_selection.py`.
 
-### 2.5 Abweichungen zwischen Code, Dokumentation, Tests und Nachweisen
+### 2.5 Differences between code, documentation, tests and evidence
 
-| Nr. | Abweichung | Korrektur |
-|-----|------------|-----------|
-| A-1 | `implementation-plan.md` Abschnitt 3 und 15a sowie `phases/phase-14.md` führen die 30-min-Abfrage als „review pending“. | Seit D2 genehmigt → Phase R0. |
-| A-2 | Die Auftragsliste nennt `GET /devices/stream?direction=from&delimited=newLine&output=singleLine&levelOfDetail=high`. Der Code ruft `GET /devices/stream` **ohne** Parameter auf; keine Repository-Quelle belegt diese Parameter. | Abschnitt 4: nur nach Hardwareprüfung übernehmen; `direction=from` nicht verwenden. |
-| A-3 | Der Code nutzt zusätzlich `GET /system/uptime`, `GET /devices/{id}` und `GET /devices/{id}/parameters`, die in der Auftragsliste fehlen. | Belegt durch Code, Tests und `protocol-contract.md` 12.2; bleiben. |
-| A-4 | `manifest.json` `version` ist auf allen Commits `0.7.0b2`; ein Praxistest lässt sich dadurch keinem Commit zuordnen. | Für Praxistests den installierten Commit festhalten (Phase R1). |
-| A-5 | Ziel „Befehlsannahme ≠ beobachteter Zustand“: Der Code übernimmt bei Rollläden **ohne** bekannte Fahrzeit nach `200` das Ziel sofort als Position (`EnOceanDevice.apply_cover_position_estimate`) und **mit** Fahrzeit nach Fahrzeit + 5 s (`_finish_cover_movement`, Kommentar „Assumed, not physical feedback“). | Bestehendes, getestetes Verhalten (MQTT und REST). Keine stille Änderung; Herkunft sichtbar machen und Entscheidung einholen → Phase R6. |
-| A-6 | README/Vertrag beschreiben REST-Tests als „simuliert“, der Maintainer hat inzwischen Praxistests durchgeführt [Praxis]. | Praxis-Baseline (Abschnitt 3) in `phase-14.md` und Vertrag 12.9 nachtragen → R0. |
+| No. | Difference | Correction |
+|-----|------------|------------|
+| A-1 | `implementation-plan.md` sections 3 and 15a and `phases/phase-14.md` listed the 30 min query as "review pending". | Approved since D2 → phase R0 (done). |
+| A-2 | The assignment named `GET /devices/stream?direction=from&delimited=newLine&output=singleLine&levelOfDetail=high`. The code calls `GET /devices/stream` **without** parameters; no repository source documents these parameters. | Section 4: adopt only after a hardware check; do not use `direction=from`. |
+| A-3 | The code also uses `GET /system/uptime`, `GET /devices/{id}` and `GET /devices/{id}/parameters`, which the assignment did not list. | Backed by code, tests and `protocol-contract.md` 12.2; they stay. |
+| A-4 | `manifest.json` `version` is `0.7.0b2` on all commits; a field test therefore cannot be mapped to a commit. | Record the installed commit for field tests (phase R1). |
+| A-5 | Goal "command accepted ≠ observed state": for covers **without** a known movement time the code takes the target as the position right after `200` (`EnOceanDevice.apply_cover_position_estimate`), **with** a movement time after movement time + 5 s (`_finish_cover_movement`, comment "Assumed, not physical feedback"). | Existing, tested behaviour (MQTT and REST). No silent change; make the origin visible and ask for a decision → phase R6. |
+| A-6 | README and contract described the REST tests as "simulated", while the maintainer had meanwhile run field tests [Field]. | Add the field baseline (section 3) to `phase-14.md` and contract 12.9 → R0 (done). |
 
-### 2.6 Weitere Befunde
+### 2.6 Further findings
 
-| Nr. | Befund | Beleg | Risiko |
-|-----|--------|-------|--------|
-| B-1 | `api._async_request` prüft den HTTP-Status nur auf 401/403 und auf leeren Body ≥ 300; bei vorhandenem JSON entscheidet allein `header.httpStatus`. Ein HTTP-500 mit JSON-Status 200 würde als Erfolg gelten. | [Code] | gering, aber widerspricht „HTTP-Status und JSON-Status getrennt behandeln“ |
-| B-2 | `_async_run_stream`: Endet ein Stream, nachdem er das erste Dokument geliefert hat, wird **sofort** ohne Pause neu verbunden (`if connected: continue`); `failures` wird zurückgesetzt. Schließt das Gateway Verbindungen direkt nach dem Snapshot, entsteht eine enge Schleife mit vollständigem Gerätelisten-Download. Feste Pausen 1–60 s, **ohne Jitter**. | [Code] | mittel (Last auf Gateway und HA) |
-| B-3 | `JsonDocumentSplitter` begrenzt nur über Chunks hinweg wachsende Reste (`_size`); ein vollständiges Dokument innerhalb eines Chunks wird nicht gegen `MAX_DOCUMENT_SIZE` geprüft. | [Code] | gering (aiohttp-Chunks sind klein) |
-| B-4 | `_apply_device_object` erzeugt bei jeder Liste ein **neues** `EnOceanDevice` und kopiert Felder einzeln. Neue Felder können beim Kopieren vergessen werden (in Phase 14 für `deferred_commands`, `profile`, `last_update_finalized_monotonic` nachgezogen); ein während eines Befehls gehaltenes altes Objekt erhält `last_command_error` ins Leere. | [Code] | mittel (Wartbarkeit, seltene falsche Fehleranzeige) |
-| B-5 | Die 30-min-Liste übernimmt `dbm` und `lastSeen` der Liste auch dann, wenn zwischen Anfrage und Antwort ein neueres Telegramm kam. | [Code] | gering (nur Metadaten) |
-| B-6 | `PriorityLock` und die Prioritäten liegen in `api.py`, gehören aber zur Funkwarteschlange des Koordinators. | [Code] | Bibliotheksgrenze unscharf |
-| B-7 | `gateway_to_ha_ms` = `time()` (HA-Uhr) minus Telegramm-Zeitstempel des Gateways (Gateway-Uhr, ms) beim Dispatch im Koordinator. Enthält den Uhrenversatz, misst **nicht** Aktor→Gateway und nicht den Entity-Write. | [Code] `rest_coordinator._mark_and_log_dispatch`, `protocol.telegram_timestamp` | Messgrenze (Abschnitt 3.2) |
-| B-8 | Setup lädt die Geräteliste doppelt: `GET /devices` und sofort danach das erste Stream-Dokument. | [Code] | unnötiger Verkehr und CPU bei großen Installationen |
+| No. | Finding | Evidence | Risk | Status |
+|-----|---------|----------|------|--------|
+| B-1 | `api._async_request` checked the HTTP status only for 401/403 and for an empty body ≥ 300; with a JSON body only `header.httpStatus` decided. An HTTP 500 with JSON status 200 counted as success. | [Code] | low, but contradicts "treat HTTP and JSON status separately" | fixed in R3 |
+| B-2 | `_async_run_stream`: when a stream ended after its first document, it reconnected **immediately** without a pause (`if connected: continue`) and reset `failures`. A gateway closing connections right after the snapshot caused a tight loop with a full device list download each time. Fixed pauses 1–60 s, **without jitter**. | [Code] | medium (load on gateway and HA) | fixed in R4 |
+| B-3 | `JsonDocumentSplitter` limited only remainders growing across chunks (`_size`); a complete document inside one chunk was not checked against `MAX_DOCUMENT_SIZE`. | [Code] | low (aiohttp chunks are small) | fixed in R4 |
+| B-4 | `_apply_device_object` creates a **new** `EnOceanDevice` for every list and copies fields one by one. New fields can be forgotten (phase 14 added `deferred_commands`, `profile`, `last_update_finalized_monotonic`); an old object held during a command writes `last_command_error` into the void. | [Code] | medium (maintainability, rare wrong error display) | open, R6 |
+| B-5 | The 30 min list took `dbm` and `lastSeen` from the list even when a newer telegram arrived between request and answer. | [Code] | low (metadata only) | fixed in R5 |
+| B-6 | `PriorityLock` and the priorities lived in `api.py` but belong to the coordinator's radio queue. | [Code] | unclear library boundary | fixed in R3 |
+| B-7 | `gateway_to_ha_ms` = `time()` (HA clock) minus the gateway's telegram timestamp (gateway clock, ms) at dispatch in the coordinator. It contains the clock offset and measures **neither** actuator→gateway nor the entity write. | [Code] `rest_coordinator._mark_and_log_dispatch`, `protocol.telegram_timestamp` | measurement limit (section 3.2) | documented |
+| B-8 | Setup loaded the device list twice: `GET /devices` and right after it the first stream document. | [Code] | unnecessary traffic and CPU on large installations | R5; see R5-H1 |
+| R5-H1 | The device list in the stream carries **no `configuration` block** (cover movement and rotation times) on OPUS-IQ-DOT 1.21.30; only `GET /devices` does. After a stream-first start, 0 of 10 covers had a movement time (10 of 10 before). | [HW] phase 21 section 7 | high for covers (no travel estimate after a start) | fixed (PR #28) |
 
-### 2.7 Testschutz der Praxis-Baseline
+### 2.7 Test protection of the field baseline
 
-| Erwartung (Abschnitt 3.1) | Vorhandene Tests | Lücke |
-|---------------------------|------------------|-------|
-| R1 Verbindung nach Migration | `test_transport_selection.py::test_switching_an_mqtt_entry_to_rest_and_back_keeps_entities` | – |
-| R2 Reload lädt Liste, Stream verbindet neu | `test_rest_stream.py::test_new_stream_resynchronises_state`, `::test_unload_stops_stream_and_timers` | Reload über `opus_greennet.reload_entry` mit REST nicht explizit |
-| R3 Öffnungs-/Schließindikatoren | `test_rest_cover_movement.py::test_real_ha_cover_shows_motion_and_accepts_configuration_updates` | – |
-| R4 Position entspricht Realität | `test_rest_devices.py::test_stream_resync_replaces_cover_state`, `test_rest_telegrams.py::test_from_telegram_updates_state_and_metadata` | Umrechnung roh→HA nur in MQTT-Entity-Tests explizit |
-| R5 Zieländerung während der Fahrt | `test_rest_cover_movement.py::test_retarget_uses_elapsed_estimate_and_cancels_old_timer`, `::test_retarget_cancels_old_queries_before_ack` | – |
-| R6 Stop → Positionsmeldung aktualisiert sofort | `test_rest_cover_stop.py`, `test_rest_cover_movement.py::test_numeric_feedback_ends_estimate_and_reconciliation` | – |
-| R7 Lokale Wippen der Rollladenaktoren, danach Position | `test_rest_telegrams.py::test_integrated_rocker_telegrams_leave_actuator_state` | Sequenz „Wippe → `unknown` → Endlage“ fehlt |
-| R8 F6-02-01: je Press/Release genau ein Event-Update | `test_rest_telegrams.py::test_rocker_press_and_release_fire_events`, `::test_fast_press_release_keeps_both_events` | Langdruck und 6×-Folge mit Zählung der Entity-Writes fehlt |
+| Expectation (section 3.1) | Existing tests | Gap |
+|---------------------------|----------------|-----|
+| R1 connection after migration | `test_transport_selection.py::test_switching_an_mqtt_entry_to_rest_and_back_keeps_entities` | – |
+| R2 reload loads the list, stream reconnects | `test_rest_stream.py::test_new_stream_resynchronises_state`, `::test_unload_stops_stream_and_timers` | reload through `opus_greennet.reload_entry` with REST not explicit |
+| R3 opening/closing indicators | `test_rest_cover_movement.py::test_real_ha_cover_shows_motion_and_accepts_configuration_updates` | – |
+| R4 position matches reality | `test_rest_devices.py::test_stream_resync_replaces_cover_state`, `test_rest_telegrams.py::test_from_telegram_updates_state_and_metadata` | raw→HA conversion explicit only in MQTT entity tests |
+| R5 target change while moving | `test_rest_cover_movement.py::test_retarget_uses_elapsed_estimate_and_cancels_old_timer`, `::test_retarget_cancels_old_queries_before_ack` | – |
+| R6 stop → position report updates at once | `test_rest_cover_stop.py`, `test_rest_cover_movement.py::test_numeric_feedback_ends_estimate_and_reconciliation` | – |
+| R7 local rockers of cover actuators, then position | `test_rest_telegrams.py::test_integrated_rocker_telegrams_leave_actuator_state` | sequence "rocker → `unknown` → end position" missing |
+| R8 F6-02-01: exactly one event update per press/release | `test_rest_telegrams.py::test_rocker_press_and_release_fire_events`, `::test_fast_press_release_keeps_both_events` | long press and 6× sequence with a count of entity writes missing |
 
-## 3. Praxistest-Baseline
+## 3. Field-test baseline
 
-### 3.1 Regressionserwartungen [Praxis]
+### 3.1 Regression expectations [Field]
 
-Vom Maintainer berichtet, nicht unabhängig verifiziert; zu erhalten, aber kein
-Beweis vollständiger Korrektheit:
-R1 Verbindung nach der Migration · R2 Reload lädt die Geräteliste und
-verbindet den Stream neu · R3 Öffnungs-/Schließindikatoren vorhanden ·
-R4 Zustand und Position entsprechen der Realität · R5 Positionsbefehle und
-Zieländerung während der Fahrt · R6 Stop → Positionsmeldung nach ≈110 ms,
-sofortige Aktualisierung · R7 lokale Wippentelegramme der Rollladenaktoren,
-danach Positionsupdates · R8 F6-02-01: 6 Press- und 6 Release-Telegramme, je
-genau ein Event-Entity-Update, Gateway→HA 7–19 ms, Empfang→Write 0,9–1,5 ms.
-Aus der Stichprobe R8 folgt **keine** allgemeine Exactly-once-Garantie.
+Reported by the maintainer, not independently verified; to be preserved, but
+no proof of complete correctness:
+R1 connection after the migration · R2 reload loads the device list and
+reconnects the stream · R3 opening/closing indicators present ·
+R4 state and position match reality · R5 position commands and target change
+while moving · R6 stop → position report after ≈110 ms, immediate update ·
+R7 local rocker telegrams of the cover actuators, then position updates ·
+R8 F6-02-01: 6 press and 6 release telegrams, exactly one event entity update
+each, gateway→HA 7–19 ms, receipt→write 0.9–1.5 ms.
+The R8 sample does **not** imply a general exactly-once guarantee.
 
-### 3.2 Offene Beobachtung: verzögerte Endlagenmeldung
+### 3.2 Open observation: delayed end-position report
 
-| Ablauf | Zeit | Beobachtung | Einordnung |
-|--------|-----:|-------------|-----------|
-| A | T+0,000 s | Rohwert 0 gesendet | OPUS 0 = offen → HA-Position 100 (`cover.py`: `100 - channel.position`) [Code] |
-| A | T+0,482 s | Position `unknown` | `from`-Telegramm; ungültiger Wert lässt die letzte Position stehen und bestätigt nichts (`_integer_reading`, `confirmed_fields_by_channel`) [Code] |
-| A | T+32,976 s | Position 0.0, `gateway_to_ha_ms=8` | Gateway-Zeitstempel liegt bereits bei ≈T+33 s → die Verzögerung entsteht **vor** dem Zeitstempel des Gateways, sofern die Uhren synchron sind (B-7) |
-| B | T+0,000 / 0,460 / 33,100 s | Rohwert 100 → `unknown` → 100.0, `gateway_to_ha_ms=19` | wie A; OPUS 100 = geschlossen → HA 0 |
+| Run | Time | Observation | Interpretation |
+|-----|-----:|-------------|----------------|
+| A | T+0.000 s | raw value 0 sent | OPUS 0 = open → HA position 100 (`cover.py`: `100 - channel.position`) [Code] |
+| A | T+0.482 s | position `unknown` | `from` telegram; an invalid value keeps the last position and confirms nothing (`_integer_reading`, `confirmed_fields_by_channel`) [Code] |
+| A | T+32.976 s | position 0.0, `gateway_to_ha_ms=8` | the gateway timestamp is already ≈T+33 s → the delay arises **before** the gateway's timestamp, provided the clocks are in sync (B-7) |
+| B | T+0.000 / 0.460 / 33.100 s | raw value 100 → `unknown` → 100.0, `gateway_to_ha_ms=19` | as A; OPUS 100 = closed → HA 0 |
 
-Bewertung [Entwurf]: Die Integration verarbeitet die Endlagenmeldung innerhalb
-von Millisekunden nach dem Gateway-Zeitstempel. Eine Regression gegenüber
-v0.7.0 ist **nicht nachgewiesen** (kein kontrollierter Vergleich).
+Assessment [Design]: the integration processes the end-position report within
+milliseconds of the gateway timestamp. A regression against v0.7.0 is **not
+shown** (no controlled comparison).
 
-Stand nach Abschnitt 3.3: H1 ist durch die Upstream-Mitteilung gestützt
-(Aktor-Nachlauf bei Fahrten in die Endlage), H2 und H4 sind dadurch
-unwahrscheinlich, H5 ist weiter durch das Log widerlegt. Die Bestätigung an
-der eigenen Installation ist Gegenstand von R1.
+State after section 3.3: H1 is supported by the upstream note (actuator
+overrun on runs into an end position), H2 and H4 are therefore unlikely, H5
+remains refuted by the log. Confirmation on the maintainer's own installation
+is the subject of R1.
 
-Ursprüngliche Hypothesen (Revision 1):
-- **H1** Der Aktor meldet erst nach Ablauf seiner eingestellten Laufzeit
-  (`verticalMovementTime`/Laufzeit inkl. Nachlauf), nicht beim Erreichen des
-  Endschalters. Bei ≈33 s gesamt und ≈5–6 s nach Stillstand wäre eine Laufzeit
-  von ≈33 s plausibel. [Annahme]
-- **H2** Das Gateway stellt die Meldung verzögert bereit (z. B. nach eigener
-  Statusabfrage). [Annahme]
-- **H3** Uhrenversatz Gateway↔HA verfälscht `gateway_to_ha_ms`. [Annahme]
-- **H4** Die Integration verzögert (Debounce, Warteschlange). Gegen H4 spricht:
-  REST hat keinen Debounce, Telegramme werden synchron im Stream-Task
-  verarbeitet [Code].
-- **H5** Die angezeigte Endlage stammt aus der eigenen Fallback-Annahme
-  (`_finish_cover_movement` nach Fahrzeit + 5 s) statt aus einem Telegramm.
-  Gegen H5 spricht das protokollierte `gateway_to_ha_ms` (nur bei Telegrammen
-  geloggt) [Code].
+Original hypotheses (revision 1):
+- **H1** The actuator reports only after its configured run time
+  (`verticalMovementTime`/run time incl. overrun), not when the limit switch
+  is reached. With ≈33 s in total and ≈5–6 s after standstill, a run time of
+  ≈33 s would be plausible. [Assumption]
+- **H2** The gateway provides the report late (e.g. after its own status
+  query). [Assumption]
+- **H3** A clock offset gateway↔HA distorts `gateway_to_ha_ms`. [Assumption]
+- **H4** The integration delays (debounce, queue). Against H4: REST has no
+  debounce, telegrams are processed synchronously in the stream task [Code].
+- **H5** The shown end position comes from the integration's own fallback
+  assumption (`_finish_cover_movement` after movement time + 5 s) rather than
+  a telegram. Against H5: the logged `gateway_to_ha_ms` (logged only for
+  telegrams) [Code].
 
-Untersuchung (Phase R1, ohne Polling, ohne Zeitgeber-Annahmen): siehe Phase R1.
+Investigation (phase R1, no polling, no timer assumptions): see phase R1.
 
-### 3.3 Neue Erkenntnis: Nachlauf des D2-05-Aktors (Upstream-Mitteilung, 2026-10-20)
+### 3.3 New finding: overrun of the D2-05 actuator (upstream note, 2026-10-20)
 
-Kernaussage **[Upstream-Mitteilung]**: Die späte Endlagenmeldung ist
-erwartetes Verhalten des Aktors und entsteht **nicht** im REST-Transport.
+Key statement **[Upstream note]**: the late end-position report is expected
+actuator behaviour and does **not** arise in the REST transport.
 
-- Fährt ein D2-05-Aktor in die vollständig offene oder geschlossene Lage, hält
-  er den Motor einige Sekunden länger als die konfigurierte Fahrzeit
-  eingeschaltet, damit die Endlage sicher erreicht wird. Der Endschalter des
-  Motors stoppt den Behang physisch; der Aktor sendet seine endgültige
-  Positionsmeldung aber erst beim Abschalten.
-- Bei Fahrten auf eine Zwischenposition und bei Stop gibt es keinen Nachlauf.
-  Das erklärt die Stop-Meldung nach ≈110 ms (Praxis-Baseline R6).
-- Die Geräteliste des Gateways enthält die konfigurierte Fahrzeit und die Dauer
-  der letzten Fahrt. Messwerte der Upstream-Installation – jede volle Fahrt
-  dauerte 3,5–5,7 s länger als konfiguriert:
+- When a D2-05 actuator moves to the fully open or closed position, it keeps
+  the motor on for a few seconds longer than the configured movement time so
+  that the end position is reached safely. The motor's limit switch stops the
+  shutter physically; the actuator sends its final position report only when
+  it switches off.
+- Runs to an intermediate position and stop have no overrun. This explains
+  the stop report after ≈110 ms (field baseline R6).
+- The gateway's device list contains the configured movement time and the
+  duration of the last run. Measurements of the upstream installation – every
+  full run took 3.5–5.7 s longer than configured:
 
-| Aktor | Konfigurierte Fahrzeit | Letzte volle Fahrt |
-|-------|-----------------------:|-------------------:|
-| Rolladen 1 | 20,68 s | 26,37 s (+5,7 s) |
-| Jalousie 1 | 26,14 s | 31,14 s (+5,0 s) |
-| Jalousie 2 | 52,78 s | 57,79 s (+5,0 s) |
-| Jalousie 3 | 55,09 s | 60,21 s (+5,1 s) |
+| Actuator | Configured movement time | Last full run |
+|----------|-------------------------:|--------------:|
+| Shutter 1 | 20.68 s | 26.37 s (+5.7 s) |
+| Blind 1 | 26.14 s | 31.14 s (+5.0 s) |
+| Blind 2 | 52.78 s | 57.79 s (+5.0 s) |
+| Blind 3 | 55.09 s | 60.21 s (+5.1 s) |
 
-- Passt zur eigenen Beobachtung (Abschnitt 3.2): ≈27 s Fahrt + ≈5–6 s
-  Nachlauf ≈ 33 s. `gateway_to_ha_ms=8/19` heißt, dass das Gateway das
-  Endtelegramm nur Millisekunden vor Home Assistant erhalten hat; die Wartezeit
-  liegt zwischen Aktor und Gateway, bevor die REST-API beteiligt ist (vgl. B-7:
-  gilt bei synchronen Uhren).
-- Vergleich mit der HomeKit-Seite desselben Gateways (Upstream, parallel zu
-  v1.0.0b0): Bei 8 Rollläden in einer geplanten Vollfahrt erhielt HomeKit jede
-  Endlage im selben Moment; v1.0.0b0 war jedes Mal 4–28 ms früher. Apple Home
-  oder die OPUS-App zeigen dieselbe Verzögerung.
-- v0.7.0 (MQTT) verhält sich nicht anders: Die Cover-Schätzung ist unverändert.
-  Während der Fahrt zeigt die Entity „opening/closing“, bis die konfigurierte
-  Fahrzeit plus 5 s Karenz abgelaufen ist oder der Aktor meldet, je nachdem was
-  zuerst eintritt. Mit MQTT konnte die Endmeldung nur gleichzeitig oder später
-  ankommen; upstream kam sie 0,8–10 s nach HomeKit (Durchsatz des MQTT-Brokers
-  im Gateway).
+- Matches the maintainer's observation (section 3.2): ≈27 s run + ≈5–6 s
+  overrun ≈ 33 s. `gateway_to_ha_ms=8/19` means the gateway received the end
+  telegram only milliseconds before Home Assistant; the waiting time lies
+  between actuator and gateway, before the REST API is involved (see B-7:
+  valid with synchronised clocks).
+- Comparison with the HomeKit side of the same gateway (upstream, alongside
+  v1.0.0b0): with 8 covers in one scheduled full run, HomeKit received every
+  end position at the same moment; v1.0.0b0 was 4–28 ms earlier each time.
+  Apple Home or the OPUS app show the same delay.
+- v0.7.0 (MQTT) behaves no differently: the cover estimate is unchanged.
+  While moving, the entity shows "opening/closing" until the configured
+  movement time plus 5 s grace has elapsed or the actuator reports, whichever
+  comes first. With MQTT the end report could only arrive at the same time or
+  later; upstream it arrived 0.8–10 s after HomeKit (throughput of the MQTT
+  broker in the gateway).
 
-Abgleich mit dem Code [Code]:
-- „Fahrzeit + 5 s Karenz“ entspricht `CoverMovement.ends_at`
-  (`started_at + travel + COVER_MOVEMENT_GRACE_SECONDS`, 5,0 s) in beiden
-  Koordinatoren; eine gültige Positionsmeldung beendet die Schätzung vorher
+Comparison with the code [Code]:
+- "Movement time + 5 s grace" corresponds to `CoverMovement.ends_at`
+  (`started_at + travel + COVER_MOVEMENT_GRACE_SECONDS`, 5.0 s) in both
+  coordinators; a valid position report ends the estimate earlier
   (`_record_confirmed_feedback`).
-- Folgerung für A-5/R6: Liegt der Nachlauf über der Karenz (upstream bis
-  5,7 s), setzt `_finish_cover_movement` das Ziel als **angenommene** Position
-  kurz **vor** der echten Endmeldung; die Meldung ersetzt sie danach. Sichtbar
-  bleibt das Ergebnis gleich, aber die Herkunft ist für ≈0–1 s „angenommen“.
-- `lastVerticalMovementTime` wird vom Code derzeit **nicht** gelesen; nur
-  `verticalMovementTime` und `rotationTime` aus `configuration.parameters`
-  (`protocol.configuration_state_functions`). Diagnose zeigt die letzte
-  Fahrtdauer daher nicht.
+- Consequence for A-5/R6: if the overrun exceeds the grace period (upstream up
+  to 5.7 s), `_finish_cover_movement` sets the target as an **assumed**
+  position shortly **before** the real end report; the report replaces it
+  afterwards. The visible result is the same, but for ≈0–1 s the origin is
+  "assumed".
+- `lastVerticalMovementTime` is currently **not** read by the code; only
+  `verticalMovementTime` and `rotationTime` from `configuration.parameters`
+  (`protocol.configuration_state_functions`). Diagnostics therefore do not
+  show the last run duration. Note (R5-H1): this configuration block exists
+  only in `GET /devices`, not in the stream's device list.
 
-Konsequenzen für den Plan [Entwurf]:
-- Kein Code-Fix für die Endlagenverzögerung; sie ist Aktorverhalten und wird
-  dokumentiert (README „Known limitations“/Cover, Vertrag 12.9) → R0/R1.
-- R1 wird von einer Ursachenanalyse zu einer **Bestätigungsmessung** an der
-  eigenen Installation verkleinert.
-- Die Karenz von 5 s bleibt vorerst unverändert. Sie ist eine gemeinsame
-  Konstante beider Transporte (`const.py`) und gilt für MQTT weiter unter
-  A1–A5; eine andere Karenz für REST braucht eine eigene REST-Konstante
-  (Abschnitt 0.1). Ob REST die Karenz bei Nachlauf > 5 s anpasst oder die
-  Herkunft nur sichtbar macht, entscheidet R6 (O-4).
+Consequences for the plan [Design]:
+- No code fix for the end-position delay; it is actuator behaviour and is
+  documented (README "Known limitations"/Cover, contract 12.9) → R0/R1.
+- R1 is reduced from a root-cause analysis to a **confirmation measurement**
+  on the maintainer's own installation.
+- The grace period of 5 s stays unchanged for now. It is a constant shared by
+  both transports (`const.py`) and stays under A1–A5 for MQTT; a different
+  grace period for REST needs its own REST constant (section 0.1). Whether
+  REST adapts the grace period for an overrun > 5 s or only makes the origin
+  visible is decided in R6 (O-4).
 
-## 4. REST-Ressourcen
+## 4. REST resources
 
-| Ressource | Im Code verwendet | Beleg |
-|-----------|-------------------|-------|
-| `GET /system/info` | ja: Config-Flow, Setup, Reauth/Reconfigure | [Code] [Test] [HW-upstream] |
-| `GET /system/uptime` | ja: Setup, alle 60 s | [Code] [Test] [HW-upstream] |
-| `GET /devices` | ja: Setup, alle 30 min (D2) | [Code] [Test] [HW-upstream] |
-| `GET /devices/stream` | ja, **ohne** Query-Parameter, Format: aneinandergereihte JSON-Dokumente (auch Pretty-Print) | [Code] [Test] [HW-upstream] |
-| `GET /devices/{id}` | ja: unbekanntes Gerät, höchstens 1×/h je Gerät | [Code] [Test] |
-| `PUT /devices/{id}/state` | ja: Befehle, Statusabfragen | [Code] [Test] [HW-upstream] |
-| `GET`/`PUT /devices/{id}/configuration` | ja: nur Service-Aktionen | [Code] [Test] |
-| `GET /devices/{id}/parameters` | ja: nur Service-Aktion | [Code] [Test] |
-| Stream-Parameter `direction=from`, `delimited=newLine`, `output=singleLine`, `levelOfDetail=high` | **nein**, in keiner Repository-Quelle belegt | – |
+| Resource | Used by the code | Evidence |
+|----------|------------------|----------|
+| `GET /system/info` | yes: config flow, setup, reauth/reconfigure | [Code] [Test] [HW-upstream] |
+| `GET /system/uptime` | yes: setup, every 60 s | [Code] [Test] [HW-upstream] |
+| `GET /devices` | yes: once right after setup (configuration and battery, R5-H1), every 30 min (D2) | [Code] [Test] [HW-upstream] [HW] |
+| `GET /devices/stream` | yes, **without** query parameters; format: concatenated JSON documents (also pretty-printed); its first document is the setup snapshot since R5; its device list has no `configuration` block [HW] | [Code] [Test] [HW-upstream] [HW] |
+| `GET /devices/{id}` | yes: unknown device, at most once per hour per device | [Code] [Test] |
+| `PUT /devices/{id}/state` | yes: commands, status queries | [Code] [Test] [HW-upstream] |
+| `GET`/`PUT /devices/{id}/configuration` | yes: service actions only | [Code] [Test] |
+| `GET /devices/{id}/parameters` | yes: service action only | [Code] [Test] |
+| Stream parameters `direction=from`, `delimited=newLine`, `output=singleLine`, `levelOfDetail=high` | **no**, not documented in any repository source | – |
 
-Bewertung der Stream-Parameter [Entwurf]:
-- `direction=from` **nicht** verwenden: Der Code braucht `to`-Telegramme für
-  Fremdbefehle (HomeKit), für die erkannte Zustellung nach ACK 201 und für die
-  Echo-Erkennung [Code]. Ohne sie gingen Zustände verloren.
-- `delimited=newLine`/`output=singleLine` wären mit dem vorhandenen Splitter
-  kompatibel (Zeilenumbrüche sind Leerraum zwischen Dokumenten) und würden das
-  Parsen nicht vereinfachen müssen. Übernahme erst nach Hardwarenachweis.
-- `levelOfDetail=high`: Wirkung unbekannt; nur nach Hardwarevergleich.
+Assessment of the stream parameters [Design]:
+- Do **not** use `direction=from`: the code needs `to` telegrams for foreign
+  commands (HomeKit), for detecting delivery after ACK 201 and for echo
+  detection [Code]. Without them, states would be lost.
+- `delimited=newLine`/`output=singleLine` would be compatible with the existing
+  splitter (line breaks are whitespace between documents) and would not
+  simplify parsing. Adopt only after hardware evidence.
+- `levelOfDetail=high`: effect unknown (possibly the missing configuration of
+  R5-H1); only after a hardware comparison.
 
-## 5. Zielarchitektur (kleinste tragfähige Lösung)
+## 5. Target architecture (smallest viable solution)
 
-### 5.1 Entwurfsentscheidungen
+### 5.1 Design decisions
 
-| ID | Entscheidung | Konkretes Problem, das sie löst |
-|----|--------------|--------------------------------|
-| E1 | **Zwei Koordinatoren bleiben**; keine gemeinsame Transport-Engine jetzt. | Eine Vereinheitlichung müsste die MQTT-Schutzmechanismen (Retained-Replays, Fragment-Debounce, Antwort-Routing, A4) neu bauen, obwohl MQTT später entfallen soll. |
-| E2 | Neues transportneutrales Modul **`domain.py`** für `CommandDelivery`, `CoverMovement`, Dispatcher-Signale, `request_error`, `ACK_STATUS_DEFERRED`, Zeitkonstanten; `coordinator.py`/`mqtt_transport.py` re-exportieren für Kompatibilität. | K2, K3: REST und Plattformen importieren kein MQTT-Modul mehr. |
-| E3 | `transport.OpusCoordinator` wird ein `typing.Protocol` (statt Union). | K6: Entfernen des MQTT-Koordinators ändert keine Plattform. |
-| E4 | MQTT nur noch bei Bedarf importieren (`__init__`, `config_flow`), `manifest.json` `dependencies` → `after_dependencies` nach Prüfung (Hassfest, Discovery-Anforderung, MQTT-Start ohne Broker). | K1, K4, K5: REST-only ohne MQTT-Integration. |
-| E5 | Bibliotheksgrenze = `api.py` + JSON-Helfer aus `wire.py`; `PriorityLock` wandert in den REST-Koordinator. Spätere Auslagerung als PyPI-Paket ohne Codeänderung am Kern. | B-6, Auftrag „isolierter Client“. |
-| E6 | Geräte werden **in place** aktualisiert (`EnOceanDevice`-Methode für Metadaten), nicht neu erzeugt. | B-4: keine vergessenen Felder, keine verwaisten Referenzen. |
-| E7 | Stream-first-Start (Abschnitt 7) statt doppelter Geräteliste. | B-8, Startrennen. |
+| ID | Decision | Concrete problem it solves |
+|----|----------|----------------------------|
+| E1 | **Two coordinators stay**; no shared transport engine for now. | A unification would have to rebuild the MQTT protections (retained replays, fragment debounce, answer routing, A4), although MQTT is to be removed later. |
+| E2 | New transport-neutral module **`domain.py`** for `CommandDelivery`, `CoverMovement`, dispatcher signals, `request_error`, `ACK_STATUS_DEFERRED`, timing constants; `coordinator.py`/`mqtt_transport.py` re-export for compatibility. | K2, K3: REST and platforms import no MQTT module. |
+| E3 | `transport.OpusCoordinator` becomes a `typing.Protocol` (instead of a union). | K6: removing the MQTT coordinator changes no platform. |
+| E4 | Import MQTT only on demand (`__init__`, `config_flow`); `manifest.json` `dependencies` → `after_dependencies` after verification (Hassfest, discovery requirement, MQTT start without broker). | K1, K4, K5: REST-only without the MQTT integration. |
+| E5 | Library boundary = `api.py` + JSON helpers from `wire.py`; `PriorityLock` moves into the REST coordinator. A later extraction as a PyPI package without code changes to the core. | B-6, assignment "isolated client". |
+| E6 | Devices are updated **in place** (an `EnOceanDevice` method for metadata), not recreated. | B-4: no forgotten fields, no orphaned references. |
+| E7 | Stream-first start (section 7) instead of a double device list. | B-8, start race. |
 
-### 5.2 Schichten
+### 5.2 Layers
 
-| Schicht | Module (Ziel) | Darf nicht kennen |
-|---------|---------------|-------------------|
-| Transport | `api.py` (HTTP, Stream, Fehler), `mqtt_transport.py` | Home Assistant (nur `mqtt_transport`), Entities, Gerätemodell |
-| Dekodierung | `protocol.py` (REST), MQTT-Flattening in `coordinator.py` | aiohttp-Objekte, Entities |
-| Fachlogik | `enocean_device.py` (Zustand, Ereignis, Metadaten, Zustellstatus), `domain.py` | MQTT-Topics, HTTP-Responses, Entities |
-| Befehlsrouting, Verfügbarkeit | `rest_coordinator.py`, `coordinator.py` | Entity-Objekte |
-| Home Assistant | `__init__.py`, `config_flow.py`, Plattformen, `entity.py`, `diagnostics.py` | Transportdetails (nur `OpusCoordinator`) |
+| Layer | Modules (target) | Must not know |
+|-------|------------------|---------------|
+| Transport | `api.py` (HTTP, stream, errors), `mqtt_transport.py` | Home Assistant (except `mqtt_transport`), entities, device model |
+| Decoding | `protocol.py` (REST), MQTT flattening in `coordinator.py` | aiohttp objects, entities |
+| Domain logic | `enocean_device.py` (state, event, metadata, delivery status), `domain.py` | MQTT topics, HTTP responses, entities |
+| Command routing, availability | `rest_coordinator.py`, `coordinator.py` | entity objects |
+| Home Assistant | `__init__.py`, `config_flow.py`, platforms, `entity.py`, `diagnostics.py` | transport details (only `OpusCoordinator`) |
 
-### 5.3 Fachmodell
+### 5.3 Domain model
 
-Weiterverwendet: `EnOceanDevice`/`EnOceanChannel`, `state_revision`,
-`ChannelStateSnapshot`, `deferred_commands`, EEP-Zuordnungen in `const.py`.
-Getrennt geführt (Ist, bleibt):
+Reused: `EnOceanDevice`/`EnOceanChannel`, `state_revision`,
+`ChannelStateSnapshot`, `deferred_commands`, EEP mappings in `const.py`.
+Kept separate (current state, stays):
 
-| Kategorie | Ist-Ort |
-|-----------|---------|
-| Dauerhafter Zustand | `EnOceanChannel` (z. B. `is_on`, `position`, `angle`) |
-| Kurzlebige Ereignisse | Tasterfelder, nach dem Dispatch gelöscht (`clear_button_occurrence`) |
-| Metadaten/Konfiguration | `EnOceanDevice` (`dbm`, `last_seen`, `eeps`), `EnOceanChannel.vertical_movement_time`, `rotation_time` |
-| Befehlsannahme/Zustellstatus | Rückgabe `CommandDelivery`, `deferred_commands`, `last_command_error` |
-| Beobachteter Gerätezustand | Felder nach `from`-Telegramm/Einzelgerät; **noch nicht** von Schätzungen unterscheidbar (A-5) |
+| Category | Current location |
+|----------|------------------|
+| Persistent state | `EnOceanChannel` (e.g. `is_on`, `position`, `angle`) |
+| Short-lived events | button fields, cleared after dispatch (`clear_button_occurrence`) |
+| Metadata/configuration | `EnOceanDevice` (`dbm`, `last_seen`, `eeps`), `EnOceanChannel.vertical_movement_time`, `rotation_time` |
+| Command acceptance/delivery status | return value `CommandDelivery`, `deferred_commands`, `last_command_error` |
+| Observed device state | fields after a `from` telegram/single device; **not yet** distinguishable from estimates (A-5) |
 
-Regeln (bestehen, werden mit Tests festgeschrieben): Fehlendes Feld ändert
-nichts; ungültiger Wert behält den alten; nur `notAvailable` setzt Messwerte
-auf unbekannt. Zustandsverantwortung: genau ein Speicher je Eintrag
-(`coordinator.devices`), keine zusätzlichen Stores.
+Rules (existing, pinned by tests): a missing field changes nothing; an invalid
+value keeps the old one; only `notAvailable` sets readings to unknown. State
+ownership: exactly one store per entry (`coordinator.devices`), no extra
+stores.
 
-## 6. Stream-Lebenszyklus: Ist und Soll
+## 6. Stream lifecycle: before and target
 
-| Anforderung | Ist [Code] | Soll / Phase |
-|-------------|-----------|--------------|
-| Ein Reader je Gateway, an den Eintrag gebunden | ein `_stream_task` über `hass.async_create_background_task`, beim Unload abgebrochen und abgewartet | bleibt; Verbindungsgeneration gegen Rückläufer eines ersetzten Streams (R4, **umgesetzt** Phase 18) |
-| Nachrichten ≠ Chunks, UTF-8-Grenzen | `JsonDocumentSplitter` mit inkrementellem UTF-8-Decoder, Zustand über Chunks | bleibt |
-| Leere/fehlerhafte/unbekannte Nachrichten | Nicht-Objekte übersprungen, unbekannte Typen ignoriert, Fremdzeichen → Fehler → Neuverbindung | bleibt |
-| Übergroße Nachrichten | Grenze 8 MB nur für über Chunks wachsende Reste (B-3) | auch vollständige Dokumente prüfen (R4, **umgesetzt** Phase 18) |
-| EOF/Abbruch | Neuverbindung | Mindestpause und Backoff auch nach kurzlebigen Verbindungen (B-2, R4, **umgesetzt** Phase 18: Stream < 10 s = Fehlschlag) |
-| Auth vs. Netz | 401/403 → `OpusAuthError` → Reauth, keine Neuversuche; sonst Backoff | bleibt |
-| Backoff mit Jitter | fest 1, 2, 5, 10, 30, 60 s, ohne Jitter | begrenzt exponentiell mit Jitter (R4, **umgesetzt** Phase 18: nominal 1–60 s, +0–25 %) |
-| Cancellation, Response-Freigabe | `async with session.get(...)`; Unload bricht Tasks ab und wartet | bleibt; Test „kein offener Reader nach Reload“ (R4, **umgesetzt** Phase 18, zusätzlich `aclosing`) |
-| Gateway-Neustart | fallende Uptime → Stream ersetzen | bleibt |
-| Stiller Stream | nach 900 s ohne Daten neu öffnen (`STREAM_IDLE_TIMEOUT`); kein Heartbeat dokumentiert; Stille ≠ Fehler (keine Nichtverfügbarkeit) | bleibt; Verfügbarkeit nur über Verbindungsfehler und Uptime-Probe |
+| Requirement | Before [Code] | Target / phase |
+|-------------|---------------|----------------|
+| One reader per gateway, bound to the entry | one `_stream_task` via `hass.async_create_background_task`, cancelled and awaited on unload | stays; connection generation against late documents of a replaced stream (R4, **done** phase 18) |
+| Messages ≠ chunks, UTF-8 boundaries | `JsonDocumentSplitter` with incremental UTF-8 decoder, state across chunks | stays |
+| Empty/malformed/unknown messages | non-objects skipped, unknown types ignored, foreign characters → error → reconnect | stays |
+| Oversized messages | 8 MB limit only for remainders growing across chunks (B-3) | also check complete documents (R4, **done** phase 18) |
+| EOF/abort | reconnect | minimum pause and backoff also after short-lived connections (B-2, R4, **done** phase 18: stream < 10 s = failure) |
+| Auth vs. network | 401/403 → `OpusAuthError` → reauth, no retries; otherwise backoff | stays |
+| Backoff with jitter | fixed 1, 2, 5, 10, 30, 60 s, no jitter | bounded exponential with jitter (R4, **done** phase 18: nominal 1–60 s, +0–25 %) |
+| Cancellation, response release | `async with session.get(...)`; unload cancels tasks and waits | stays; test "no open reader after reload" (R4, **done** phase 18, plus `aclosing`) |
+| Gateway restart | falling uptime → replace the stream | stays |
+| Silent stream | reopen after 900 s without data (`STREAM_IDLE_TIMEOUT`); no documented heartbeat; silence ≠ error (no unavailability) | stays; availability only through connection errors and the uptime probe |
 
-## 7. Start und Resynchronisierung
+## 7. Start and resynchronisation
 
-### 7.1 Analyse des Rennens zwischen `GET /devices` und Stream [Code]
+### 7.1 Analysis of the race between `GET /devices` and the stream [Code]
 
-1. Setup liest `GET /devices` (Zeitpunkt t₁), startet danach den Stream.
-2. Der Stream liefert als erstes Dokument die vollständige Liste (t₂ > t₁) und
-   danach Telegramme **in Reihenfolge auf derselben Verbindung**.
-3. Änderungen zwischen t₁ und t₂ sind im Stream-Snapshot enthalten; Zustände
-   gehen nicht verloren. Tasterereignisse aus diesem Fenster gehen verloren –
-   das ist korrekt, Ereignisse werden nie aus Snapshots erzeugt.
-4. Folge: Die erste Liste ist redundant (B-8). Ein echtes Überschreibrisiko
-   besteht nur bei einer Quittung kurz vor t₂: Der Snapshot kann den alten
-   Zustand zeigen. Ausstehende Statusprüfungen bleiben bestehen, weil Listen
-   keine Rückmeldung sind (`test_rest_devices.py::test_device_list_is_not_command_feedback`).
-5. Die 30-min-Liste ist nicht autoritativ und überschreibt keinen Live-Zustand;
-   nur Metadaten können zurückspringen (B-5).
+1. Setup read `GET /devices` (time t₁), then started the stream.
+2. The stream delivers the complete list as its first document (t₂ > t₁) and
+   then telegrams **in order on the same connection**.
+3. Changes between t₁ and t₂ are contained in the stream snapshot; no state is
+   lost. Button events from this window are lost – that is correct, events are
+   never created from snapshots.
+4. Consequence: the first list is redundant (B-8). A real overwrite risk
+   exists only for an acknowledgement shortly before t₂: the snapshot may show
+   the old state. Pending status checks stay, because lists are not feedback
+   (`test_rest_devices.py::test_device_list_is_not_command_feedback`).
+5. The 30 min list is not authoritative and overwrites no live state; only
+   metadata could jump back (B-5).
 
-### 7.2 Vorgeschlagener Ablauf [Entwurf, Phase R5]
+Correction after the hardware check (R5-H1): point 4 holds for **state** only.
+The stream's list lacks the `configuration` block, so it is not a full
+replacement of `GET /devices`.
 
-1. `GET /system/info` – Identität (EURID) prüfen; Auth/Mismatch → Reauth.
-2. Stream öffnen und auf das erste `devices`-Dokument warten (Frist z. B.
-   30 s, Wert in R5 festlegen). Ausbleiben → `ConfigEntryNotReady`.
-3. Dieses Dokument autoritativ anwenden → verfügbar → Plattformen laden.
-4. Derselbe Task liest den Stream weiter (keine zweite Verbindung).
-5. Jede Neuverbindung beginnt wieder mit einem autoritativen Snapshot;
-   Verbindungsgeneration verhindert die Anwendung von Dokumenten eines
-   ersetzten Streams.
-6. `GET /devices` nur noch alle 30 min (D2); Metadaten aus dieser Liste
-   überschreiben neuere Telegramm-Metadaten nicht (B-5).
-7. `GET /system/uptime` bleibt die 60-s-Gesundheitsprüfung, ändert nie
-   Gerätezustände (Gateway-Gesundheit ist kein Gerätezustand; HA-Regel
+### 7.2 Proposed sequence [Design, phase R5]
+
+1. `GET /system/info` – check identity (EURID); auth/mismatch → reauth.
+2. Open the stream and wait for the first `devices` document (deadline e.g.
+   30 s, value set in R5). Missing → `ConfigEntryNotReady`.
+3. Apply this document authoritatively → available → load platforms.
+4. The same task keeps reading the stream (no second connection).
+5. Every reconnect starts again with an authoritative snapshot; the
+   connection generation prevents applying documents of a replaced stream.
+6. `GET /devices` only every 30 min (D2); metadata from this list does not
+   overwrite newer telegram metadata (B-5).
+7. `GET /system/uptime` stays the 60 s health check and never changes device
+   states (gateway health is not device state; HA rule
    `entity-unavailable`).
 
-Begründung: eine Quelle der Wahrheit beim Start, kein Rennen zwischen zwei
-Snapshots, eine Geräteliste weniger je Start. Alternative „beides behalten“
-bleibt möglich, falls Hardware zeigt, dass der erste Stream-Snapshot verzögert
-kommt; Entscheidung in R5 nach Messung.
+Rationale: one source of truth at startup, no race between two snapshots, one
+device list fewer per start. The alternative "keep both" remained possible if
+hardware showed that the first stream snapshot arrives late; decision in R5
+after measurement.
 
-**Umgesetzt in R5 (Phase 21):** Ablauf wie oben, Frist 30 s. `GET
-/system/uptime` bleibt beim Setup (Ausgangswert der Neustarterkennung). Die
-Messung auf Hardware erfolgt über `gateway.first_device_list_seconds` in der
-Diagnose; liegt sie nahe an 30 s, wird die Frist angepasst oder die
-Alternative gewählt. **Ergebnis:** 0,076 s (Frist bleibt); wegen R5-H1 folgt
-nach dem Setup einmal `GET /devices` nur für Konfiguration und Batterie.
+**Implemented in R5 (phase 21):** sequence as above, deadline 30 s.
+`GET /system/uptime` stays at setup (baseline of the restart detection). The
+hardware measurement uses `gateway.first_device_list_seconds` in the
+diagnostics. **Result [HW]:** 0.076 s with 53 devices (deadline stays).
+Because of R5-H1, the non-authoritative metadata refresh (`GET /devices`)
+runs once right after setup for configuration and battery only (PR #28).
 
-## 8. Phasenplan
+## 8. Phase plan
 
-Arbeitszweig (Entscheidung 2026-10-20): Bis auf Weiteres wird nur auf
-`feature/rest-api-integration` gearbeitet. Jeder Phasen-Branch startet von
-dort und wird per PR mit Base `feature/rest-api-integration` zurückgeführt,
-nie nach `main`. Ein späterer Merge nach `main` braucht zuerst den Revert des
-Revert-Commits `32685d1` (PR #15).
+Working branch (decision 2026-10-20): until further notice all work happens on
+`feature/rest-api-integration`. Every phase branch starts from there and
+returns by PR with base `feature/rest-api-integration`, never into `main`. A
+later merge into `main` first needs the revert of the revert commit `32685d1`
+(PR #15).
 
-Jede Phase: eigener Branch (`feat/`/`fix/`), Tests zuerst, CI grün,
-Phasenbericht `phases/phase-NN.md` nach Abschnitt 20 von
-`implementation-plan.md`, keine Version, kein CHANGELOG ohne Freigabe.
-Hardwaretests nur mit separater Freigabe. Für jede Phase gilt Abschnitt 0.1
-(D3): A1–A5 für den MQTT-Pfad und gemeinsamen Code, Best Practices und
-Home-Assistant-Vorgaben für den REST-Transport.
+Every phase: its own branch (`feat/`/`fix/`), tests first, CI green, phase
+report `phases/phase-NN.md` per section 20 of `implementation-plan.md`, no
+version, no CHANGELOG without approval. Hardware tests only with separate
+approval. Section 0.1 (D3) applies to every phase: A1–A5 for the MQTT path and
+shared code, best practices and Home Assistant requirements for the REST
+transport.
 
-### R0 – Dokumentationsnachzug (nur Doku)
+Phase numbering: R0 = 15, R2 = 16, R3 = 17, R4 = 18, R4.2 = 19, R4.3 = 20,
+R5 = 21 (R1 is still open).
 
-**Status 2026-10-20:** umgesetzt auf Branch `docs/opus-r0-rest-documentation`
-(Basis `1847f88`), Bericht `phases/phase-15.md`. **Gemergt** in
-`feature/rest-api-integration` über PR #16 (Merge-Commit `4014b1c`,
-2026-10-20); nicht in `main`. Erledigt damit
-A-1 und A-6 aus Abschnitt 2.5.
+### R0 – Documentation follow-up (docs only)
 
-- D2 eintragen: `implementation-plan.md` Abschnitt 3 (Ergänzung „genehmigt
-  2026-10-20“) und 15a, `phases/phase-14.md` Abschnitt 9,
-  `protocol-contract.md` 12.8/12.9 (Praxis-Baseline, Endlagenbeobachtung,
-  Aktor-Nachlauf nach Abschnitt 3.3 als Upstream-Mitteilung gekennzeichnet).
-- README „Known limitations“: Endlagenmeldung bei Vollfahrten kommt erst nach
-  dem Aktor-Nachlauf (≈3,5–6 s nach physischem Stillstand); Stop und
-  Zwischenpositionen ohne Nachlauf.
-- Dieses Dokument verlinken.
-- Akzeptanz: keine Codeänderung, Querverweise konsistent.
+**Status 2026-10-20:** implemented on branch `docs/opus-r0-rest-documentation`
+(base `1847f88`), report `phases/phase-15.md`. **Merged** into
+`feature/rest-api-integration` via PR #16 (merge commit `4014b1c`,
+2026-10-20); not into `main`. Resolves A-1 and A-6 of section 2.5.
 
-### R1 – Bestätigung des Aktor-Nachlaufs (Messung, kein Fix)
+- Record D2: `implementation-plan.md` section 3 (addition "approved
+  2026-10-20") and 15a, `phases/phase-14.md` section 9, `protocol-contract.md`
+  12.8/12.9 (field baseline, end-position observation, actuator overrun per
+  section 3.3 labelled as upstream note).
+- README "Known limitations": on full runs the end-position report arrives
+  only after the actuator overrun (≈3.5–6 s after physical standstill); stop
+  and intermediate positions without overrun.
+- Link this document.
+- Acceptance: no code change, consistent cross-references.
 
-Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
+### R1 – Confirmation of the actuator overrun (measurement, no fix)
 
-- Installierten Commit notieren (A-4).
-- Vollfahrt auf/zu: Apple Home oder OPUS-App neben Home Assistant beobachten;
-  die Endlage soll in beiden im selben Moment erscheinen.
-- Konfigurierte Fahrzeit und letzte Fahrtdauer vergleichen
-  (`verticalMovementTime`, `lastVerticalMovementTime`): Differenz nach einer
-  Vollfahrt ≈5–6 s erwartet. Quelle bevorzugt die Geräteliste des Gateways
-  (keine Funkanfrage). Der Upstream-Vorschlag
-  `opus_greennet.get_device_configuration` ist eine ReCom-Anfrage
-  (`protocol-contract.md` 12.2: potenziell Funk) und daher nur als einmalige,
-  ausdrücklich freigegebene Benutzeraktion zulässig.
-- Diagnose: `vertical_movement_time` und `last_update_source` der Endlage
-  (Telegramm statt Fallback, H5); Uhren von Gateway und HA (NTP) prüfen (H3).
-- Ergebnis dokumentieren (Phasenbericht, README-Hinweis zur Endlage bei
-  Vollfahrten, Vertrag 12.9).
-- Reine Messphase ohne Codeänderung. Für eine unverfälschte Messung keine
-  zusätzlichen Abfragen während der Messfahrten. Folgerungen für den Code
-  (z. B. Karenz, Herkunft der Position) gehen nach R6.
+Starting point is section 3.3 (upstream note, H1 supported). **Open.**
 
-### R2 – REST-only-Entkopplung
+- Record the installed commit (A-4).
+- Full run up/down: watch Apple Home or the OPUS app next to Home Assistant;
+  the end position should appear in both at the same moment.
+- Compare the configured movement time and the last run duration
+  (`verticalMovementTime`, `lastVerticalMovementTime`): a difference of
+  ≈5–6 s after a full run is expected. The preferred source is the gateway's
+  device list (no radio request). The upstream suggestion
+  `opus_greennet.get_device_configuration` is a ReCom request
+  (`protocol-contract.md` 12.2: potentially radio) and is therefore only
+  allowed as a one-off, explicitly approved user action.
+- Diagnostics: `vertical_movement_time` and `last_update_source` of the end
+  position (telegram instead of fallback, H5); check the clocks of gateway and
+  HA (NTP) (H3).
+- Document the result (phase report, README note on the end position on full
+  runs, contract 12.9).
+- Pure measurement phase without code change. For an undistorted measurement,
+  no extra queries during the measurement runs. Consequences for the code
+  (e.g. grace period, origin of the position) go to R6.
 
-**Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r2-rest-only-decoupling`
-(Basis `feature/rest-api-integration` `4014b1c`), Bericht `phases/phase-16.md`;
-**gemergt** in `feature/rest-api-integration` über PR #17
-(Merge-Commit `b9c3fb0`, 2026-10-20); nicht in `main`. K1–K6 aufgelöst:
-`domain.py` (E2), `OpusCoordinator` als
-`Protocol` (E3), MQTT-Importe nur bei Bedarf in `__init__`/`config_flow` (E4),
-Fixture `hass_without_mqtt` (K5). O-1 geklärt: `after_dependencies: ["mqtt"]`
-mit Belegen (Hassfest am Referenzcommit grün, MQTT-Discovery und MQTT-Einträge
-unverändert, REST-Eintrag ohne MQTT-Integration). Keine Verhaltens-, Timing-,
-Wire- oder Verkehrsänderung auf MQTT oder REST. K7 bleibt offen (R8).
+### R2 – REST-only decoupling
 
-- `domain.py` (E2), Re-Exporte in `coordinator.py`/`mqtt_transport.py`.
-- `OpusCoordinator` als `Protocol` (E3).
-- Lazy-Imports MQTT (`__init__`, `config_flow`); `manifest.json` nach Prüfung
-  `after_dependencies: ["mqtt"]` (E4) – Hassfest am Referenzcommit, MQTT-
-  Discovery und MQTT-Einträge ohne Verhaltensänderung belegen.
-- Tests: Fixture ohne `"mqtt"` in `hass.config.components`; REST-Eintrag lädt,
-  steuert, entlädt; Import von `rest_coordinator` lädt kein
-  `homeassistant.components.mqtt` (Prüfung über `sys.modules`).
-- MQTT (A1–A5): keine Verhaltens- oder Verkehrsänderung; MQTT-Tests
-  unverändert grün; Re-Exporte sind keine Verhaltensänderung.
-- REST (D3): Struktur nach Home-Assistant-Vorgaben; Verhaltensänderungen am
-  REST-Pfad sind zulässig, wenn begründet und im Bericht offengelegt.
+**Status 2026-10-20:** implemented on branch `feat/opus-r2-rest-only-decoupling`
+(base `feature/rest-api-integration` `4014b1c`), report `phases/phase-16.md`;
+**merged** into `feature/rest-api-integration` via PR #17 (merge commit
+`b9c3fb0`, 2026-10-20); not into `main`. K1–K6 resolved: `domain.py` (E2),
+`OpusCoordinator` as a `Protocol` (E3), MQTT imports only on demand in
+`__init__`/`config_flow` (E4), fixture `hass_without_mqtt` (K5). O-1 settled:
+`after_dependencies: ["mqtt"]` with evidence (Hassfest green at the reference
+commit, MQTT discovery and MQTT entries unchanged, REST entry without the MQTT
+integration). No behaviour, timing, wire or traffic change on MQTT or REST.
+K7 stays open (R8).
 
-### R3 – REST-Client-Härtung und Bibliotheksgrenze
+- `domain.py` (E2), re-exports in `coordinator.py`/`mqtt_transport.py`.
+- `OpusCoordinator` as a `Protocol` (E3).
+- Lazy MQTT imports (`__init__`, `config_flow`); `manifest.json`
+  `after_dependencies: ["mqtt"]` after verification (E4) – evidence through
+  Hassfest at the reference commit, MQTT discovery and MQTT entries without a
+  behaviour change.
+- Tests: fixture without `"mqtt"` in `hass.config.components`; a REST entry
+  loads, controls and unloads; importing `rest_coordinator` loads no
+  `homeassistant.components.mqtt` (checked through `sys.modules`).
+- MQTT (A1–A5): no behaviour or traffic change; MQTT tests unchanged and
+  green; re-exports are not a behaviour change.
+- REST (D3): structure per Home Assistant requirements; behaviour changes on
+  the REST path are allowed when justified and disclosed in the report.
 
-**Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r3-rest-client-hardening`
-(Basis `feature/rest-api-integration` `b9c3fb0`), Bericht `phases/phase-17.md`;
-gemergt über PR #18 (`1c30105`), CI-Lauf `39423057097` grün. B-1 behoben (HTTP-Status und JSON-Status getrennt, Fehlerklasse
-mit `http_status` und `gateway_status`), B-6 behoben (`PriorityLock` und
-Prioritäten im REST-Koordinator; `api.py` importiert nur Standardbibliothek,
-aiohttp und `wire.py`). Keine Wiederholungen, Nebenläufigkeit und Timeouts
-unverändert (Begründung im Bericht, Abschnitt 2). MQTT-Pfad unverändert.
+### R3 – REST client hardening and library boundary
 
-- HTTP-Status zusätzlich zum JSON-Status auswerten (B-1); Fehlerklasse mit
-  beiden Werten.
-- `PriorityLock` in den REST-Koordinator (B-6); `api.py` ohne
-  Integrationskonstanten.
-- Tests: kein HA-Import in `api.py`/`wire.py` (AST), kein `ClientSession(`,
-  Fehlermeldungen ohne Zugangsdaten, keine Wiederholung bei Timeout eines PUT.
-- REST (D3): Nebenläufigkeit, Timeouts und Wiederholungen nach Best Practice
-  festlegen und im Bericht begründen (Idempotenz des Befehls, Risiko einer
-  Doppelausführung am Aktor, Funkverkehr vorher/nachher).
+**Status 2026-10-20:** implemented on branch `feat/opus-r3-rest-client-hardening`
+(base `feature/rest-api-integration` `b9c3fb0`), report `phases/phase-17.md`;
+merged via PR #18 (`1c30105`), CI run `39423057097` green. B-1 fixed (HTTP
+status and JSON status separate, error class with `http_status` and
+`gateway_status`), B-6 fixed (`PriorityLock` and priorities in the REST
+coordinator; `api.py` imports only the standard library, aiohttp and
+`wire.py`). No retries; concurrency and timeouts unchanged (justification in
+the report, section 2). MQTT path unchanged.
 
-### R4 – Stream-Lebenszyklus
+- Evaluate the HTTP status in addition to the JSON status (B-1); error class
+  with both values.
+- `PriorityLock` into the REST coordinator (B-6); `api.py` without
+  integration constants.
+- Tests: no HA import in `api.py`/`wire.py` (AST), no `ClientSession(`, error
+  messages without credentials, no repetition after a PUT timeout.
+- REST (D3): set concurrency, timeouts and retries by best practice and
+  justify them in the report (idempotency of the command, risk of a double
+  execution at the actuator, radio traffic before/after).
 
-**Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r4-stream-lifecycle`
-(Basis `feature/rest-api-integration` `e5b609e`), Bericht `phases/phase-18.md`;
-gemergt über PR #21 (`ae3e084`), CI-Lauf `39431240243` grün. B-2 behoben (begrenzter exponentieller
-Backoff 1–60 s mit 0–25 % Jitter nach oben, Pause nach jedem Stream-Ende,
-Stream < 10 s zählt als Fehlschlag), B-3 behoben (Größenprüfung auch für
-vollständige Dokumente), Verbindungsgeneration und `aclosing` gegen
-Rückläufer eines ersetzten Readers. MQTT-Pfad unverändert.
+### R4 – Stream lifecycle
 
-- Begrenzter exponentieller Backoff mit Jitter; kurzlebige Verbindungen
-  (z. B. < 10 s) zählen als Fehlschlag (B-2).
-- Verbindungsgeneration für Dokumente; Größenprüfung auch für vollständige
-  Dokumente (B-3).
-- Tests: Schließen direkt nach dem Snapshot erzeugt keine enge Schleife;
-  Reload hinterlässt keinen zweiten Reader; Auth-Fehler ohne Neuversuch.
-- REST (D3): Backoff und Neuverbindung nach Best Practice; Gateway-Verkehr
-  vorher/nachher im Bericht.
+**Status 2026-10-20:** implemented on branch `feat/opus-r4-stream-lifecycle`
+(base `feature/rest-api-integration` `e5b609e`), report `phases/phase-18.md`;
+merged via PR #21 (`ae3e084`), CI run `39431240243` green. B-2 fixed (bounded
+exponential backoff 1–60 s with 0–25 % upward jitter, a pause after every
+stream end, a stream < 10 s counts as a failure), B-3 fixed (size check also
+for complete documents), connection generation and `aclosing` against late
+documents of a replaced reader. MQTT path unchanged.
 
-### R5 – Start und Resynchronisierung
+- Bounded exponential backoff with jitter; short-lived connections
+  (e.g. < 10 s) count as failures (B-2).
+- Connection generation for documents; size check also for complete
+  documents (B-3).
+- Tests: closing right after the snapshot causes no tight loop; reload leaves
+  no second reader; auth errors without retry.
+- REST (D3): backoff and reconnect by best practice; gateway traffic
+  before/after in the report.
 
-**Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r5-stream-first-start`
-(Basis `feature/rest-api-integration` `bcb6276`), Bericht `phases/phase-21.md`;
-gemergt über PR #25 (`2d3cf9c`), CI-Lauf `39458477903` grün. Stream-first nach 7.2 (B-8 behoben: kein
-`GET /devices` mehr beim Start), Frist 30 s für die erste Liste
-(`FIRST_DEVICE_LIST_TIMEOUT`), gemessene Dauer in Log und Diagnose; B-5
-behoben (Telegramm nach Anfragebeginn behält `dbm`/`lastSeen`).
+### R5 – Start and resynchronisation
 
-**Hardware-Prüfung 2026-10-20 (Phase 21, Abschnitt 7):** erste Liste nach
-0,076 s, Frist 30 s bestätigt. Befund R5-H1: Die Stream-Liste enthält auf
-OPUS-IQ-DOT 1.21.30 **keinen `configuration`-Block**, Rollläden hatten nach
-dem Start keine Fahrzeiten (0 von 10). Korrektur auf Branch
-`fix/opus-r5-movement-times`: einmal `GET /devices` direkt nach dem Setup
-(nicht autoritativ, wie die 30-min-Liste). Das Ziel „eine Geräteliste weniger
-je Start“ ist auf dieser Firmware nicht erreichbar und entfällt; Zustand und
-Verfügbarkeit kommen weiter nur aus dem Stream.
+**Status 2026-10-20:** implemented on branch `feat/opus-r5-stream-first-start`
+(base `feature/rest-api-integration` `bcb6276`), report `phases/phase-21.md`;
+merged via PR #25 (`2d3cf9c`), CI run `39458477903` green. Stream first per
+7.2, deadline 30 s for the first list (`FIRST_DEVICE_LIST_TIMEOUT`), measured
+time in log and diagnostics; B-5 fixed (a telegram after the request start
+keeps `dbm`/`lastSeen`).
 
-- Stream-first nach Abschnitt 7.2 (E7); Frist für das erste Dokument messen.
-- B-5: Metadaten der 30-min-Liste nur übernehmen, wenn kein neueres Telegramm
-  seit Anfragebeginn kam.
-- Tests: Rennen Anfrage/Telegramm, Neuverbindung mit Snapshot, kein
-  Tasterereignis aus Snapshots, Setup-Fehler ohne erstes Dokument.
-- Messbar: eine Geräteliste weniger je Start und Reload (**entfällt** nach
-  Hardware-Befund R5-H1: die Stream-Liste trägt keine Konfiguration).
+**Hardware check 2026-10-20 (phase 21, section 7):** first list after
+0.076 s, deadline 30 s confirmed. Finding R5-H1: on OPUS-IQ-DOT 1.21.30 the
+stream's list contains **no `configuration` block**; covers had no movement
+times after a start (0 of 10). Fix on branch `fix/opus-r5-movement-times`:
+`GET /devices` once right after setup (not authoritative, like the 30 min
+list); merged via PR #28 (`8153328`), CI run `39464251539` green. The goal
+"one device list fewer per start" is not reachable on this firmware and is
+withdrawn; state and availability still come only from the stream.
 
-### R6 – Fachmodell
+Related fix: the diagnostics redact the HomeKit QR setup payload
+(`homekitQR`), found in the same hardware diagnostics; PR #27 (`56640c0`), CI
+run `39462018715` green.
 
-- In-place-Aktualisierung (E6) mit Test „Feldliste vollständig übernommen“.
-- Herkunft der Position (`reported`/`estimated`/`assumed`) zunächst nur in der
-  Diagnose (A-5); keine sichtbare Verhaltensänderung ohne Entscheidung.
-- `lastVerticalMovementTime` aus der Geräteliste als Diagnosewert übernehmen
-  (keine neue Anfrage; Abschnitt 3.3), damit der Nachlauf ohne ReCom sichtbar
-  ist.
-- Entscheidungsvorlage zur 5-s-Karenz bei Nachlauf > 5 s (O-4): unverändert
-  lassen, nur Herkunft anzeigen, oder Karenz aus gemessener Fahrtdauer
-  ableiten (würde Statusprüfungen zeitlich verschieben, nie vermehren).
-- Regressionstests für R4/R7/R8 aus Abschnitt 2.7 (Sequenz Wippe → `unknown`
-  → Endlage; 6× Press/Release mit genau einem Entity-Write je Telegramm;
-  Langdruck).
+- Stream first per section 7.2 (E7); measure the deadline for the first
+  document.
+- B-5: take metadata from the 30 min list only if no newer telegram arrived
+  since the request started.
+- Tests: race request/telegram, reconnect with snapshot, no button event from
+  snapshots, setup failure without a first document.
+- Measurable: one device list fewer per start and reload (**withdrawn** after
+  hardware finding R5-H1: the stream's list carries no configuration).
 
-### R7 – Standard für neue Einträge (Entscheidung)
+### R6 – Domain model
 
-**Teilweise vorgezogen 2026-10-20 als R4.2** (Entscheidung des Maintainers):
-REST steht im Einrichtungsmenü an erster, MQTT an zweiter Stelle; Branch
-`feat/opus-r4-2-rest-first-menu`, Bericht `phases/phase-19.md`. Offen für R7:
-MQTT-Hinweis „Fallback“ in den Menütexten.
+- In-place update (E6) with a test "field list completely taken over".
+- Origin of the position (`reported`/`estimated`/`assumed`) at first only in
+  diagnostics (A-5); no visible behaviour change without a decision.
+- Take `lastVerticalMovementTime` from the device list as a diagnostic value
+  (no new request; section 3.3), so the overrun is visible without ReCom.
+- Decision template for the 5 s grace period with an overrun > 5 s (O-4):
+  leave it unchanged, only show the origin, or derive the grace period from
+  the measured run duration (would shift status checks in time, never add
+  any).
+- Regression tests for R4/R7/R8 of section 2.7 (sequence rocker → `unknown`
+  → end position; 6× press/release with exactly one entity write per
+  telegram; long press).
 
-**Weiter vorgezogen 2026-10-20 als R4.3** (Entscheidung des Maintainers):
-Neue Gateways werden nur noch über REST eingerichtet. Der Einrichtungsdialog
-zeigt direkt Host, Port, Benutzer und Passwort (kein Menü), auch ein über MQTT
-entdecktes Gateway führt in dieses REST-Formular. MQTT bleibt für bestehende
-Einträge und als Wahl im Neu-konfigurieren-Menü. Branch
-`feat/opus-r4-3-rest-only-setup`, Bericht `phases/phase-20.md`; gemergt über
-PR #24 (`bcb6276`), CI-Lauf `39449339335` grün. Damit ist der
-Menüteil von R7 erledigt; ein „Fallback“-Hinweis entfällt.
+### R7 – Default for new entries (decision)
 
-- Optional: REST als erste Menüoption (**erledigt**, R4.2; ersetzt durch R4.3: REST als einzige Einrichtung); MQTT-Hinweis „Fallback“ (entfällt).
-- Bestehende MQTT-Einträge werden nie automatisch umgestellt (A5 gilt für
-  MQTT). Auswirkungen auf bestehende REST-Einträge und Entity-IDs werden im
-  Bericht offengelegt (D3).
+**Partly brought forward 2026-10-20 as R4.2** (maintainer decision): REST
+first, MQTT second in the setup menu; branch `feat/opus-r4-2-rest-first-menu`,
+report `phases/phase-19.md`; merged via PR #23 (`c8573ef`).
 
-### R8 – Abschlussaudit
+**Brought forward further 2026-10-20 as R4.3** (maintainer decision D4): new
+gateways are set up over REST only. The setup dialog shows host, port, user
+and password directly (no menu); a gateway discovered over MQTT also leads to
+this REST form. MQTT stays for existing entries and as a choice in the
+reconfigure menu. Branch `feat/opus-r4-3-rest-only-setup`, report
+`phases/phase-20.md`; merged via PR #24 (`bcb6276`), CI run `39449339335`
+green. The menu part of R7 is therefore done; a "fallback" hint is dropped.
 
-- `quality_scale.yaml`, Evidenzmatrix, README, Vertrag synchronisieren;
-  K7 (Discovery für REST) bewerten: Discovery mit vorbelegter Adresse und
-  Herstellerstandard-Passwort prüfen oder Regel nach MQTT-Entfernung
-  begründet neu einstufen.
-- Repetierte Race-Suites inkl. REST, Referenz- und Latest-Job grün.
+- Optional: REST as the first menu option (**done**, R4.2; replaced by R4.3:
+  REST as the only setup); MQTT hint "fallback" (dropped).
+- Existing MQTT entries are never switched automatically (A5 applies to
+  MQTT). Effects on existing REST entries and entity IDs are disclosed in the
+  report (D3).
 
-### Später (nicht Teil dieses Plans)
+### R8 – Final audit
 
-MQTT-Entfernung erst nach R2–R8, nach Freigabe und nach einer
-Übergangsversion: `coordinator.py`, `mqtt_transport.py`, `discovery.py`,
-MQTT-Flow-Schritte, MQTT-Tests entfernen; Plattformen und Gerätemodell
-bleiben unverändert (Ziel 5).
+- Synchronise `quality_scale.yaml`, the evidence matrix, README and contract;
+  assess K7 (discovery for REST): check discovery with a prefilled address and
+  the vendor default password, or reclassify the rule with justification after
+  removing MQTT.
+- Repeated race suites incl. REST, reference and latest jobs green.
 
-## 9. Akzeptanzmatrix
+### Later (not part of this plan)
 
-| Szenario | Erwartung |
-|----------|-----------|
-| Langer Leerlauf | nur Uptime 60 s und Geräteliste 30 min; keine Gerätestatusabfrage |
-| Stream schweigt 15 min | Neuverbindung mit Snapshot, Entities bleiben verfügbar |
-| Gateway schließt Verbindungen sofort | Backoff mit Jitter, keine enge Schleife |
-| Reload/Unload | kein offener Reader, keine Timer, keine Tasks |
-| Snapshot nach Telegramm auf derselben Verbindung | Telegramm gilt (Reihenfolge) |
-| 30-min-Liste während Telegramm | Live-Zustand bleibt; Metadaten springen nicht zurück |
-| Positionsmeldung `unknown` | letzte Position bleibt, keine Bestätigung |
-| Endlage verzögert (Vollfahrt, Aktor-Nachlauf) | keine Zusatzabfrage, keine Zeitgeber-Endlage als Rückmeldung; Endmeldung wird bei Empfang sofort übernommen |
-| Stop oder Zwischenposition | Positionsmeldung ohne Nachlauf, sofortige Übernahme |
-| Tasterfolge | je Telegramm genau ein Event-Update, keine Wiederholung aus Listen |
-| REST-only ohne MQTT-Integration | Eintrag lädt, steuert, entlädt |
-| MQTT-Eintrag | Verhalten und Verkehr unverändert |
-| ACK 201 | keine Annahme, keine Abfrage |
-| Timeout eines Befehls | nur diese Aktion fehlgeschlagen, Gateway verfügbar, kein Retry |
+Remove MQTT only after R2–R8, after approval and after a transition version:
+remove `coordinator.py`, `mqtt_transport.py`, `discovery.py`, the MQTT flow
+steps and the MQTT tests; platforms and device model stay unchanged (goal 5).
 
-## 10. Offene Annahmen und Entscheidungen
+## 9. Acceptance matrix
 
-| Nr. | Offen | Klärung |
-|-----|-------|---------|
-| O-1 | Startet Home Assistant die Integration ohne eingerichtete MQTT-Integration mit `after_dependencies`, und akzeptiert Hassfest den `mqtt`-Discovery-Schlüssel dann? | **Geklärt in R2** (`phases/phase-16.md` Abschnitt 5): ja; `manifest.json` umgestellt |
-| O-2 | Wirkung und Unterstützung der Stream-Parameter | Hardwarevergleich, separate Freigabe |
-| O-3 | Ursache der Endlagenverzögerung: durch Upstream-Mitteilung als Aktor-Nachlauf erklärt (Abschnitt 3.3); Bestätigung an der eigenen Installation offen | R1 |
-| O-4 | Soll die Positionsschätzung (A-5) sichtbar bleiben, und wie wird die 5-s-Karenz bei Nachlauf > 5 s behandelt? | Entscheidung nach R6 |
-| O-5 | REST als Standard für neue Einträge | R7 |
-| O-6 | Welcher Commit lief im Praxistest? | R1 (A-4) |
-| O-7 | Discovery für REST-Gateways | R8 |
+| Scenario | Expectation |
+|----------|-------------|
+| Long idle | only uptime 60 s and device list 30 min; no device status query |
+| Stream silent for 15 min | reconnect with snapshot, entities stay available |
+| Gateway closes connections at once | backoff with jitter, no tight loop |
+| Reload/unload | no open reader, no timers, no tasks |
+| Snapshot after a telegram on the same connection | the telegram counts (order) |
+| 30 min list during a telegram | live state stays; metadata does not jump back |
+| Start | state from the stream's first list within 30 s; configuration from one `GET /devices` right after |
+| Position report `unknown` | last position stays, no confirmation |
+| Delayed end position (full run, actuator overrun) | no extra query, no timer end position as feedback; the end report is applied at once on receipt |
+| Stop or intermediate position | position report without overrun, applied at once |
+| Button sequence | exactly one event update per telegram, no repetition from lists |
+| REST-only without MQTT integration | entry loads, controls, unloads |
+| MQTT entry | behaviour and traffic unchanged |
+| ACK 201 | no assumption, no query |
+| Command timeout | only this action failed, gateway available, no retry |
+
+## 10. Open assumptions and decisions
+
+| No. | Open | Resolution |
+|-----|------|------------|
+| O-1 | Does Home Assistant start the integration without a configured MQTT integration with `after_dependencies`, and does Hassfest then accept the `mqtt` discovery key? | **Settled in R2** (`phases/phase-16.md` section 5): yes; `manifest.json` changed |
+| O-2 | Effect and support of the stream parameters (incl. whether `levelOfDetail=high` adds the configuration block, R5-H1) | hardware comparison, separate approval |
+| O-3 | Cause of the end-position delay: explained by the upstream note as actuator overrun (section 3.3); confirmation on the maintainer's installation open | R1 |
+| O-4 | Should the position estimate (A-5) stay visible, and how is the 5 s grace period handled for an overrun > 5 s? | decision after R6 |
+| O-5 | REST as the default for new entries | **Decided** (D4): REST only for new entries (R4.3) |
+| O-6 | Which commit ran in the field test? | R1 (A-4) |
+| O-7 | Discovery for REST gateways | R8 (MQTT discovery leads to the REST form since R4.3) |
