@@ -9,18 +9,6 @@ DOMAIN: Final = "opus_greennet"
 # Configuration keys
 CONF_EAG_ID: Final = "eag_id"
 
-# Transport of a config entry (phase 14). Entries without CONF_TRANSPORT were
-# created for MQTT and stay on MQTT; only an explicit user action (adding a
-# gateway over REST or the reconfigure flow) selects the REST transport. Host,
-# port, username and password of REST entries use Home Assistant's shared
-# CONF_* names. The EAG identifier is the gateway's EURID in both transports
-# and anchors every device and entity unique ID.
-CONF_TRANSPORT: Final = "transport"
-TRANSPORT_MQTT: Final = "mqtt"
-TRANSPORT_REST: Final = "rest"
-DEFAULT_PORT: Final = 8080
-DEFAULT_USERNAME: Final = "admin"
-
 # MQTT Topic patterns (EnOcean over IP specification)
 TOPIC_BASE: Final = "EnOcean"
 TOPIC_STREAM_TELEGRAM: Final = "{base}/{eag_id}/stream/telegram/{device_id}/from"
@@ -147,20 +135,12 @@ KEY_BUTTON_MOTION: Final = "buttonAI"
 KEY_BUTTON_NO_MOTION: Final = "buttonA0"
 
 INDEXED_STATE_CONTAINERS: Final = ("states", "transmitModes")
-RWM_EEP: Final = "F6-05-02"
 KEY_SMOKE_ALARM: Final = "smokeAlarm"
 KEY_BATTERY_LOW_RWM: Final = "batteryLow"
 
 # Function keys used in EnOcean telegrams
 KEY_SWITCH: Final = "switch"
 KEY_DIMMER: Final = "dimValue"
-# D2-01 dimmers: without rampingMode the gateway uses the device's first dim
-# timer, a slow fade. "switch" sets the new value at once (like HomeKit);
-# rampingTime1 keeps the device's configured fade for HA transitions. Sent by
-# the REST transport only; the MQTT wire values are unchanged (phase 14).
-KEY_RAMPING_MODE: Final = "rampingMode"
-RAMPING_MODE_SWITCH: Final = "switch"
-RAMPING_MODE_FADE: Final = "rampingTime1"
 KEY_POSITION: Final = "position"
 KEY_STOP: Final = "stop"
 KEY_ANGLE: Final = "angle"

@@ -6,12 +6,10 @@ import asyncio
 import json
 from collections.abc import Callable
 from time import monotonic
-from typing import Any
 
 from homeassistant import config_entries
 from homeassistant.components import mqtt
 from homeassistant.components.mqtt.const import MQTT_CONNECTION_STATE
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import entity_registry as er
@@ -19,7 +17,6 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from paho.mqtt.client import topic_matches_sub
 
 from custom_components.opus_greennet.const import DOMAIN
-from tests.fake_gateway import FakeGateway
 
 
 class MQTTTransport:
@@ -101,47 +98,15 @@ class MQTTTransport:
         await self.hass.async_block_till_done()
 
 
-async def start_user_flow(hass: HomeAssistant, transport_step: str) -> dict:
-    """Open the manual flow and choose a transport in its menu (phase 14)."""
+async def configure_bridge(hass: HomeAssistant, eag_id: str = "aabb0011") -> dict:
+    """Submit a bridge through the actual config flow manager."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-    assert result["type"] is FlowResultType.MENU
-    assert result["menu_options"] == ["mqtt_bridge", "rest_api"]
-    return await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": transport_step}
-    )
-
-
-async def configure_bridge(hass: HomeAssistant, eag_id: str = "aabb0011") -> dict:
-    """Submit an MQTT bridge through the actual config flow manager."""
-    result = await start_user_flow(hass, "mqtt_bridge")
     assert result["type"] is FlowResultType.FORM
     return await hass.config_entries.flow.async_configure(
         result["flow_id"], {"eag_id": eag_id}
     )
-
-
-async def configure_rest_bridge(
-    hass: HomeAssistant, gateway: FakeGateway, **overrides: Any
-) -> dict[str, Any]:
-    """Submit a REST gateway through the actual config flow manager."""
-    result = await start_user_flow(hass, "rest_api")
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "rest_api"
-    return await hass.config_entries.flow.async_configure(
-        result["flow_id"], {**gateway.config, **overrides}
-    )
-
-
-async def setup_rest_bridge(hass: HomeAssistant, gateway: FakeGateway) -> ConfigEntry:
-    """Configure a REST gateway, wait for its event stream and return the entry."""
-    result = await configure_rest_bridge(hass, gateway)
-    assert result["type"] is FlowResultType.CREATE_ENTRY, result
-    await hass.async_block_till_done()
-    await gateway.wait_for_stream()
-    await hass.async_block_till_done()
-    return hass.config_entries.async_entries(DOMAIN)[0]
 
 
 async def wait_for_entity(
@@ -156,10 +121,3 @@ async def wait_for_entity(
             await asyncio.sleep(0.01)
         await hass.async_block_till_done()
     return entity_id
-
-
-async def wait_until(predicate: Any, timeout: float = 5) -> None:
-    """Poll a condition while the event loop keeps running."""
-    async with asyncio.timeout(timeout):
-        while not predicate():
-            await asyncio.sleep(0.01)

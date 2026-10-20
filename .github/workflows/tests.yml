@@ -108,11 +108,7 @@ jobs:
               tests/test_ack_device_health.py \
               tests/test_late_responses.py \
               tests/test_late_answer_diagnostics.py \
-              tests/test_traffic_baseline.py \
-              tests/test_rest_stream.py \
-              tests/test_rest_requests.py \
-              tests/test_rest_lifecycle.py \
-              tests/test_transport_selection.py || exit 1
+              tests/test_traffic_baseline.py || exit 1
           done
 
       - name: Summarise traffic baseline
@@ -213,11 +209,7 @@ jobs:
               tests/test_field_freshness.py \
               tests/test_ack_device_health.py \
               tests/test_late_responses.py \
-              tests/test_late_answer_diagnostics.py \
-              tests/test_rest_stream.py \
-              tests/test_rest_requests.py \
-              tests/test_rest_lifecycle.py \
-              tests/test_transport_selection.py || exit 1
+              tests/test_late_answer_diagnostics.py || exit 1
           done
 
   validate-reference:

@@ -23,10 +23,10 @@ from .const import CONF_EAG_ID, DEFAULT_CHANNEL
 from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
     SIGNAL_DEVICE_REMOVED,
+    OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanChannel, EnOceanDevice
 from .entity import OpusGreenNetEntity
-from .transport import OpusCoordinator
 
 # Binary sensor state is pushed by the coordinator.
 PARALLEL_UPDATES = 0
@@ -222,7 +222,7 @@ class OpusGreenNetBaseBinarySensor(OpusGreenNetEntity, BinarySensorEntity):
 
     def __init__(
         self,
-        coordinator: OpusCoordinator,
+        coordinator: OpusGreenNetCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
@@ -240,7 +240,7 @@ class OpusGreenNetDescriptiveBinarySensor(OpusGreenNetBaseBinarySensor):
 
     def __init__(
         self,
-        coordinator: OpusCoordinator,
+        coordinator: OpusGreenNetCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
@@ -269,7 +269,7 @@ class OpusGreenNetStateBinarySensor(OpusGreenNetBaseBinarySensor):
 
     def __init__(
         self,
-        coordinator: OpusCoordinator,
+        coordinator: OpusGreenNetCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
@@ -301,7 +301,7 @@ class OpusGreenNetHandlePositionSensor(OpusGreenNetBaseBinarySensor):
 
     def __init__(
         self,
-        coordinator: OpusCoordinator,
+        coordinator: OpusGreenNetCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
