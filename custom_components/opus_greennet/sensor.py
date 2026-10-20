@@ -25,13 +25,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import OpusGreenNetConfigEntry
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL
-from .coordinator import (
+from .domain import (
     SIGNAL_DEVICE_DISCOVERED,
     SIGNAL_DEVICE_REMOVED,
-    OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanChannel, EnOceanDevice
 from .entity import OpusGreenNetEntity, migrate_legacy_entity_suffix
+from .transport import OpusCoordinator
 
 # Sensor state is pushed by the coordinator.
 PARALLEL_UPDATES = 0
@@ -244,7 +244,7 @@ class OpusGreenNetBaseSensor(OpusGreenNetEntity, SensorEntity):
 
     def __init__(
         self,
-        coordinator: OpusGreenNetCoordinator,
+        coordinator: OpusCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
@@ -266,7 +266,7 @@ class OpusGreenNetHumiditySensor(OpusGreenNetBaseSensor):
 
     def __init__(
         self,
-        coordinator: OpusGreenNetCoordinator,
+        coordinator: OpusCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
@@ -292,7 +292,7 @@ class OpusGreenNetFeedTemperatureSensor(OpusGreenNetBaseSensor):
 
     def __init__(
         self,
-        coordinator: OpusGreenNetCoordinator,
+        coordinator: OpusCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
@@ -323,7 +323,7 @@ class OpusGreenNetPowerConsumptionSensor(OpusGreenNetBaseSensor):
 
     def __init__(
         self,
-        coordinator: OpusGreenNetCoordinator,
+        coordinator: OpusCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
@@ -355,7 +355,7 @@ class OpusGreenNetSignalStrengthSensor(OpusGreenNetBaseSensor):
 
     def __init__(
         self,
-        coordinator: OpusGreenNetCoordinator,
+        coordinator: OpusCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
@@ -386,7 +386,7 @@ class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
 
     def __init__(
         self,
-        coordinator: OpusGreenNetCoordinator,
+        coordinator: OpusCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
@@ -425,7 +425,7 @@ class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
 
     def __init__(
         self,
-        coordinator: OpusGreenNetCoordinator,
+        coordinator: OpusCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,

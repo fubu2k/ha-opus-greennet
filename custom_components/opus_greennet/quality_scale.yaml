@@ -11,6 +11,9 @@
 # Last full re-audit of all 54 rules: phase 13, 2026-10-20, base main 96510dd
 # (docs/quality/phases/phase-13.md). Statuses are unchanged by that audit;
 # finding F13-1 (rocker event device class) is closed in the same branch.
+# Phase 14 (2026-10-20, docs/quality/phases/phase-14.md) adds the optional REST
+# transport next to MQTT. It changes reauthentication-flow,
+# reconfiguration-flow and inject-websession from exempt to done.
 rules:
   # Bronze
   action-setup:
@@ -20,18 +23,25 @@ rules:
     status: exempt
     comment: >-
       Push integration (iot_class local_push); no entity polls (should_poll is
-      False). The only periodic request is the 60 s gateway uptime probe, a
-      gateway endpoint that never queries a radio device; it is documented
-      under docs-data-update and pinned by the traffic baseline tests.
+      False). On both transports the 60 s gateway uptime probe is a gateway
+      endpoint that never queries a radio device; it is pinned by the traffic
+      baseline tests. REST entries receive state on the gateway's event stream
+      and additionally read the gateway's device list every 30 min (gateway
+      model, no radio telegram). Both are documented under docs-data-update.
   brands:
     status: done
     comment: Local brand/ folder (icon, logo, @2x), supported for custom integrations since HA 2026.3.
   common-modules:
     status: done
-    comment: Runtime coordinator in coordinator.py, shared base entity in entity.py.
+    comment: >-
+      Runtime coordinators in coordinator.py (MQTT) and rest_coordinator.py
+      (REST) with one public interface (transport.py), shared base entity in
+      entity.py.
   config-flow:
     status: done
-    comment: UI config flow with data_description for its only field.
+    comment: >-
+      UI config flow: a menu chooses the MQTT bridge or the REST API; every
+      form field has a data_description.
   config-flow-test-coverage:
     status: done
     comment: 100 % gate in CI; every error is followed by a recovering submission.
@@ -51,7 +61,7 @@ rules:
     comment: README introduction and Features.
   docs-installation-instructions:
     status: done
-    comment: README Prerequisites, MQTT Bridge Setup and Installation.
+    comment: README Prerequisites, MQTT Bridge Setup, REST API Setup and Installation.
   docs-removal-instructions:
     status: done
     comment: README section Removing the integration.
@@ -69,10 +79,16 @@ rules:
   runtime-data: done
   test-before-configure:
     status: done
-    comment: The config flow probes the gateway uptime endpoint before creating the entry.
+    comment: >-
+      Before creating the entry the config flow probes the gateway uptime
+      endpoint (MQTT) or reads the gateway's system information and EURID
+      (REST).
   test-before-setup:
     status: done
-    comment: async_setup_entry raises ConfigEntryNotReady when the gateway does not answer.
+    comment: >-
+      async_setup_entry raises ConfigEntryNotReady when the gateway does not
+      answer and, for REST entries, ConfigEntryAuthFailed when it rejects the
+      credentials or answers as a different gateway.
   unique-config-entry: done
 
   # Silver
@@ -82,11 +98,13 @@ rules:
     status: exempt
     comment: >-
       The integration has no options flow and therefore no configuration
-      parameters after setup. The only setup value, the EAG identifier, is
-      documented under docs-installation-parameters.
+      parameters after setup. The setup values (EAG identifier, or host, port,
+      username and password) are documented under docs-installation-parameters.
   docs-installation-parameters:
     status: done
-    comment: README section Configuration describes the EAG identifier.
+    comment: >-
+      README section Configuration describes the EAG identifier (MQTT) and
+      host, port, username and password (REST).
   entity-unavailable: done
   integration-owner: done
   log-when-unavailable: done
@@ -94,10 +112,12 @@ rules:
     status: done
     comment: Every platform sets PARALLEL_UPDATES = 0; requests are serialised by the transport queue.
   reauthentication-flow:
-    status: exempt
+    status: done
     comment: >-
-      The config entry stores no credentials. MQTT authentication belongs to the
-      Home Assistant MQTT integration and the broker bridge configuration.
+      REST entries: rejected credentials or a different gateway at the stored
+      address start the reauth flow, which verifies the gateway identity. MQTT
+      entries store no credentials; MQTT authentication belongs to the Home
+      Assistant MQTT integration.
   test-coverage:
     status: done
     comment: CI enforces more than 95 % per integration module and in total (script/check_coverage.py).
@@ -109,14 +129,17 @@ rules:
     status: done
     comment: >-
       MQTT discovery: manifest mqtt filter EnOcean/+/stream/devices/+/friendlyId
-      and async_step_mqtt. A message names a candidate only; confirmation runs
-      the existing fresh uptime check. Requires bridged OPUS topics.
+      and async_step_mqtt. A message names a candidate only; since phase 20
+      (R4.3) the offer opens the REST form (address, user, password with the
+      EURID suggested) and accepts only an address that answers as the
+      announced gateway. Requires bridged OPUS topics; manual REST setup is
+      always available.
   discovery-update-info:
     status: exempt
     comment: >-
-      The config entry stores no network address; the gateway is reached only
-      through the Home Assistant MQTT broker by its stable EAG identifier.
-      Discovery announces only that identifier, which is the unique ID.
+      MQTT discovery announces only the stable EAG identifier, which is the
+      unique ID; MQTT entries store no network address. No discovery reports a
+      REST address; a changed REST address is entered in the reconfigure flow.
   docs-data-update:
     status: done
     comment: README section Availability and command behavior.
@@ -162,17 +185,17 @@ rules:
       unlock request and mechanics fault entities plus service icons; all other
       entities keep their device-class icons. No Python icon properties.
   reconfiguration-flow:
-    status: exempt
+    status: done
     comment: >-
-      The only configuration value is the EAG identifier, which is the config
-      entry unique ID. Changing it addresses a different gateway and requires a
-      new config entry.
+      The reconfigure flow switches a gateway between MQTT and REST or changes
+      its REST address and credentials. It rejects an address that answers as
+      a different gateway and keeps devices, entities and unique IDs.
   repair-issues:
     status: done
     comment: >-
       Persistent, fixable repair after the one-time removal of a duplicate beta
-      entity during unique-ID migration. Transient broker, bridge or radio
-      outages and quiet sensors are intentionally not issues.
+      entity during unique-ID migration. Transient broker, bridge, gateway or
+      radio outages and quiet sensors are intentionally not issues.
   stale-devices:
     status: done
     comment: >-
@@ -183,12 +206,16 @@ rules:
   # Platinum
   async-dependency:
     status: exempt
-    comment: The integration has no Python requirements; it uses Home Assistant's async MQTT API.
-  inject-websession:
-    status: exempt
     comment: >-
-      The integration makes no HTTP requests; all gateway communication uses
-      the Home Assistant MQTT integration.
+      The integration has no Python requirements. It uses Home Assistant's
+      async MQTT API and, for REST entries, aiohttp shipped with Home Assistant
+      through its own small async client (api.py).
+  inject-websession:
+    status: done
+    comment: >-
+      The REST client receives Home Assistant's shared aiohttp session
+      (async_get_clientsession) in the config flow and the entry setup. MQTT
+      entries use the Home Assistant MQTT integration.
   strict-typing:
     status: done
     comment: >-

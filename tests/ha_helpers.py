@@ -6,10 +6,12 @@ import asyncio
 import json
 from collections.abc import Callable
 from time import monotonic
+from typing import Any
 
 from homeassistant import config_entries
 from homeassistant.components import mqtt
 from homeassistant.components.mqtt.const import MQTT_CONNECTION_STATE
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import entity_registry as er
@@ -17,6 +19,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from paho.mqtt.client import topic_matches_sub
 
 from custom_components.opus_greennet.const import DOMAIN
+from tests.fake_gateway import FakeGateway
 
 
 class MQTTTransport:
@@ -98,15 +101,72 @@ class MQTTTransport:
         await self.hass.async_block_till_done()
 
 
-async def configure_bridge(hass: HomeAssistant, eag_id: str = "aabb0011") -> dict:
-    """Submit a bridge through the actual config flow manager."""
+async def start_user_flow(hass: HomeAssistant) -> dict:
+    """Open the manual flow; it shows the REST form directly (phase R4.3)."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
     assert result["type"] is FlowResultType.FORM
-    return await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"eag_id": eag_id}
+    assert result["step_id"] == "user"
+    return result
+
+
+async def configure_bridge(hass: HomeAssistant, eag_id: str = "aabb0011") -> dict:
+    """Add an MQTT entry the way the former manual MQTT step did.
+
+    Since phase R4.3 new gateways are added over REST only; MQTT entries come
+    from earlier versions or from the reconfigure flow. Tests that need such an
+    entry get it with the former step's behaviour: the same normalisation, the
+    same single gateway probe (``validate_input``, unchanged MQTT traffic), the
+    same entry data and unique ID. A known gateway aborts before the probe.
+    """
+    from custom_components.opus_greennet.config_flow import validate_input
+    from custom_components.opus_greennet.discovery import normalize_eag_id
+
+    normalized = normalize_eag_id(eag_id)
+    known = {entry.unique_id for entry in hass.config_entries.async_entries(DOMAIN)}
+    if normalized is not None and normalized in known:
+        return {"type": FlowResultType.ABORT, "reason": "already_configured"}
+    info = await validate_input(hass, {"eag_id": eag_id})
+    entry = ConfigEntry(
+        version=1,
+        minor_version=1,
+        domain=DOMAIN,
+        title=info["title"],
+        data={"eag_id": info["eag_id"]},
+        source=config_entries.SOURCE_USER,
+        options={},
+        unique_id=info["eag_id"],
+        discovery_keys={},
+        subentries_data=None,
     )
+    await hass.config_entries.async_add(entry)
+    return {
+        "type": FlowResultType.CREATE_ENTRY,
+        "title": entry.title,
+        "data": dict(entry.data),
+        "result": entry,
+    }
+
+
+async def configure_rest_bridge(
+    hass: HomeAssistant, gateway: FakeGateway, **overrides: Any
+) -> dict[str, Any]:
+    """Submit a REST gateway through the actual config flow manager."""
+    result = await start_user_flow(hass)
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**gateway.config, **overrides}
+    )
+
+
+async def setup_rest_bridge(hass: HomeAssistant, gateway: FakeGateway) -> ConfigEntry:
+    """Configure a REST gateway, wait for its event stream and return the entry."""
+    result = await configure_rest_bridge(hass, gateway)
+    assert result["type"] is FlowResultType.CREATE_ENTRY, result
+    await hass.async_block_till_done()
+    await gateway.wait_for_stream()
+    await hass.async_block_till_done()
+    return hass.config_entries.async_entries(DOMAIN)[0]
 
 
 async def wait_for_entity(
@@ -121,3 +181,10 @@ async def wait_for_entity(
             await asyncio.sleep(0.01)
         await hass.async_block_till_done()
     return entity_id
+
+
+async def wait_until(predicate: Any, timeout: float = 5) -> None:
+    """Poll a condition while the event loop keeps running."""
+    async with asyncio.timeout(timeout):
+        while not predicate():
+            await asyncio.sleep(0.01)

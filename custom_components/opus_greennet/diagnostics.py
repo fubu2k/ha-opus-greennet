@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.redact import REDACTED
 
 from .enocean_device import EnOceanDevice
+from .transport import entry_transport
 from .wire import JsonList, JsonObject, parse_json
 
 if TYPE_CHECKING:
@@ -24,10 +25,16 @@ TO_REDACT = {
     "address",
     "apikey",
     "authorization",
+    # REST system information (phase 14): base ID and HomeKit setup code,
+    # also as the setup payload of the HomeKit QR code (X-HM://...), which
+    # encodes the same code and allows pairing the gateway.
+    "baseid",
     "deviceid",
     "eagid",
     "eurid",
     "friendlyid",
+    "homekitpin",
+    "homekitqr",
     "host",
     "hostname",
     "ip",
@@ -132,7 +139,7 @@ def log_entity_state_write(
     device: EnOceanDevice,
     channel_id: int | None = None,
 ) -> None:
-    """Log latency from MQTT receipt to the entity state write."""
+    """Log latency from telegram receipt (MQTT or REST) to the state write."""
     if not logger.isEnabledFor(logging.DEBUG):
         return
 
@@ -194,9 +201,15 @@ async def async_get_config_entry_diagnostics(
             },
             "gateway": {
                 "eag_id": coordinator.eag_id,
+                "transport": entry_transport(entry.data),
                 "available": coordinator.available,
                 "info": coordinator.gateway_info,
                 "uptime": coordinator.gateway_uptime,
+                # REST only: seconds from opening the event stream to its
+                # first device list at setup (phase R5 measurement).
+                "first_device_list_seconds": getattr(
+                    coordinator, "first_device_list_seconds", None
+                ),
                 "late_answers": coordinator.late_answer_diagnostics(coordinator.eag_id),
             },
             "devices": devices,

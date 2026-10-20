@@ -16,13 +16,13 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_registry import EntityRegistry
 
 from .const import DOMAIN
-from .coordinator import (
+from .diagnostics import log_entity_state_write
+from .domain import (
     SIGNAL_AVAILABILITY_UPDATE,
     SIGNAL_DEVICE_STATE_UPDATE,
-    OpusGreenNetCoordinator,
 )
-from .diagnostics import log_entity_state_write
 from .enocean_device import EnOceanDevice
+from .transport import OpusCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -193,7 +193,7 @@ class OpusGreenNetEntity(Entity):
 
     def __init__(
         self,
-        coordinator: OpusGreenNetCoordinator,
+        coordinator: OpusCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
@@ -208,6 +208,14 @@ class OpusGreenNetEntity(Entity):
         # Immutable projection of the state last written by a coordinator
         # dispatch. Any other write (commands, availability) clears it.
         self._dispatched_projection: Hashable | None = None
+        # REST only (phase 21, transport-bound per plan section 0.1): with the
+        # stream-first start no device list is dispatched after the entities
+        # are created, so the initial write, which shows the coordinator's
+        # current device state, is the baseline for unchanged updates. MQTT
+        # coordinators do not set the flag; their behaviour is unchanged.
+        self._initial_write_pending = (
+            getattr(coordinator, "initial_write_is_baseline", False) is True
+        )
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -223,7 +231,7 @@ class OpusGreenNetEntity(Entity):
 
     @property
     def available(self) -> bool:
-        """Return whether the MQTT transport is connected."""
+        """Return whether the gateway is reachable over its transport."""
         return self._coordinator.available
 
     async def async_added_to_hass(self) -> None:
@@ -260,9 +268,17 @@ class OpusGreenNetEntity(Entity):
             return None
 
     def _async_write_ha_state(self) -> None:
-        """Forget the dispatch projection whenever any path writes state."""
+        """Forget the dispatch projection whenever any path writes state.
+
+        On REST entries the initial write is the exception: it shows the
+        coordinator's current device state and becomes the baseline for later
+        dispatches.
+        """
         self._dispatched_projection = None
         super()._async_write_ha_state()
+        if self._initial_write_pending:
+            self._initial_write_pending = False
+            self._dispatched_projection = self._visible_projection()
 
     @callback
     def _handle_state_update(self, device: EnOceanDevice) -> None:

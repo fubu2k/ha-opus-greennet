@@ -2,14 +2,16 @@
 
 ## Project Overview
 
-Home Assistant custom integration for OPUS GreenNet Bridge (EnOcean over IP via MQTT).
+Home Assistant custom integration for OPUS GreenNet Bridge (EnOcean over IP via MQTT,
+or directly via the gateway's REST API; the transport is chosen per config entry).
 Repository: https://github.com/kegelmeier/ha-opus-greennet
 
 ## Tech Stack
 
 - Python 3.14 (Home Assistant 2026.8+)
 - Home Assistant custom component architecture
-- MQTT (EnOcean over IP protocol)
+- MQTT (EnOcean over IP protocol) — transport of every entry without `transport: rest`
+- EnOcean over IP REST API (HTTP + event stream, aiohttp shipped with HA) — opt-in transport (phase 14)
 - HACS compatible
 
 ## Project Structure
@@ -17,7 +19,13 @@ Repository: https://github.com/kegelmeier/ha-opus-greennet
 - `custom_components/opus_greennet/` — all integration code
 - `manifest.json` — version (single source of truth) + metadata
 - `const.py` — all constants, EEP mappings, topic patterns
-- `coordinator.py` — MQTT communication, device discovery, command dispatch
+- `transport.py` — transport selection (`entry_transport`) and the `OpusCoordinator` protocol (the coordinator interface of platforms and services)
+- `domain.py` — transport-neutral names shared by both coordinators and the platforms: `CommandDelivery`, `CoverMovement`, dispatcher signals, `request_error`, `ACK_STATUS_DEFERRED`, shared timing constants (phase R2)
+- `coordinator.py` — MQTT transport: communication, device discovery, command dispatch
+- `mqtt_transport.py` — MQTT request manager, subscriptions, gateway probe
+- `rest_coordinator.py` — REST transport: event stream, health probe, commands (same public interface), radio queue (`PriorityLock`, priorities 0/10/20)
+- `api.py` — REST client (requests, HTTP and gateway status checks, error mapping, event stream splitting); imports only the standard library, aiohttp and `wire.py` (phase R3, `tests/test_rest_client_hardening.py`)
+- `protocol.py` — pure helpers that read REST gateway documents
 - `enocean_device.py` — device/channel data model
 - Platform files: `light.py`, `switch.py`, `cover.py`, `climate.py`, `sensor.py`, `binary_sensor.py`, `event.py`
 - `services.yaml` — HA service definitions (rendered in Developer Tools)
@@ -111,7 +119,10 @@ Versioning is done **manually and separately** from PRs. After one or more PRs a
 
 - All platforms follow the dispatcher signal pattern (see `light.py` as reference)
 - Device state is held in `EnOceanChannel` dataclass fields
-- Coordinator handles ALL MQTT communication; entities never touch MQTT directly
+- Coordinators handle ALL gateway communication (MQTT or REST); entities never touch MQTT or HTTP directly
+- Platforms type the coordinator as `OpusCoordinator`; transport-specific features need an explicit `isinstance` check (see `light.py`, REST-only dimmer ramping)
+- REST code, shared modules and platforms import from `domain.py` and `transport.py`, never from `coordinator.py`, `mqtt_transport.py` or `discovery.py`. Only `__init__.py` and `config_flow.py` import the MQTT transport, and only when an MQTT entry or MQTT flow step needs it (`tests/test_rest_only_decoupling.py`)
+- Never switch an entry's transport automatically; entries without `transport` stay on MQTT (guardrail A5)
 - Use `KNOWN_STATE_KEYS` in const.py when adding new function keys
 - Multi-channel devices require the `channel` key in command functions
 
@@ -125,4 +136,5 @@ Versioning is done **manually and separately** from PRs. After one or more PRs a
 ## Reference
 
 - MQTT protocol spec: `opus_mqtt_services_reference.md` in repo root
+- Gateway interface contract (MQTT and REST): `docs/quality/protocol-contract.md`
 - EEP profiles: https://www.enocean-alliance.org/eep/

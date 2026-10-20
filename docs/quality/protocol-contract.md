@@ -8,6 +8,11 @@ unless a phase explicitly permits a proven bug fix.
 Vendor protocol source: `opus_mqtt_services_reference.md`. Where the code goes
 beyond that reference (gateway alias keys, Mosquitto bridge topic), this is noted.
 
+Sections 1–11 describe the MQTT transport, which every config entry without
+`transport: rest` uses. Phase 14 added the optional REST transport; its
+contract is section 12. Sections 3, 4, 8, 9 and 10 (command wire values, value
+validation, identities, services, signals) apply to both transports.
+
 Verification legend: **[Code]** read from source, **[Test]** covered by existing
 tests, **[Ref]** per vendor reference, **[unverified]** supported neither by
 hardware observation nor by the reference.
@@ -427,3 +432,258 @@ optional `config_entry_id`.
   leaf for each device (the discovery filter) is **[unverified]** on hardware;
   the evidence is a field report of a numeric `friendlyId` topic (CHANGELOG)
   and the flattened device model of the reference.
+
+## 12. REST transport (phase 14)
+
+Ported from upstream `kegelmeier/ha-opus-greennet`, branch
+`feat/rest-transport` (`20b34c9`, contract of that branch). Upstream observed
+the REST API on a real gateway; those observations are marked **[HW-upstream]**
+(OPUS-GW v1.21.31, API 2.6.3.0, 65 devices). Practical tests the maintainer
+ran on the own installation after phase 14 are marked **[Praxis]**
+(reported, not independently verified, section 12.9). Information passed on in
+writing from the upstream project with measurements of its installation is
+marked **[Upstream-Mitteilung]**.
+
+### 12.1 Selection and identity (A5)
+
+- `transport.entry_transport`: an entry uses REST only when its data contains
+  `transport: rest`; every other entry, including all entries created before
+  phase 14, uses the unchanged MQTT coordinator. **[Code][Test]**
+- REST entry data: `eag_id`, `transport`, `host`, `port`, `username`,
+  `password`. The unique ID is the EAG identifier = the gateway's EURID (upper
+  case), the same value as on MQTT, so a gateway can only be configured once.
+  **[Code][Test]**
+- Switching is an explicit user action in the reconfigure flow
+  (`reconfigure_rest`, `reconfigure_mqtt`). It changes only the entry data;
+  device identifiers `(opus_greennet, "<EAG>_<DEV>")`, entity unique IDs, entity
+  IDs and registry settings stay unchanged. Upstream verified that REST creates
+  exactly the 138 unique IDs of an MQTT installation. **[Code][Test][HW-upstream]**
+- REST-only operation (phase 16 = REST plan R2): `manifest.json` lists `mqtt`
+  under `after_dependencies`, not `dependencies`. Home Assistant sets up a
+  configured MQTT integration before this integration, but no longer sets up
+  MQTT for a REST entry; the `mqtt` discovery key is unchanged and is read by
+  the MQTT integration independently of dependencies. A REST entry loads,
+  controls and unloads with the MQTT integration absent. **[Code][Test]**
+- Import boundary: `rest_coordinator.py`, `transport.py`, `entity.py`,
+  `diagnostics.py` and the platforms import neither the MQTT transport
+  (`coordinator.py`, `mqtt_transport.py`, `discovery.py`) nor
+  `homeassistant.components.mqtt`; shared names live in `domain.py`.
+  `__init__.py` imports the MQTT coordinator only when an MQTT entry is set up,
+  `config_flow.py` imports MQTT only in its MQTT steps. Platforms depend on the
+  `transport.OpusCoordinator` protocol. **[Code][Test]**
+- An MQTT entry while the MQTT integration is not set up keeps its previous
+  outcome: setup is retried (`ConfigEntryNotReady`), the MQTT flow steps abort
+  with `mqtt_not_configured`. **[Code][Test]**
+
+### 12.2 Endpoints and radio classification
+
+Plain HTTP (default port 8080), basic authentication (vendor default user
+`admin`, password = EURID in upper case). Shared Home Assistant aiohttp session.
+Request bound 10 s (connect 10 s), ReCom 45 s. Every JSON answer carries
+`header.httpStatus`; `200` and `201` count as success, any other status fails
+with the gateway's `header.message` as reason. **[HW-upstream][Code][Test]**
+Since phase 17 (REST plan R3, finding B-1) the HTTP status line is checked
+separately: an answer is accepted only with HTTP 2xx **and** document status
+`200`/`201`. A non-2xx HTTP status fails the request even when the body
+reports `200`; the error keeps both values (`OpusResponseError.http_status`,
+`.gateway_status`) and reads `HTTP status <h>, gateway status <g>` when they
+differ, otherwise `status <h>` (plus the gateway message). A non-2xx answer
+without a readable gateway document reports its HTTP status instead of
+"invalid JSON". The document status alone still decides between `200`
+(transmitted) and `201` (deferred). The client never repeats a request.
+**[Code][Test]**
+
+| Method and path | Trigger | Scope |
+|-----------------|---------|-------|
+| `GET /system/info` | Config flow, setup | Gateway (EURID, version, base ID, HomeKit setup code and HomeKit QR payload; the latter three redacted in diagnostics) |
+| `GET /system/uptime` | Setup, health check every 60 s (`GATEWAY_HEALTH_INTERVAL`, same as MQTT) | Gateway |
+| `GET /devices` | Once right after setup (configuration and battery only; the stream's list has no `configuration` block **[HW]**), then every 30 min (`DEVICE_LIST_REFRESH_INTERVAL`) | Gateway device model, no radio telegram **[HW-upstream]** |
+| `GET /devices/stream` | Setup (its first document is the setup snapshot, phase 21/R5); long-lived, reopened after it ends or after 15 min without data | Gateway |
+| `GET /devices/{id}` | A telegram from a device missing in the device list; at most once per hour per device | Gateway device model |
+| `PUT /devices/{id}/state` | User commands; status queries 5/20 s after unconfirmed commands (covers 10/20 s after the travel estimate) | Potentially radio |
+| `GET`/`PUT /devices/{id}/configuration`, `GET …/parameters` | Explicit service actions only | Radio (ReCom) |
+
+Only `PUT …/state` and ReCom reach a radio device. They share one in-flight
+slot (`rest_coordinator.PriorityLock`, moved from `api.py` in phase 17:
+commands 0, queries 10, background checks 20), are
+never repeated and are dropped when superseded or queued before an outage.
+**[Code][Test]**
+
+### 12.3 Event stream
+
+- The first document of every stream is the complete device list
+  (`header.content = "devices"`) and is applied as authoritative state, like a
+  resync. Then one document per telegram (`content = "telegram"`); a single
+  device object (`content = "device"`) is live feedback. Other content types
+  are ignored. **[HW-upstream][Code][Test]**
+- Documents are written back to back without delimiters; `JsonDocumentSplitter`
+  cuts them. Every document is limited to 8 MB (8 388 608 characters), whether
+  it arrives in one chunk or grows across several (phase 18/R4, finding B-3);
+  a larger document fails the stream, which is reopened with the backoff of
+  12.4. **[HW-upstream][Code][Test]**
+- One reader per entry. Each started reader gets a new connection
+  generation; a reader replaced by a restart (failed probe, falling uptime)
+  applies no further document, changes no availability and closes its HTTP
+  response at once (`contextlib.aclosing`). **[Code][Test]**
+- Stream first (phase 21/R5, plan E7): setup reads `GET /system/info` and
+  `GET /system/uptime`, opens the stream and waits for its first device list
+  (`FIRST_DEVICE_LIST_TIMEOUT` 30 s); that list is the only setup snapshot
+  and the same reader continues. No list in time, or a first attempt that
+  fails or ends before the list, fails setup (`ConfigEntryNotReady`; HTTP
+  401/403 → reauthentication). The measured time is logged at debug level and
+  shown in diagnostics (`gateway.first_device_list_seconds`; 0.076 s on
+  OPUS-IQ-DOT 1.21.30 with 53 devices **[HW]**). **[Code][Test]**
+- The stream's device list carries states and battery but **no
+  `configuration` block** (cover movement and rotation times) **[HW]**.
+  Setup therefore runs the non-authoritative metadata refresh (`GET
+  /devices`) once right after the first list; it applies configuration and
+  battery only. **[Code][Test]**
+- The 30 min list never replaces the signal strength or last-seen time of a
+  telegram received after its request started (finding B-5). Stream
+  snapshots are ordered with the telegrams on the same connection and always
+  apply. **[Code][Test]**
+- Battery level is not streamed; it comes from the device list. Status replies
+  that do not change state are not streamed. **[HW-upstream]**
+- There are no retained messages on REST. Section 6 (A4) therefore does not
+  apply; the stream's device list is the gateway's current model, and the
+  30 min refresh applies only configuration, battery and metadata, never live
+  state. **[Code][Test]**
+
+### 12.4 Availability (A2)
+
+- `available` = not unloaded and gateway available. Available after setup and
+  whenever a stream connects; unavailable when a stream connection attempt or
+  the health check fails, or the credentials are rejected. A stream that ends
+  after it connected does not make the gateway unavailable. Every stream end
+  is followed by a pause (phase 18/R4, finding B-2): nominal 1, 2, 4, 8, 16,
+  32, 60 s (bounded exponential), each lengthened by a random 0–25 % (jitter),
+  so never shorter than nominal and never longer than 75 s. A stream that
+  delivered its device list but ended within 10 s counts as a failed attempt;
+  only a stream open for at least 10 s resets the schedule to 1 s. Rejected
+  credentials (401/403) end the reader without another attempt.
+  **[Code][Test]**
+- The health check describes the gateway only and never confirms or changes a
+  device state. A falling uptime (gateway restart) or a failed check replaces
+  the stream. **[Code][Test]**
+- A command timeout or rejection fails only that action and never changes
+  gateway availability (A2, A3). HTTP 401 at runtime makes the gateway
+  unavailable once and starts one reauthentication flow. **[Code][Test]**
+
+### 12.5 Acknowledgements and deferred delivery (phase 11 semantics)
+
+- `200` = transmitted, `201` = SoftSmartAck (deferred). `async_send_command`
+  returns `CommandDelivery` like the MQTT coordinator. **[Code][Test]**
+- After `201`: no estimate in the entity, no cover travel estimate, no status
+  query for that command; the values are kept in `deferred_commands`
+  (diagnostics). A matching `from` report, a single device document or the
+  gateway's later outbound telegram clears them; a device list does not.
+  **[Code][Test]**
+- The gateway echoes every transmitted command as a `to` telegram (~40 ms after
+  the HTTP answer **[HW-upstream]**). Within 2 s after a transmitted (`200`)
+  own command, an echo with the same target state is ignored and schedules no
+  extra check. A deferred own command is not registered as an echo, so its
+  later transmission follows the foreign-command path (optimistic state and
+  the usual two checks), as on MQTT. **[Code][Test]**
+- HTTP correlates each answer with its request: the late-answer ambiguity of
+  section 7.2 does not exist; `late_answer_diagnostics` returns zero counters
+  with the same keys. **[Code][Test]**
+
+### 12.6 Dimmer ramping mode (REST only)
+
+D2-01 dim commands carry `{"key": "rampingMode", "value": "switch"}` (new
+value at once, as HomeKit sends **[HW-upstream]**), or `"rampingTime1"` (the
+dimmer's own configured fade) when the light action has a `transition`. Only
+REST lights of D2-01 dimmers advertise the transition feature. A5-38-08 gateway
+dimming has no ramping mode. The MQTT wire values of section 3 are unchanged.
+**[Code][Test]**
+
+### 12.7 Configuration flow
+
+- Manual setup is a menu: `mqtt_bridge` (the former user step, unchanged) or
+  `rest_api` (host, port, username, password; reads `GET /system/info`).
+  Adding a gateway that is already configured aborts without changing the
+  existing entry or its transport. **[Code][Test]**
+- `ConfigEntryAuthFailed` (`invalid_auth`, `wrong_gateway`) starts the
+  reauthentication flow of REST entries, which accepts an address only if it
+  answers with the same EURID. **[Code][Test]**
+- `reconfigure_mqtt` runs the same fresh MQTT uptime probe as MQTT setup and
+  removes the stored REST address and credentials. **[Code][Test]**
+
+### 12.8 Traffic comparison (A1)
+
+| Background operation | MQTT | REST |
+|----------------------|------|------|
+| Gateway health | uptime every 60 s | uptime every 60 s |
+| Device state | retained/live push | event stream push |
+| Resync | device list on reconnect (debounced 60 s) | device list at the start of each stream |
+| Metadata (battery, signal, movement times) | retained push | device list every 30 min (gateway model) |
+| Status checks after commands | 2 per unconfirmed channel | 2 per unconfirmed channel; none for own echoes |
+| Automatic device configuration access | none | none |
+
+No row adds a radio request. The 30 min device list read is a new periodic
+gateway request on REST entries only; it is a read of the gateway model, not a
+device poll (implementation plan section 3, phase 14 amendment). **[Code][Test]**
+
+The maintainer approved this read on 2026-10-20 (decision D2,
+`Implementations-Plan-Rest-API.md` section 0). Since decision D3 (same
+section, 0.1) the guardrails A1–A5 bind only the MQTT transport; REST traffic
+is defined by best practices and Home Assistant requirements, and each change
+is disclosed with before/after traffic in its phase report. The MQTT column of
+this table stays bound by A1.
+
+### 12.9 Practical baseline and limits of verification
+
+Practical baseline **[Praxis]** (REST transport on the maintainer's own
+installation after phase 14; reported, not independently verified; the
+installed commit was not recorded because `manifest.json` reports `0.7.0b2` on
+every commit): connection after the migration of an entry; reload re-reads the
+device list and reconnects the stream; cover opening/closing indicators;
+state and position match reality; position commands and retargeting during
+travel; Stop with a position report after about 110 ms and immediate update;
+local rocker telegrams of cover actuators followed by position updates;
+F6-02-01 rocker: 6 press and 6 release telegrams, exactly one event entity
+update each, gateway to HA 7–19 ms, receipt to state write 0.9–1.5 ms. The
+sample proves no general exactly-once guarantee.
+
+Delayed end position after full cover travel:
+
+| Run | Time after command | Observation |
+|-----|-------------------:|-------------|
+| A (raw 0 = open, HA 100) | 0.48 s | position report `unknown`: last position kept, nothing confirmed **[Code]** |
+| A | 32.98 s | position 0.0, `gateway_to_ha_ms = 8` **[Praxis]** |
+| B (raw 100 = closed, HA 0) | 0.46 s / 33.10 s | `unknown`, then 100.0, `gateway_to_ha_ms = 19` **[Praxis]** |
+
+- `gateway_to_ha_ms` is HA time minus the gateway's telegram timestamp at
+  dispatch. It includes any clock offset between gateway and HA and measures
+  neither actuator to gateway nor the entity write **[Code]**. With
+  synchronised clocks the delay arises before the gateway receives the report.
+- Explanation **[Upstream-Mitteilung]**: on travel into the fully open or
+  closed end position a D2-05 actuator keeps the motor switched on for a few
+  seconds beyond the configured travel time; the motor's limit switch stops
+  the shutter physically, but the actuator sends its final position only when
+  it switches off. Intermediate positions and Stop have no overrun (consistent
+  with the 110 ms Stop report). Upstream measured full runs 3.5–5.7 s longer
+  than the configured travel time (for example 20.68 s configured, 26.37 s last
+  run); Apple HomeKit on the same gateway received each end position at the
+  same moment. The delay is actuator behaviour, not caused by the REST
+  transport. Confirmation on the own installation: REST plan phase R1.
+- Effect on the travel estimate **[Code]**: the estimate ends at configured
+  travel time plus `COVER_MOVEMENT_GRACE_SECONDS` (5.0 s) or at the first valid
+  position report, whichever comes first. If the overrun exceeds the grace,
+  `_finish_cover_movement` sets the target as an assumed position shortly
+  before the real report replaces it. Unchanged; any change of the grace or of
+  the visibility of assumed positions needs a separate decision (REST plan R6,
+  O-4). No extra status query is sent. On MQTT none may be added (A1); on
+  REST a change follows plan section 0.1 (D3) and is disclosed with its traffic.
+- `lastVerticalMovementTime` of the device list is not read by the code; only
+  `verticalMovementTime` and `rotationTime` are used **[Code]**.
+
+Not verified in this repository:
+
+- REST behaviour on hardware beyond the practical baseline above (all
+  **[HW-upstream]** statements come from the upstream branch).
+- The actuator overrun on the own installation (REST plan R1).
+- Whether the gateway ever sends `content = "device"` documents.
+- Whether `GET /devices` can trigger radio traffic on any firmware; upstream
+  observed none.
+- ACK `201` on REST: which profiles receive it.

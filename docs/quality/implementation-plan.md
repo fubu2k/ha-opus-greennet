@@ -46,6 +46,14 @@ static analysis, actually executed tests, CI outcomes and hardware observations.
 These supersede the original blanket exclusions. Permission for a scoped phase
 is not permission for unrelated side work.
 
+Scope since 2026-10-20 (maintainer decision D3, `Implementations-Plan-Rest-API.md`
+section 0.1): A1–A5 bind the MQTT transport, i.e. every entry without
+`transport: rest`, and all code the MQTT path executes, including modules
+shared with REST. The REST transport is developed in all further phases
+according to best practices and Home Assistant requirements; A1–A5 are no
+longer a preservation rule for it. REST changes to shared modules must be
+transport-bound and leave the MQTT tests unchanged.
+
 | ID | Binding rule | Permitted work | Prohibited shortcuts |
 |----|--------------|----------------|----------------------|
 | A1 | No increase in automatic radio-device polling, reconciliation slots or retry traffic. Keep intervals unless a reviewed change reduces unnecessary work. | Suppress redundant queries, classify endpoint/radio effects, prove unchanged or reduced traffic. | New periodic device pollers, shorter intervals, extra reconciliation slots, automatic command retries. |
@@ -85,6 +93,23 @@ a request to a battery-powered device.
 | Configuration/parameters | May involve ReCom/device access | Explicit user action only; no automatic background reads/writes. |
 | Incoming streams/telegrams | Existing publications | Local parsing must not publish requests. |
 | Diagnostics/icons/enablement | HA representation | No device polling or configuration reads/writes. |
+
+Phase 14 amendment (optional REST transport, 2026-10-20; approved by the
+maintainer on 2026-10-20 as decision D2 of `Implementations-Plan-Rest-API.md`
+section 0, recorded in phase 15 / REST plan R0): for config entries with
+`transport: rest` the same rules
+apply to the REST endpoints (`protocol-contract.md` section 12). `GET
+/system/uptime` keeps the 60 s interval. `GET /devices` is read at setup, at
+the start of every event stream and additionally every 30 minutes, because the
+gateway does not stream battery level, signal strength and movement times; it
+is a read of the gateway model without radio telegram (upstream hardware
+observation). `PUT …/state` and ReCom keep the policies above. MQTT entries are
+unaffected; no entry switches transport without an explicit user action.
+The 30 min interval (`DEVICE_LIST_REFRESH_INTERVAL`) is the current state.
+Since decision D3 (section 2) A1 no longer fixes REST traffic; a change of
+this read follows best practices and Home Assistant requirements and is
+disclosed with before/after traffic in the phase report. MQTT traffic stays
+bound by A1.
 
 Create a profile/operation capability matrix: EEP/profile, operation, reference,
 cache-versus-radio behaviour, known power source, support and verification
@@ -233,6 +258,111 @@ F13-2 decided: `codeowners`, documentation and issue tracker stay with
 change. Completed: merged via PR #13 (`2e46bfd`), CI green on the pull request
 (run `39376442882`) and on `main` (run `39376460361`), CHANGELOG
 "Unreleased". This closes the quality series.
+
+Status update 2026-10-20 (phase 14): base `main` `39b4c66`. At the
+maintainer's request the REST transport of upstream `kegelmeier/ha-opus-greennet`
+(branch `feat/rest-transport`, `20b34c9`) is integrated as an optional second
+transport next to the unchanged MQTT transport, on branch
+`feature/rest-api-integration`, report `phases/phase-14.md` (section 15a).
+Quality scale: `reauthentication-flow`, `reconfiguration-flow` and
+`inject-websession` change from exempt to done (48 done, 6 exempt, 0 todo).
+CI green on the branch (run `39384621424`). Not merged; merge and release
+approval remain separate.
+
+Status update 2026-10-20 (phase 15 = REST plan R0): base
+`feature/rest-api-integration` `1847f88` (adds
+`Implementations-Plan-Rest-API.md`). Documentation only, on branch
+`docs/opus-r0-rest-documentation`, report `phases/phase-15.md`: maintainer
+decision D2 (30 min device list read on REST entries) recorded as approved in
+section 3 and 15a, `phases/phase-14.md` and protocol contract 12.8; the
+maintainer's practical REST tests and the delayed end-position report after
+full cover travel (actuator overrun, upstream communication) recorded in
+protocol contract 12.9 and README "Known limitations". No code, timing or
+traffic change. Maintainer decision D3 recorded on the same branch: A1–A5
+bind only the MQTT transport; REST is developed in all further phases
+according to best practices and Home Assistant requirements (section 2 scope
+note, `Implementations-Plan-Rest-API.md` section 0.1). The next REST phase
+needs its own approval. Merged into `feature/rest-api-integration` by PR #16
+(`4014b1c`, 2026-10-20); not merged into `main`.
+
+Status update 2026-10-20 (branch policy): PR #14 merged
+`feature/rest-api-integration` into `main` by mistake (`112bc43`); it was
+reverted by PR #15 (`32685d1`, tree identical to `39b4c66`). Maintainer
+decision: until further notice all work happens on
+`feature/rest-api-integration`; phase branches start from it and are merged
+back into it, not into `main`. A later merge into `main` first needs a revert
+of the revert commit (`phases/phase-15.md` section 11).
+
+Status update 2026-10-20 (phase 16 = REST plan R2): base
+`feature/rest-api-integration` `4014b1c` (R0 merged by PR #16). Branch
+`feat/opus-r2-rest-only-decoupling`, report `phases/phase-16.md`. REST-only
+decoupling: new transport-neutral `domain.py` (re-exported unchanged by
+`coordinator.py` and `mqtt_transport.py`), `transport.OpusCoordinator` as a
+`typing.Protocol`, MQTT imported on demand in `__init__.py` and
+`config_flow.py`, `manifest.json` `dependencies: ["mqtt"]` changed to
+`after_dependencies: ["mqtt"]` after evidence for open question O-1. No
+behaviour, timing, wire or traffic change on MQTT or REST (A1–A5 for MQTT
+under decision D3). Merged into `feature/rest-api-integration` by PR #17
+(`b9c3fb0`, 2026-10-20); not merged into `main`. The next REST phase (R1 or
+R3) needs its own approval.
+
+Status update 2026-10-20 (phase 17 = REST plan R3): base
+`feature/rest-api-integration` `b9c3fb0` (R2 merged by PR #17). Branch
+`feat/opus-r3-rest-client-hardening`, report `phases/phase-17.md`. REST client
+hardening: HTTP status line and document status checked separately (B-1),
+`PriorityLock` and request priorities moved from `api.py` into
+`rest_coordinator.py` (B-6), boundary tests for `api.py`/`wire.py`, the
+injected web session, credential-free error texts and no retries. Only REST
+behaviour change: an answer with a non-2xx HTTP status now fails even when its
+body reports 200 (decision D3, disclosed in the report). MQTT path untouched
+(A1–A5). Merged into `feature/rest-api-integration` via PR #18 (`1c30105`);
+CI run `39423057097` green on the merged head.
+
+Status update 2026-10-20 (phase 18 = REST plan R4): base
+`feature/rest-api-integration` `e5b609e`. Branch
+`feat/opus-r4-stream-lifecycle`, report `phases/phase-18.md`. REST event
+stream lifecycle: bounded exponential backoff with jitter after every stream
+end, short-lived streams (< 10 s) count as failures (B-2), size check for
+complete documents (B-3), connection generation and `aclosing` for replaced
+readers. REST behaviour changes disclosed under decision D3. MQTT path
+untouched (A1–A5). Merged into `feature/rest-api-integration` via PR #21
+(`ae3e084`); CI run `39431240243` green on the merged head.
+
+Status update 2026-10-20 (phase 19 = REST plan R4.2, the menu-order part of
+R7 brought forward at the maintainer's request): base
+`feature/rest-api-integration` `c4aa809`. Branch
+`feat/opus-r4-2-rest-first-menu`, report `phases/phase-19.md`. The manual
+setup menu lists the REST API first and the MQTT bridge second. No transport,
+entry, identity or traffic change (A1–A5). Merged into
+`feature/rest-api-integration` via PR #23 (`c8573ef`); CI run `39434909485`
+green on the branch head `becd4d6`.
+
+Status update 2026-10-20 (phase 20 = REST plan R4.3, maintainer decision):
+base `feature/rest-api-integration` `c8573ef`. Branch
+`feat/opus-r4-3-rest-only-setup`, report `phases/phase-20.md`. New gateways
+are added over REST only: the manual setup shows the REST form directly and an
+MQTT-discovered gateway opens the same REST form (EURID suggested as
+password). Existing MQTT entries are not touched and can still be switched in
+the reconfigure flow (A5). No runtime, request or traffic change of either
+transport (A1–A4). Merged into `feature/rest-api-integration` via PR #24
+(`bcb6276`); CI run `39449339335` green on the branch.
+
+Status update 2026-10-20 (phase 21 = REST plan R5): base
+`feature/rest-api-integration` `bcb6276`. Branch
+`feat/opus-r5-stream-first-start`, report `phases/phase-21.md`. Stream-first
+setup: the stream's first device list replaces `GET /devices` at setup and
+reload (B-8, one device list fewer per start), 30 s deadline, measured time
+in diagnostics; the 30 min list keeps newer telegram metadata (B-5). REST
+behaviour changes disclosed under D3; MQTT path untouched (A1–A5). Merged
+into `feature/rest-api-integration` via PR #25 (`2d3cf9c`); CI run
+`39458477903` green. Hardware check (report section 7): first list after
+0.076 s; finding R5-H1 (stream list without cover configuration) fixed on
+`fix/opus-r5-movement-times` with one `GET /devices` right after setup.
+
+Status update 2026-10-20 (REST to `main`, maintainer decision): branch
+`release/rest-api-to-main` restores the REST transport on `main` (revert of
+`32685d1`) and merges `feature/rest-api-integration` with PRs #29 and #30. No
+version bump; release separately per `CLAUDE.md`.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
@@ -559,6 +689,40 @@ necessarily tier blockers; assess actual rule/correctness impact. Acceptance:
 no unreasoned applicable todo, no false hardware guarantee, reviewed compatibility
 and traffic evidence; release authorisation remains separate.
 
+## 15a. Phase 14 – Optional REST transport (implemented, not merged)
+
+Branch: `feature/rest-api-integration` (name chosen by the maintainer).
+The section 3 amendment (30 min device list read on REST entries) was approved
+on 2026-10-20 (decision D2). Merge and release approval remain separate.
+Follow-up work for the REST transport is planned in
+[`Implementations-Plan-Rest-API.md`](Implementations-Plan-Rest-API.md)
+(phases R0–R8, each with its own approval).
+
+- Scope: add the upstream REST transport (`api.py`, `protocol.py`,
+  `rest_coordinator.py`) as an opt-in per config entry (`transport.py`). The
+  MQTT coordinator, `mqtt_transport.py`, MQTT discovery and phases 10–12 stay
+  unchanged and remain the path of every existing entry.
+- A1: no new radio request; REST reuses the 60 s health interval and the two
+  status checks; own-command echoes schedule no extra check. The 30 min device
+  list read is a gateway-model read on REST entries only (section 3
+  amendment, approved 2026-10-20, D2).
+- A2: gateway health never confirms device state; a command timeout fails only
+  its action.
+- A3: one request in flight, no write retries, no cooldowns.
+- A4: unchanged on MQTT; REST has no retained messages (contract 12.3).
+- A5: identities, entity IDs and registry settings unchanged; switching the
+  transport only in the reconfigure flow; existing entries are never switched
+  automatically.
+- Phase 11 semantics are kept on REST (ACK 201: no estimate, no travel
+  estimate, no status query). Phase 12 diagnostics keep their keys (always
+  zero on REST).
+- Upstream's D2-01 `rampingMode` fix is applied to REST only; porting it to
+  MQTT would change MQTT wire values and needs a separate decision.
+
+Acceptance: CI green on the branch (both jobs, hassfest, coverage gates,
+repeated race suites including the REST suites), unchanged MQTT tests apart
+from the new config-flow menu, documentation and evidence updated.
+
 ## 16. Mandatory acceptance matrix
 
 | Scenario | Required result |
@@ -621,7 +785,9 @@ for run in 1 2 3; do
 done
 ```
 
-Add freshness/ACK/late-response suites when implemented. Record commands,
+Add freshness/ACK/late-response suites when implemented. Phase 14 adds
+`test_rest_stream.py`, `test_rest_requests.py`, `test_rest_lifecycle.py` and
+`test_transport_selection.py` to the repeated suites. Record commands,
 environment, exit status, coverage, traffic and local/CI origin. Keep individual
 evidence even if a different combined job fails.
 
@@ -667,6 +833,7 @@ proven dead code with tests. Preserve icon/diagnostic policy in sections 10–11
 - Evidence: `docs/quality/quality-scale-evidence.md`.
 - Rules: `custom_components/opus_greennet/quality_scale.yaml`.
 - Protocol: `docs/quality/protocol-contract.md`.
+- REST follow-up plan: `docs/quality/Implementations-Plan-Rest-API.md`.
 - Vendor reference: `opus_mqtt_services_reference.md`.
 - CI: `.github/workflows/tests.yml`.
 - Official scale: https://developers.home-assistant.io/docs/core/integration-quality-scale/

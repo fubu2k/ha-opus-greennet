@@ -11,13 +11,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import OpusGreenNetConfigEntry
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL, DOMAIN
-from .coordinator import (
+from .domain import (
     SIGNAL_DEVICE_DISCOVERED,
     SIGNAL_DEVICE_REMOVED,
-    OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanDevice
 from .entity import OpusGreenNetEntity, migrate_legacy_entity_suffix
+from .transport import OpusCoordinator
 
 PARALLEL_UPDATES = 0
 
@@ -77,7 +77,7 @@ class OpusGreenNetAutoLock(OpusGreenNetEntity, LockEntity):
 
     def __init__(
         self,
-        coordinator: OpusGreenNetCoordinator,
+        coordinator: OpusCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,

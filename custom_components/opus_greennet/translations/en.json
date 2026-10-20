@@ -4,29 +4,96 @@
     "step": {
       "user": {
         "title": "Opus GreenNet Bridge",
-        "description": "Configure the bridge connected to your MQTT broker. Setup checks that the specified bridge responds.",
+        "description": "Enter the address of the gateway's REST API. Setup reads only the gateway's identity; no EnOcean device is queried. Gateways that are already configured keep their connection.",
         "data": {
-          "eag_id": "EAG identifier"
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password"
         },
         "data_description": {
-          "eag_id": "The eight-character bridge identifier used in MQTT topics, for example A1B2C3D4 (fictional)."
+          "host": "IP address or host name of the OPUS gateway in your network.",
+          "port": "Port of the gateway's REST API (default 8080).",
+          "username": "User name of the gateway's REST API (vendor default: admin).",
+          "password": "Password of the gateway's REST API. The vendor default is the gateway's EURID in capital letters."
         }
       },
       "discovery_confirm": {
+        "title": "Opus GreenNet Bridge {eag_id}",
+        "description": "Gateway {eag_id} was found in device data on your MQTT broker. Enter the address of its REST API to set it up. The address is accepted only if it answers as gateway {eag_id}; no EnOcean device is queried.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "IP address or host name of the OPUS gateway in your network.",
+          "port": "Port of the gateway's REST API (default 8080).",
+          "username": "User name of the gateway's REST API (vendor default: admin).",
+          "password": "Password of the gateway's REST API. The vendor default is the gateway's EURID in capital letters."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate gateway {eag_id}",
+        "description": "The gateway rejected the stored credentials or answers with a different identity. Enter the address and credentials of gateway {eag_id}.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "IP address or host name of the OPUS gateway in your network.",
+          "port": "Port of the gateway's REST API (default 8080).",
+          "username": "User name of the gateway's REST API (vendor default: admin).",
+          "password": "Password of the gateway's REST API. The vendor default is the gateway's EURID in capital letters."
+        }
+      },
+      "reconfigure": {
         "title": "Opus GreenNet Bridge",
-        "description": "Set up the gateway {eag_id}? It was found in device data on your MQTT broker. Before the entry is created, setup checks that this gateway responds. No EnOcean device is queried."
+        "description": "Choose how Home Assistant reaches this gateway. Devices, entities, their IDs and your settings stay unchanged.",
+        "menu_options": {
+          "reconfigure_rest": "Directly through the gateway's REST API",
+          "reconfigure_mqtt": "Through the MQTT broker"
+        }
+      },
+      "reconfigure_rest": {
+        "title": "REST API of gateway {eag_id}",
+        "description": "Enter the address and credentials of gateway {eag_id}. They are accepted only if this address answers as gateway {eag_id}.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "IP address or host name of the OPUS gateway in your network.",
+          "port": "Port of the gateway's REST API (default 8080).",
+          "username": "User name of the gateway's REST API (vendor default: admin).",
+          "password": "Password of the gateway's REST API. The vendor default is the gateway's EURID in capital letters."
+        }
+      },
+      "reconfigure_mqtt": {
+        "title": "MQTT broker for gateway {eag_id}",
+        "description": "Reach gateway {eag_id} through the MQTT broker again. Before switching, Home Assistant checks that the gateway answers there. A stored REST address and its credentials are removed."
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to the MQTT broker",
-      "invalid_eag_id": "The EAG identifier must contain exactly eight hexadecimal characters",
       "unknown": "Unexpected error",
-      "gateway_unavailable": "The MQTT broker is connected, but the bridge did not respond. Check its identifier and the MQTT bridge connection."
+      "gateway_unavailable": "The MQTT broker is connected, but the bridge did not respond. Check its identifier and the MQTT bridge connection.",
+      "cannot_connect_gateway": "Failed to connect to the gateway. Check host and port.",
+      "invalid_auth": "The gateway rejected the username or password",
+      "unsupported_gateway": "The device at this address did not answer like an OPUS gateway",
+      "wrong_gateway": "This address answers as a different gateway"
     },
     "abort": {
       "already_configured": "This bridge is already configured",
       "mqtt_not_configured": "Set up and connect the MQTT integration before adding this bridge",
-      "invalid_discovery_info": "The MQTT message does not identify an OPUS gateway"
+      "invalid_discovery_info": "The MQTT message does not identify an OPUS gateway",
+      "reauth_successful": "Re-authentication was successful",
+      "reconfigure_successful": "Reconfiguration was successful"
     }
   },
   "entity": {
@@ -178,6 +245,12 @@
     },
     "autolock_read_only": {
       "message": "AutoLock control via MQTT is disabled pending manufacturer clarification. Only the reported lock state is available."
+    },
+    "invalid_auth": {
+      "message": "The OPUS gateway rejected the stored credentials. Re-authenticate the gateway."
+    },
+    "wrong_gateway": {
+      "message": "The configured address answers as a different OPUS gateway. Re-authenticate the gateway with its correct address."
     }
   },
   "issues": {
