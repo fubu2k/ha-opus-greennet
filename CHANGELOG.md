@@ -4,19 +4,46 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Changed
+### REST API transport (fork branch `feature/rest-api-integration`, REST plan phases R0–R5)
+
+Builds on the REST transport of phase 14 (based on upstream `feat/rest-transport`). Entries that use the MQTT bridge are unchanged in behaviour and traffic; their entity IDs, unique IDs and settings are kept. Reports: `docs/quality/phases/phase-15.md` to `phase-21.md`; plan: `docs/quality/Implementations-Plan-Rest-API.md`.
+
+#### Changed
+- **New gateways are set up over the REST API only** (R4.3). *Add integration* opens the REST form directly: host, port (`8080`), user (`admin`) and password (by default the gateway's EURID in capital letters). A gateway discovered on the MQTT broker opens the same form with the EURID suggested as password and is accepted only if the address answers as that gateway. Existing MQTT entries keep MQTT and are never switched automatically; *Reconfigure* still switches an entry between REST and MQTT without changing its devices or entities. (R4.2 had first put REST first in a setup menu; R4.3 replaced the menu.)
+- **Stream-first start** (R5). Setup reads the gateway identity and uptime, opens the event stream and takes all device states from its first document, the complete device list. If that list does not arrive within 30 seconds, Home Assistant retries the setup later; rejected credentials start one re-authentication. Measured on an OPUS-IQ-DOT 1.21.30 with 53 devices: 0.076 s. Right after setup the device list is read once more (`GET /devices`) for cover movement and rotation times and battery levels, which the streamed list does not contain; it never changes live state.
+- **Reconnect with bounded backoff and jitter** (R4). After every stream end the integration waits before reconnecting: 1, 2, 4, 8, 16, 32, then 60 seconds, each lengthened by a random 0–25 %. A stream that closes within 10 seconds counts as a failed attempt, so a gateway that closes every connection right after the device list no longer causes a tight reconnect loop with a full device list download each time. Rejected credentials are never retried. A replaced stream applies no further data and releases its connection at once.
+- **HTTP status and gateway status are checked separately** (R3). An answer with a non-2xx HTTP status now fails even if its body reports success (before, HTTP 500 with a body status 200 counted as success). Commands are still never repeated; timeouts and concurrency are unchanged.
+- The device list read every 30 minutes keeps the signal strength and last-seen time of a telegram that arrived while the list was being read (R5).
+- REST entries work without the Home Assistant MQTT integration (R2): MQTT is loaded only for MQTT entries and MQTT discovery (`manifest.json`: `after_dependencies` instead of `dependencies`).
+
+#### Fixed
+- Cover movement and rotation times were missing after a start with the first stream-first build, so the travel estimate stayed off until the next 30-minute device list (R5 hardware finding R5-H1).
+- Diagnostics redact the gateway's HomeKit QR setup payload (`homekitQR`, `X-HM://…`), which encodes the HomeKit pairing code; before, only `homekitPin` was redacted.
+- Every streamed document is limited to 8 MB, also when it arrives complete in one network chunk (R4).
+
+#### Added
+- Diagnostics show `gateway.first_device_list_seconds`: the time from opening the event stream to its first device list at setup (REST entries).
+
+#### Documentation and quality assurance
+- REST API implementation plan (now in English), protocol contract (REST sections 12.2–12.4), README (REST transport, setup, gateway discovery) and phase reports 15–21.
+- Approved the 30-minute device list read for REST (decision D2) and documented the field-test baseline and the actuator overrun on full cover runs (R0).
+- New test modules `test_rest_only_decoupling.py`, `test_rest_client_hardening.py`, `test_rest_client_coordinator.py`, `test_rest_stream_backoff.py` and `test_rest_stream_first.py`; every phase passed the CI workflow (ruff, strict mypy, coverage gates, Hassfest, Home Assistant 2026.10.2 and latest stable).
+
+### Quality series (phases 12–13)
+
+#### Changed
 - The supply voltage of SMS presence detectors (A5-07-01/03) is classified as a diagnostic entity and appears under **Diagnostic** on the device page. It stays enabled; existing entries keep their enabled/disabled setting, entity ID, name and icon, so automations continue to work.
 - Battery levels of all OPUS devices that report one (SMS presence detectors, A5-04-01/02/03 temperature/humidity sensors and the OPUS motion detector) are displayed in whole percent, for example `88 %` instead of `87.5 %`. Only the display is rounded: entity state, history and long-term statistics keep the reported value, and a display precision you set in the entity settings takes precedence.
 - Neither change sends a request to a device or changes MQTT traffic, entity inventory or unique IDs.
 - Rocker switch event entities (F6-02-xx, F6-03-xx) use the `button` event device class, so the frontend shows a button icon by default. Entity IDs, names, event types and automations are unchanged; existing entries keep their enabled/disabled setting and any icon you chose. No request is sent to a device.
 
-### Added
+#### Added
 - Integration diagnostics list `late_answers` for every device and for the gateway: `unanswered_requests` counts requests from the last two minutes that ended without a gateway reply (timeout or cancellation), and `possibly_late_answers` counts replies that arrived while such a request was still open. OPUS replies carry no request ID, so such a reply may belong to the earlier request. The counters only make this visible: they never delay, repeat, drop or change a request, and they change no entity state or availability.
 
-### Compatibility and upgrade notes
+#### Compatibility and upgrade notes
 - The README section "Timeouts without a request ID" now explains the known limitation: if a reply arrives after the 10-second timeout while the next request to the same device is waiting, that request can report success although the gateway rejected it, or an error although the gateway accepted it. Replies never cross devices, retained replies are ignored, and the next device report shows the real state. The same applies to a reply to another MQTT client (for example the MyOPUS app). Timeouts, request order and MQTT traffic are unchanged.
 
-### Development and quality assurance
+#### Development and quality assurance
 - New regression suites `tests/test_late_responses.py` (18 cases) and `tests/test_late_answer_diagnostics.py` (19 cases) reproduce how late replies are attributed and pin that no cooldown, retry or extra request follows a timeout. Both run three additional times in CI. Report: `docs/quality/phases/phase-12.md`.
 - Final quality-scale audit (phase 13): all 54 rules re-verified against the code (45 done, 9 exempt, 0 todo) with explicit exemption justifications, a per-entity inventory and the documented limits of the evidence. This is a Platinum-equivalent self-assessment, not an official Home Assistant rating. Report: `docs/quality/phases/phase-13.md`.
 
