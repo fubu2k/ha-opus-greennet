@@ -482,6 +482,16 @@ Plain HTTP (default port 8080), basic authentication (vendor default user
 Request bound 10 s (connect 10 s), ReCom 45 s. Every JSON answer carries
 `header.httpStatus`; `200` and `201` count as success, any other status fails
 with the gateway's `header.message` as reason. **[HW-upstream][Code][Test]**
+Since phase 17 (REST plan R3, finding B-1) the HTTP status line is checked
+separately: an answer is accepted only with HTTP 2xx **and** document status
+`200`/`201`. A non-2xx HTTP status fails the request even when the body
+reports `200`; the error keeps both values (`OpusResponseError.http_status`,
+`.gateway_status`) and reads `HTTP status <h>, gateway status <g>` when they
+differ, otherwise `status <h>` (plus the gateway message). A non-2xx answer
+without a readable gateway document reports its HTTP status instead of
+"invalid JSON". The document status alone still decides between `200`
+(transmitted) and `201` (deferred). The client never repeats a request.
+**[Code][Test]**
 
 | Method and path | Trigger | Scope |
 |-----------------|---------|-------|
@@ -494,7 +504,8 @@ with the gateway's `header.message` as reason. **[HW-upstream][Code][Test]**
 | `GET`/`PUT /devices/{id}/configuration`, `GET …/parameters` | Explicit service actions only | Radio (ReCom) |
 
 Only `PUT …/state` and ReCom reach a radio device. They share one in-flight
-slot (`api.PriorityLock`: commands 0, queries 10, background checks 20), are
+slot (`rest_coordinator.PriorityLock`, moved from `api.py` in phase 17:
+commands 0, queries 10, background checks 20), are
 never repeated and are dropped when superseded or queued before an outage.
 **[Code][Test]**
 

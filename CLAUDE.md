@@ -23,8 +23,8 @@ Repository: https://github.com/kegelmeier/ha-opus-greennet
 - `domain.py` — transport-neutral names shared by both coordinators and the platforms: `CommandDelivery`, `CoverMovement`, dispatcher signals, `request_error`, `ACK_STATUS_DEFERRED`, shared timing constants (phase R2)
 - `coordinator.py` — MQTT transport: communication, device discovery, command dispatch
 - `mqtt_transport.py` — MQTT request manager, subscriptions, gateway probe
-- `rest_coordinator.py` — REST transport: event stream, health probe, commands (same public interface)
-- `api.py` — REST client (requests, error mapping, event stream splitting, request priority lock)
+- `rest_coordinator.py` — REST transport: event stream, health probe, commands (same public interface), radio queue (`PriorityLock`, priorities 0/10/20)
+- `api.py` — REST client (requests, HTTP and gateway status checks, error mapping, event stream splitting); imports only the standard library, aiohttp and `wire.py` (phase R3, `tests/test_rest_client_hardening.py`)
 - `protocol.py` — pure helpers that read REST gateway documents
 - `enocean_device.py` — device/channel data model
 - Platform files: `light.py`, `switch.py`, `cover.py`, `climate.py`, `sensor.py`, `binary_sensor.py`, `event.py`

@@ -30,10 +30,13 @@ Lifecycle:
 from __future__ import annotations
 
 import asyncio
+import heapq
+import itertools
 import logging
 from collections.abc import Callable, Coroutine, Sequence
 from datetime import datetime, timedelta
 from time import monotonic, time
+from typing import Final
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -42,9 +45,6 @@ from homeassistant.helpers.event import async_call_later, async_track_time_inter
 
 from . import protocol
 from .api import (
-    PRIORITY_BACKGROUND,
-    PRIORITY_COMMAND,
-    PRIORITY_QUERY,
     RECOM_TIMEOUT,
     OpusApiError,
     OpusAuthError,
@@ -52,7 +52,6 @@ from .api import (
     OpusGatewayClient,
     OpusResponseError,
     OpusTimeoutError,
-    PriorityLock,
     gateway_uptime_value,
     response_status,
 )
@@ -104,6 +103,66 @@ UNKNOWN_DEVICE_RETRY_SECONDS = 3600.0
 # acknowledgement; within this time an echo with the same content is not
 # mistaken for a command from another controller.
 OWN_COMMAND_ECHO_SECONDS = 2.0
+
+# Radio queue priorities: lower values are dispatched first. User-initiated
+# control commands must never wait behind status queries, and delayed
+# (background) reconciliation queries must never compete with either of them.
+# The values match the MQTT transport (``mqtt_transport``); moved here from
+# ``api.py`` in phase R3 because scheduling is coordinator policy, not HTTP.
+PRIORITY_COMMAND: Final = 0
+PRIORITY_QUERY: Final = 10
+PRIORITY_BACKGROUND: Final = 20
+
+
+class PriorityLock:
+    """An asyncio lock whose waiters are woken by priority, then FIFO.
+
+    It serialises the requests that may reach a radio device (state PUTs and
+    ReCom), so exactly one of them is in flight per gateway.
+    """
+
+    def __init__(self) -> None:
+        self._locked = False
+        self._waiters: list[tuple[int, int, asyncio.Future[None]]] = []
+        self._counter = itertools.count()
+
+    @property
+    def queue_depth(self) -> int:
+        """Return the number of waiters."""
+        return len(self._waiters)
+
+    def locked(self) -> bool:
+        """Return whether the lock is currently held."""
+        return self._locked
+
+    async def acquire(self, priority: int = PRIORITY_COMMAND) -> None:
+        """Acquire the lock, queueing by priority while it is held."""
+        if not self._locked and not self._waiters:
+            self._locked = True
+            return
+        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        entry = (priority, next(self._counter), future)
+        heapq.heappush(self._waiters, entry)
+        try:
+            await future
+        except BaseException:
+            if future.done() and not future.cancelled():
+                # Ownership was handed over just before cancellation.
+                self.release()
+            else:
+                self._waiters.remove(entry)
+                heapq.heapify(self._waiters)
+            raise
+
+    def release(self) -> None:
+        """Hand the lock to the highest-priority waiter, if any."""
+        while self._waiters:
+            _, _, future = heapq.heappop(self._waiters)
+            if not future.done():
+                # Ownership transfers directly; the lock stays held.
+                future.set_result(None)
+                return
+        self._locked = False
 
 
 class GatewayMismatchError(OpusApiError):

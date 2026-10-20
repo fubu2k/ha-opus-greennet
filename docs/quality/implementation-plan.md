@@ -303,6 +303,17 @@ decoupling: new transport-neutral `domain.py` (re-exported unchanged by
 behaviour, timing, wire or traffic change on MQTT or REST (A1–A5 for MQTT
 under decision D3). Not merged; merge approval remains separate.
 
+Status update 2026-10-20 (phase 17 = REST plan R3): base
+`feature/rest-api-integration` `b9c3fb0` (R2 merged by PR #17). Branch
+`feat/opus-r3-rest-client-hardening`, report `phases/phase-17.md`. REST client
+hardening: HTTP status line and document status checked separately (B-1),
+`PriorityLock` and request priorities moved from `api.py` into
+`rest_coordinator.py` (B-6), boundary tests for `api.py`/`wire.py`, the
+injected web session, credential-free error texts and no retries. Only REST
+behaviour change: an answer with a non-2xx HTTP status now fails even when its
+body reports 200 (decision D3, disclosed in the report). MQTT path untouched
+(A1–A5). Not merged; merge approval remains separate.
+
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
 phase 8 -> phase 9 -> resumed phase 6 -> phases 10, 11, 12 -> phase 13.

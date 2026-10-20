@@ -9,16 +9,12 @@ import aiohttp
 import pytest
 
 from custom_components.opus_greennet.api import (
-    PRIORITY_BACKGROUND,
-    PRIORITY_COMMAND,
-    PRIORITY_QUERY,
     JsonDocumentSplitter,
     OpusAuthError,
     OpusConnectionError,
     OpusGatewayClient,
     OpusResponseError,
     OpusTimeoutError,
-    PriorityLock,
     decode_response,
     gateway_uptime_value,
     response_status,
@@ -138,58 +134,6 @@ def test_splitter_limits_document_size() -> None:
     splitter = JsonDocumentSplitter(max_size=10)
     with pytest.raises(OpusResponseError, match="too large"):
         splitter.feed(b'{"a": "0123456789"')
-
-
-# ── priority lock ──────────────────────────────────────────────────────────
-
-
-async def test_priority_lock_orders_waiters_by_priority_then_fifo() -> None:
-    lock = PriorityLock()
-    order: list[str] = []
-    await lock.acquire()
-
-    async def waiter(name: str, priority: int) -> None:
-        await lock.acquire(priority)
-        order.append(name)
-        lock.release()
-
-    tasks = [
-        asyncio.create_task(waiter("background", PRIORITY_BACKGROUND)),
-        asyncio.create_task(waiter("query", PRIORITY_QUERY)),
-        asyncio.create_task(waiter("command-1", PRIORITY_COMMAND)),
-        asyncio.create_task(waiter("command-2", PRIORITY_COMMAND)),
-    ]
-    await asyncio.sleep(0)
-    assert lock.queue_depth == 4
-    lock.release()
-    await asyncio.gather(*tasks)
-    assert order == ["command-1", "command-2", "query", "background"]
-    assert not lock.locked()
-
-
-async def test_priority_lock_cancelled_waiter_leaves_queue() -> None:
-    lock = PriorityLock()
-    await lock.acquire()
-    task = asyncio.create_task(lock.acquire())
-    await asyncio.sleep(0)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert lock.queue_depth == 0
-    lock.release()
-    assert not lock.locked()
-
-
-async def test_priority_lock_cancel_after_handover_releases() -> None:
-    lock = PriorityLock()
-    await lock.acquire()
-    task = asyncio.create_task(lock.acquire())
-    await asyncio.sleep(0)
-    lock.release()  # hands ownership to the waiter
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert not lock.locked()
 
 
 # ── HTTP ───────────────────────────────────────────────────────────────────
