@@ -74,7 +74,7 @@ tests, the `config_flow.py` 100 % coverage gate and Hassfest run in CI.
 
 | Run | Head | Result |
 |-----|------|--------|
-| see PR / Actions | `feat/opus-r4-3-rest-only-setup` | recorded after the run |
+| `39449339335` (workflow_dispatch) | `feat/opus-r4-3-rest-only-setup` `ae43b7d` | **success**: `validate`, `Hassfest at Home Assistant 2026.10.2 (fixed reference)`, `Home Assistant 2026.10.2 (fixed reference)`, `Home Assistant (latest stable)` |
 
 ## 6. Residual risks
 
