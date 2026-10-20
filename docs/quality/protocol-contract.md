@@ -568,10 +568,11 @@ gateway request on REST entries only; it is a read of the gateway model, not a
 device poll (implementation plan section 3, phase 14 amendment). **[Code][Test]**
 
 The maintainer approved this read on 2026-10-20 (decision D2,
-`Implementations-Plan-Rest-API.md` section 0). The approval is limited to the
-fixed 30 min interval (`DEVICE_LIST_REFRESH_INTERVAL`); a shorter interval,
-another read path or a device query derived from the list remains prohibited
-(A1).
+`Implementations-Plan-Rest-API.md` section 0). Since decision D3 (same
+section, 0.1) the guardrails A1–A5 bind only the MQTT transport; REST traffic
+is defined by best practices and Home Assistant requirements, and each change
+is disclosed with before/after traffic in its phase report. The MQTT column of
+this table stays bound by A1.
 
 ### 12.9 Practical baseline and limits of verification
 
@@ -615,7 +616,8 @@ Delayed end position after full cover travel:
   `_finish_cover_movement` sets the target as an assumed position shortly
   before the real report replaces it. Unchanged; any change of the grace or of
   the visibility of assumed positions needs a separate decision (REST plan R6,
-  O-4). No extra status query is sent and none may be added (A1).
+  O-4). No extra status query is sent. On MQTT none may be added (A1); on
+  REST a change follows plan section 0.1 (D3) and is disclosed with its traffic.
 - `lastVerticalMovementTime` of the device list is not read by the code; only
   `verticalMovementTime` and `rotationTime` are used **[Code]**.
 

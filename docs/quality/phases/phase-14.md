@@ -191,9 +191,11 @@ Added after this phase; the sections above stay as recorded.
 - **Decision D2 (approved):** the maintainer approved the section 3 amendment
   on 2026-10-20: REST entries read `GET /devices` every 30 minutes
   (`DEVICE_LIST_REFRESH_INTERVAL`), because the event stream does not carry
-  battery level, signal strength and movement times. The interval is fixed; a
-  shorter interval, another read path or a device query derived from the list
-  stays prohibited (A1). The review item above is closed by this decision.
+  battery level, signal strength and movement times. The review item above is
+  closed by this decision.
+- **Decision D3:** since 2026-10-20 the guardrails A1–A5 bind only the MQTT
+  transport; REST is developed further according to best practices and Home
+  Assistant requirements (`Implementations-Plan-Rest-API.md` section 0.1).
 - **Practical tests [Praxis]:** after this phase the maintainer ran the REST
   transport on the own installation and reported (not independently verified):
   connection after migration, reload re-reads the device list and reconnects

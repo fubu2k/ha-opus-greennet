@@ -46,6 +46,14 @@ static analysis, actually executed tests, CI outcomes and hardware observations.
 These supersede the original blanket exclusions. Permission for a scoped phase
 is not permission for unrelated side work.
 
+Scope since 2026-10-20 (maintainer decision D3, `Implementations-Plan-Rest-API.md`
+section 0.1): A1–A5 bind the MQTT transport, i.e. every entry without
+`transport: rest`, and all code the MQTT path executes, including modules
+shared with REST. The REST transport is developed in all further phases
+according to best practices and Home Assistant requirements; A1–A5 are no
+longer a preservation rule for it. REST changes to shared modules must be
+transport-bound and leave the MQTT tests unchanged.
+
 | ID | Binding rule | Permitted work | Prohibited shortcuts |
 |----|--------------|----------------|----------------------|
 | A1 | No increase in automatic radio-device polling, reconciliation slots or retry traffic. Keep intervals unless a reviewed change reduces unnecessary work. | Suppress redundant queries, classify endpoint/radio effects, prove unchanged or reduced traffic. | New periodic device pollers, shorter intervals, extra reconciliation slots, automatic command retries. |
@@ -97,9 +105,11 @@ gateway does not stream battery level, signal strength and movement times; it
 is a read of the gateway model without radio telegram (upstream hardware
 observation). `PUT …/state` and ReCom keep the policies above. MQTT entries are
 unaffected; no entry switches transport without an explicit user action.
-The approval covers exactly this read: the 30 min interval
-(`DEVICE_LIST_REFRESH_INTERVAL`) is fixed; a shorter interval, an additional
-read path or any device query derived from the list remains prohibited by A1.
+The 30 min interval (`DEVICE_LIST_REFRESH_INTERVAL`) is the current state.
+Since decision D3 (section 2) A1 no longer fixes REST traffic; a change of
+this read follows best practices and Home Assistant requirements and is
+disclosed with before/after traffic in the phase report. MQTT traffic stays
+bound by A1.
 
 Create a profile/operation capability matrix: EEP/profile, operation, reference,
 cache-versus-radio behaviour, known power source, support and verification
@@ -268,8 +278,11 @@ section 3 and 15a, `phases/phase-14.md` and protocol contract 12.8; the
 maintainer's practical REST tests and the delayed end-position report after
 full cover travel (actuator overrun, upstream communication) recorded in
 protocol contract 12.9 and README "Known limitations". No code, timing or
-traffic change. Not merged; the next REST phase (R1, confirmation measurement
-on the own installation) needs its own approval.
+traffic change. Maintainer decision D3 recorded on the same branch: A1–A5
+bind only the MQTT transport; REST is developed in all further phases
+according to best practices and Home Assistant requirements (section 2 scope
+note, `Implementations-Plan-Rest-API.md` section 0.1). Not merged; the next
+REST phase needs its own approval.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:

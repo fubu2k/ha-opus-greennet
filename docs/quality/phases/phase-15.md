@@ -36,7 +36,7 @@ observations of REST plan section 3. No behaviour, default or timing change.
 
 | ID | Result |
 |----|--------|
-| A1 | No code change. D2 is recorded with its limit: fixed 30 min interval, no shorter interval, no further read path, no device query derived from the list. The documentation explicitly states that no extra status query is sent or may be added for the delayed end position. |
+| A1 | No code change. D2 is recorded as approved. The documentation states that no extra status query is sent for the delayed end position. Scope of A1 after D3: see section 10. |
 | A2 | Unchanged. The documentation keeps "uptime never confirms device state". |
 | A3 | Unchanged. No cooldown or retry is described or proposed. |
 | A4 | Unchanged; REST has no retained messages (contract 12.3). |
@@ -120,3 +120,26 @@ describe the 30 min read without a review reservation and needed no change.
   own installation (no fix, no polling, no timing change). It needs separate
   approval, including approval of any hardware observation.
 - No merge or release permission is implied.
+
+## 10. Addendum: maintainer decision D3 (2026-10-20)
+
+Recorded on this branch after the R0 commit `4deef35`, documentation only.
+
+- **Decision:** the guardrails A1–A5 bind only the MQTT transport. The REST
+  transport is developed in all further phases (from R1) according to best
+  practices and Home Assistant requirements.
+- **Rules for all further phases:** `Implementations-Plan-Rest-API.md`
+  section 0.1. In short: MQTT entries and all code the MQTT path executes keep
+  A1–A5 (no behaviour, timing, wire or traffic change; identities and
+  transport unchanged; retained protection of phase 10 unchanged; re-exports
+  are no behaviour change; anything beyond needs approval). REST follows the
+  Integration Quality Scale, the Home Assistant developer documentation and
+  established HTTP/stream practice; every REST behaviour or traffic change is
+  disclosed in its phase report. REST changes to shared modules must be
+  transport-bound and leave the MQTT tests unchanged.
+- **Documents updated:** `implementation-plan.md` section 2 (scope note) and
+  section 3 (30 min read no longer fixed by A1); `Implementations-Plan-Rest-API.md`
+  (header, D3, section 0.1, sections 3.3 and 7.2, phase rules R1–R4 and R7);
+  `protocol-contract.md` 12.8 and 12.9; `phases/phase-14.md` 9.1.
+- **No code change.** The decision changes what later phases may do on REST,
+  not the current behaviour.

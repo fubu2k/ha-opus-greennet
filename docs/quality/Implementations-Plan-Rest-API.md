@@ -12,7 +12,7 @@ des Maintainers (Plan `implementation-plan.md`, Abschnitte 4 und 5).
 | Hauptzweig | `main` = `39b4c66`; **enthält den REST-Stand nicht** (nicht gemergt) |
 | Herkunft des REST-Codes | upstream `kegelmeier/ha-opus-greennet`, Branch `feat/rest-transport` (`20b34c9`), integriert in Phase 14 (`phases/phase-14.md`) |
 | CI-Nachweis des geprüften Stands | Workflow „Tests“, Lauf `39384621424` auf `e04245f` (Code identisch mit `2010d2f`), grün |
-| Verbindliche Regeln | Guardrails A1–A5 aus `implementation-plan.md` Abschnitt 2 gelten unverändert |
+| Verbindliche Regeln | Guardrails A1–A5 aus `implementation-plan.md` Abschnitt 2 gelten ab Entscheidung D3 (Abschnitt 0.1) **nur für den MQTT-Transport**; REST wird nach Best Practices und Home-Assistant-Vorgaben entwickelt |
 | Ablageort | `docs/quality/` (das Repository hat kein Verzeichnis `/Quality`; die Qualitätsdokumente liegen dort) |
 
 Kennzeichnung der Aussagen:
@@ -33,11 +33,53 @@ nicht nachgemessen),
 |----|-------|--------------|-------|
 | D1 | 2026-10-20 | REST wird als **zusätzlicher** Transport neben MQTT integriert; MQTT bleibt unverändert, bestehende Einträge bleiben auf MQTT. | Umgesetzt in Phase 14. |
 | D2 | 2026-10-20 | **Die Geräteliste wird bei REST alle 30 Minuten vom Gateway gelesen.** Dieser neue Hintergrundverkehr wird für die REST-API benötigt (Batteriestand, Signalstärke und Fahrzeiten kommen nicht über den Stream). | Die in `implementation-plan.md` Abschnitt 3 als „requires maintainer review“ eingetragene Ergänzung ist damit **genehmigt**. Dokumentationsnachzug in Phase R0. |
+| D3 | 2026-10-20 | **Die Guardrails A1–A5 gelten nur für den MQTT-Transport.** Der REST-Transport wird in allen weiteren Phasen (ab R1) nach Best Practices und den Vorgaben von Home Assistant neu entwickelt. | Gilt für alle folgenden Phasen; Regeln in Abschnitt 0.1. Die bisherigen, aus A1–A5 abgeleiteten Einschränkungen für REST in diesem Plan sind ersetzt. |
 
-Zu D2 bleibt verbindlich: `GET /devices` liest das Gerätemodell des Gateways
-und löst nach der Upstream-Beobachtung kein Funktelegramm aus **[HW-upstream]**.
-Intervall 30 min ist fest; eine Verkürzung, ein zusätzlicher Abfragepfad oder
-eine Ableitung von Geräteabfragen daraus bleibt nach A1 unzulässig.
+Zu D2: `GET /devices` liest das Gerätemodell des Gateways und löst nach der
+Upstream-Beobachtung kein Funktelegramm aus **[HW-upstream]**. Das Intervall
+von 30 min ist der aktuelle Stand. Die ursprüngliche Festlegung „fest, nach A1
+nicht verkürzbar“ ist durch D3 aufgehoben; eine Änderung folgt Abschnitt 0.1.
+
+### 0.1 Geltungsbereich der Guardrails ab D3 (verbindlich für alle weiteren Phasen)
+
+**MQTT-Transport – Guardrails A1–A5 unverändert verbindlich.** Gilt für jeden
+Eintrag ohne `transport: rest` und für allen Code, den der MQTT-Pfad ausführt:
+
+- Keine Verhaltens-, Timing-, Wire- oder Verkehrsänderung. Keine neuen
+  Abfragen, keine Retries, keine Cooldowns.
+- Unique IDs, Entity-IDs, Gerätezuordnungen, Registry-Einstellungen und der
+  Transport bestehender Einträge bleiben unverändert. Kein automatischer
+  Transportwechsel.
+- Retained-Schutz (Phase 10) unverändert.
+- Ein Re-Export ist keine Verhaltensänderung. Jede darüber hinausgehende
+  Änderung am MQTT-Pfad braucht die Freigabe des Maintainers.
+
+**REST-Transport – Neuentwicklung nach Best Practices und Home-Assistant-Vorgaben.**
+A1–A5 sind für REST kein Bestandsschutz mehr. Maßstab sind:
+
+- die Home Assistant Integration Quality Scale (Ziel: alle anwendbaren Regeln
+  erfüllt) und die Home-Assistant-Entwicklerdokumentation (u. a. Config Flow,
+  Entity-Modell, Verfügbarkeit, `inject-websession`, Fehlerbehandlung,
+  Diagnose, Reauth/Reconfigure, strikte Typisierung),
+- anerkannte Praxis für HTTP-Clients und Streams (getrennte Fehlerklassen,
+  Timeouts, begrenzter Backoff mit Jitter, sauberer Lebenszyklus),
+- Tests zuerst; Coverage-Gates, ruff, strict mypy und Hassfest werden nicht
+  abgesenkt.
+
+Verhalten, Timing, Abfragen, Entity-Modell und Code-Struktur des
+REST-Transports dürfen geändert werden, wenn die Phase das begründet. Jede
+Änderung wird im Phasenbericht offengelegt (Abschnitt 20 von
+`implementation-plan.md`): Funk- und Gateway-Verkehr vorher/nachher sowie
+Auswirkungen auf bestehende REST-Einträge und Entity-IDs.
+
+**Gemeinsamer Code.** Module, die auch der MQTT-Pfad nutzt
+(`enocean_device.py`, `entity.py`, die Plattformen, `const.py`, `wire.py`,
+`domain.py` sobald vorhanden), stehen für den MQTT-Pfad weiter unter A1–A5.
+Eine REST-Änderung an diesen Modulen muss transportgebunden sein (eigener
+Wert, eigener Codepfad oder `isinstance`-Prüfung) und ist durch die
+unveränderten MQTT-Tests zu belegen. Beispiel: `COVER_MOVEMENT_GRACE_SECONDS`
+liegt in `const.py` und gilt für beide Koordinatoren; eine andere Karenz für
+REST braucht eine eigene REST-Konstante.
 
 ## 1. Zielbild und Prioritäten (aus dem Auftrag)
 
@@ -276,9 +318,11 @@ Konsequenzen für den Plan [Entwurf]:
   dokumentiert (README „Known limitations“/Cover, Vertrag 12.9) → R0/R1.
 - R1 wird von einer Ursachenanalyse zu einer **Bestätigungsmessung** an der
   eigenen Installation verkleinert.
-- Die Karenz von 5 s bleibt unverändert (A1/A3: keine Timing-Änderung ohne
-  eigene Phase und Entscheidung); ob sie bei Nachlauf > 5 s angepasst oder die
-  Herkunft nur sichtbar gemacht wird, entscheidet R6 (O-4).
+- Die Karenz von 5 s bleibt vorerst unverändert. Sie ist eine gemeinsame
+  Konstante beider Transporte (`const.py`) und gilt für MQTT weiter unter
+  A1–A5; eine andere Karenz für REST braucht eine eigene REST-Konstante
+  (Abschnitt 0.1). Ob REST die Karenz bei Nachlauf > 5 s anpasst oder die
+  Herkunft nur sichtbar macht, entscheidet R6 (O-4).
 
 ## 4. REST-Ressourcen
 
@@ -391,7 +435,8 @@ auf unbekannt. Zustandsverantwortung: genau ein Speicher je Eintrag
 6. `GET /devices` nur noch alle 30 min (D2); Metadaten aus dieser Liste
    überschreiben neuere Telegramm-Metadaten nicht (B-5).
 7. `GET /system/uptime` bleibt die 60-s-Gesundheitsprüfung, ändert nie
-   Gerätezustände (A2).
+   Gerätezustände (Gateway-Gesundheit ist kein Gerätezustand; HA-Regel
+   `entity-unavailable`).
 
 Begründung: eine Quelle der Wahrheit beim Start, kein Rennen zwischen zwei
 Snapshots, eine Geräteliste weniger je Start. Alternative „beides behalten“
@@ -403,7 +448,9 @@ kommt; Entscheidung in R5 nach Messung.
 Jede Phase: eigener Branch (`feat/`/`fix/`), Tests zuerst, CI grün,
 Phasenbericht `phases/phase-NN.md` nach Abschnitt 20 von
 `implementation-plan.md`, keine Version, kein CHANGELOG ohne Freigabe.
-Hardwaretests nur mit separater Freigabe.
+Hardwaretests nur mit separater Freigabe. Für jede Phase gilt Abschnitt 0.1
+(D3): A1–A5 für den MQTT-Pfad und gemeinsamen Code, Best Practices und
+Home-Assistant-Vorgaben für den REST-Transport.
 
 ### R0 – Dokumentationsnachzug (nur Doku)
 
@@ -439,8 +486,9 @@ Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
   (Telegramm statt Fallback, H5); Uhren von Gateway und HA (NTP) prüfen (H3).
 - Ergebnis dokumentieren (Phasenbericht, README-Hinweis zur Endlage bei
   Vollfahrten, Vertrag 12.9).
-- **Verboten:** zusätzliches Polling, kürzere Prüfintervalle, Zielwert als
-  Ist-Position per Zeitgeber, Änderung der 5-s-Karenz in dieser Phase.
+- Reine Messphase ohne Codeänderung. Für eine unverfälschte Messung keine
+  zusätzlichen Abfragen während der Messfahrten. Folgerungen für den Code
+  (z. B. Karenz, Herkunft der Position) gehen nach R6.
 
 ### R2 – REST-only-Entkopplung
 
@@ -452,7 +500,10 @@ Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
 - Tests: Fixture ohne `"mqtt"` in `hass.config.components`; REST-Eintrag lädt,
   steuert, entlädt; Import von `rest_coordinator` lädt kein
   `homeassistant.components.mqtt` (Prüfung über `sys.modules`).
-- A1–A5: keine Verhaltens- oder Verkehrsänderung; MQTT-Tests unverändert grün.
+- MQTT (A1–A5): keine Verhaltens- oder Verkehrsänderung; MQTT-Tests
+  unverändert grün; Re-Exporte sind keine Verhaltensänderung.
+- REST (D3): Struktur nach Home-Assistant-Vorgaben; Verhaltensänderungen am
+  REST-Pfad sind zulässig, wenn begründet und im Bericht offengelegt.
 
 ### R3 – REST-Client-Härtung und Bibliotheksgrenze
 
@@ -462,7 +513,9 @@ Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
   Integrationskonstanten.
 - Tests: kein HA-Import in `api.py`/`wire.py` (AST), kein `ClientSession(`,
   Fehlermeldungen ohne Zugangsdaten, keine Wiederholung bei Timeout eines PUT.
-- A3: unverändert eine Anfrage gleichzeitig, keine Retries.
+- REST (D3): Nebenläufigkeit, Timeouts und Wiederholungen nach Best Practice
+  festlegen und im Bericht begründen (Idempotenz des Befehls, Risiko einer
+  Doppelausführung am Aktor, Funkverkehr vorher/nachher).
 
 ### R4 – Stream-Lebenszyklus
 
@@ -472,7 +525,8 @@ Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
   Dokumente (B-3).
 - Tests: Schließen direkt nach dem Snapshot erzeugt keine enge Schleife;
   Reload hinterlässt keinen zweiten Reader; Auth-Fehler ohne Neuversuch.
-- A1: Neuverbindungen werden seltener, nie häufiger.
+- REST (D3): Backoff und Neuverbindung nach Best Practice; Gateway-Verkehr
+  vorher/nachher im Bericht.
 
 ### R5 – Start und Resynchronisierung
 
@@ -501,7 +555,9 @@ Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
 ### R7 – Standard für neue Einträge (Entscheidung)
 
 - Optional: REST als erste Menüoption; MQTT-Hinweis „Fallback“.
-- Bestehende Einträge werden nie automatisch umgestellt (A5).
+- Bestehende MQTT-Einträge werden nie automatisch umgestellt (A5 gilt für
+  MQTT). Auswirkungen auf bestehende REST-Einträge und Entity-IDs werden im
+  Bericht offengelegt (D3).
 
 ### R8 – Abschlussaudit
 
