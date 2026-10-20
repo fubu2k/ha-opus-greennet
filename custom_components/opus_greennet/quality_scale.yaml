@@ -8,6 +8,9 @@
 # It is not an official rating. Home Assistant assigns quality scale tiers only
 # to core integrations; manifest.json intentionally declares no quality_scale.
 # Evidence for every rule: docs/quality/quality-scale-evidence.md
+# Last full re-audit of all 54 rules: phase 13, 2026-10-20, base main 96510dd
+# (docs/quality/phases/phase-13.md). Statuses are unchanged by that audit;
+# finding F13-1 (rocker event device class) is closed in the same branch.
 rules:
   # Bronze
   action-setup:
@@ -17,7 +20,9 @@ rules:
     status: exempt
     comment: >-
       Push integration (iot_class local_push); no entity polls (should_poll is
-      False). The 60 s gateway health probe is documented under docs-data-update.
+      False). The only periodic request is the 60 s gateway uptime probe, a
+      gateway endpoint that never queries a radio device; it is documented
+      under docs-data-update and pinned by the traffic baseline tests.
   brands:
     status: done
     comment: Local brand/ folder (icon, logo, @2x), supported for custom integrations since HA 2026.3.
@@ -38,7 +43,9 @@ rules:
     comment: README section Services.
   docs-conditions:
     status: exempt
-    comment: The integration provides no conditions.
+    comment: >-
+      The integration provides no conditions (no condition platform and no
+      device_condition module).
   docs-high-level-description:
     status: done
     comment: README introduction and Features.
@@ -50,7 +57,10 @@ rules:
     comment: README section Removing the integration.
   docs-triggers:
     status: exempt
-    comment: The integration provides no triggers.
+    comment: >-
+      The integration provides no triggers (no trigger platform and no
+      device_trigger module). Rocker presses are event entities that work with
+      the core state trigger.
   entity-event-setup:
     status: done
     comment: Dispatcher subscriptions are created in async_added_to_hass and released with async_on_remove.
@@ -70,7 +80,10 @@ rules:
   config-entry-unloading: done
   docs-configuration-parameters:
     status: exempt
-    comment: The integration has no options flow and therefore no configuration parameters after setup.
+    comment: >-
+      The integration has no options flow and therefore no configuration
+      parameters after setup. The only setup value, the EAG identifier, is
+      documented under docs-installation-parameters.
   docs-installation-parameters:
     status: done
     comment: README section Configuration describes the EAG identifier.
@@ -129,7 +142,11 @@ rules:
     status: done
     comment: Devices discovered after setup are added through dispatcher signals.
   entity-category: done
-  entity-device-class: done
+  entity-device-class:
+    status: done
+    comment: >-
+      Device classes on sensors, binary sensors, covers and rocker events
+      (EventDeviceClass.BUTTON, phase 13 finding F13-1 closed).
   entity-disabled-by-default:
     status: done
     comment: >-
@@ -169,7 +186,9 @@ rules:
     comment: The integration has no Python requirements; it uses Home Assistant's async MQTT API.
   inject-websession:
     status: exempt
-    comment: The integration makes no HTTP requests.
+    comment: >-
+      The integration makes no HTTP requests; all gateway communication uses
+      the Home Assistant MQTT integration.
   strict-typing:
     status: done
     comment: >-

@@ -46,7 +46,7 @@ A custom Home Assistant integration for the Opus GreenNet Bridge, enabling contr
 | **Binary Sensor** | D5-00-01, F6-05-01, F6-05-02, A5-07-01, A5-07-03, F6-02-01 + A5-04-01, _(from climate devices)_ | Contact open/closed state, SMS motion detection, OPUS motion detector (`buttonAI` = motion, `buttonA0` = no motion), water leak detection, RWM smoke alarm and low battery, window open, actuator errors, battery low |
 | **Handle sensors** | D2-06-40, F6-10-00, D2-03-10 | Handle position plus separate open, tilted and closed binary sensors |
 | **Lock** | D2-06-40 | Read-only AutoLock status, unlock-request sensor and mechanics-fault binary sensor |
-| **Event** | F6-02-01, F6-02-02, F6-02-03, F6-03-01, F6-03-02 | Rocker switch press/release events, per button (`buttonA0_pressed`, `buttonA0_released`, …, `multipleButtons_released`) with `button` and `action` event attributes |
+| **Event** | F6-02-01, F6-02-02, F6-02-03, F6-03-01, F6-03-02 | Rocker switch press/release events, per button (`buttonA0_pressed`, `buttonA0_released`, …, `multipleButtons_released`) with `button` and `action` event attributes; event device class `button` |
 
 Cover tilt controls are hidden when the bridge reports `rotationTime` as `0` or
 `noRotation`, as used for plain roller shutters. The integration uses the existing
@@ -930,6 +930,7 @@ tests/
 ├── test_cover_movement.py       # Estimated travel, feedback, timing and cleanup
 ├── test_reconciliation_feedback.py # Valid feedback, channels, and command timing
 ├── test_event_entity.py         # Rocker switch event entity tests
+├── test_event_device_class.py   # Rocker event device class (button), registry settings kept
 ├── test_event_lifecycle.py      # Transient button fields are never replayed
 ├── test_entities.py             # Entity state and Home Assistant service tests
 ├── test_platform_edge_cases.py  # Platform setup and entity edge cases
