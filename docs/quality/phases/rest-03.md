@@ -1,7 +1,7 @@
 # REST phase 03 – fixed CI reference (Home Assistant 2026.10.2, hassfest, icons)
 
 - **Status:** implemented on branch `feat/rest-only-ci-reference`, not yet
-  merged. CI pending (section 4). No version change, no release.
+  merged. CI green (section 4). No version change, no release.
 - **Base:** `feature/rest-only` (v1.0.0b1). Independent of REST phases 01
   and 02.
 
@@ -39,4 +39,4 @@ registry change (A1, A2, A3, A5 unaffected).
 
 | Run | Head | Result |
 |-----|------|--------|
-| pending | – | – |
+| [39493900432](https://github.com/fubu2k/ha-opus-greennet/actions/runs/39493900432) | `3addb22` | passed: HA 2026.10.2 (fixed reference), Hassfest at 2026.10.2, HA latest stable, moving hassfest |
