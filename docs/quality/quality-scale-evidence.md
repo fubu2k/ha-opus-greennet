@@ -32,12 +32,11 @@ Rule -> implementation -> tests -> documentation for every rule in
   "Exemption justifications". No status changed; exemption comments were made
   more explicit. The audit is static; the test result of record is the CI run
   on the phase 13 branch (see the report).
-- Result: every applicable rule is done or justified as exempt. One finding
-  stays open: **F13-1**, the rocker event entities carry no device class
-  although `EventDeviceClass.BUTTON` fits (`entity-device-class`, "where
-  possible"). It is a one-attribute metadata change and therefore outside this
-  documentation-only phase. The **Platinum-equivalent self-assessment** is
-  final once F13-1 is closed or the maintainer records why it stays open. It remains a
+- Finding **F13-1** (rocker event entities without a device class) is closed
+  on the same branch: `event.py` sets `EventDeviceClass.BUTTON`, registry and
+  frontend metadata only, tested in `tests/test_event_device_class.py`.
+- Result: every applicable rule is done or justified as exempt, so the
+  **Platinum-equivalent self-assessment** is reached. It remains a
   self-assessment: the exemptions have not been accepted by an official Home
   Assistant review, and discovery, ACK 201 handling and radio/battery effects
   have not been observed on hardware (see "Limits of this evidence").
@@ -103,7 +102,7 @@ Rule -> implementation -> tests -> documentation for every rule in
 | `docs-use-cases` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Use cases |
 | `dynamic-devices` | done | `SIGNAL_DEVICE_DISCOVERED` dispatcher listeners in every platform | `test_coordinator_parsing.py::test_live_device_discovery_runs_after_initial_timer_completed`; `test_entities.py::test_sensor_setup_adds_new_types_after_profile_discovery`; `test_platform_edge_cases.py::test_lock_setup_adds_already_discovered_handles` | README Removing or replacing a device |
 | `entity-category` | done | `EntityCategory.DIAGNOSTIC` for signal strength, actuator status binary sensors, the D2-06-40 `unlock_request`/`mechanics_fault` handle diagnostics and the SMS `supply_voltage` (enabled) | `test_binary_sensor_descriptions.py::test_description_inventory_matches_stable`; `test_entities.py::test_sensor_values_and_metadata`; `test_handle_diagnostics.py`; `test_sensor_metadata.py` | `phases/phase-06.md` |
-| `entity-device-class` | done | Device classes on sensors, binary sensors and covers (`CoverDeviceClass.BLIND`, D2-05 position and angle); rocker event entities have no class yet: open finding F13-1 (`EventDeviceClass.BUTTON`), see `phases/phase-13.md` | `test_entities.py::test_sensor_values_and_metadata`, `::test_moisture_sensor_values_and_metadata`; `test_binary_sensor_descriptions.py` | – |
+| `entity-device-class` | done | Device classes on sensors, binary sensors, covers (`CoverDeviceClass.BLIND`, D2-05 position and angle) and rocker events (`EventDeviceClass.BUTTON`, phase 13 F13-1) | `test_entities.py::test_sensor_values_and_metadata`, `::test_moisture_sensor_values_and_metadata`; `test_binary_sensor_descriptions.py`; `test_event_device_class.py::test_rocker_event_is_a_button_with_unchanged_metadata`, `::test_existing_rocker_entry_keeps_user_settings` | – |
 | `entity-disabled-by-default` | done | `entity_registry_enabled_default = False` for the signal strength sensor and the D2-06-40 `unlock_request`/`mechanics_fault` diagnostics (new registry entries only) | `test_entities.py::test_sensor_values_and_metadata`; `test_handle_diagnostics.py::test_new_handle_registers_disabled_diagnostics`, `::test_existing_diagnostic_entries_keep_user_settings`, `::test_activating_diagnostics_sends_no_device_request` | README HOPPE window handles; `phases/phase-06.md` |
 | `entity-translations` | done | `translation_key` on every named entity; `strings.json`, `translations/en.json`, `translations/de.json` | TR (all tests) | – |
 | `exception-translations` | done | `translation_domain`/`translation_key` on raised Home Assistant errors | TR `test_raised_exception_keys_are_translated`; `test_service_actions.py::test_rejected_read_surfaces_translated_error` | – |

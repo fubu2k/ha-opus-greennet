@@ -1,8 +1,12 @@
 # Phase 13 - Final rule audit and report
 
-- **Status:** implemented on branch `docs/opus-q13-quality-acceptance`;
-  documentation only; CI on the branch pending; awaiting maintainer review.
-  Not merged. No version change, no CHANGELOG entry, no release.
+- **Status:** implemented on branch `fix/opus-q13-event-device-class`
+  (maintainer decision 2026-10-20: one branch for the audit documentation and
+  the F13-1 fix, to be merged into `main` of the fork). CI on the branch
+  pending; awaiting maintainer review. Not merged. No version change, no
+  CHANGELOG entry, no release. The audit was first prepared as commit
+  `011b6e4` on a local branch `docs/opus-q13-quality-acceptance` (plan
+  section 15 suggestion); that branch was never pushed and is superseded.
 - **Base SHA:** `96510dd52931fac560cef4904ca5fcabda05348a` (`main`,
   2026-10-19 22:08 +0200, "docs: add phase 12 to the unreleased changelog").
   Code identical to `e57cbd2` (PR #12 merge); `e57cbd2..96510dd` changes only
@@ -34,22 +38,24 @@ Platinum-equivalent self-assessment only with complete applicable evidence.
 | Icon semantics | requested unlock shows `mdi:lock-clock`, never an open lock; unknown mechanics value uses the neutral default `mdi:cog-outline`, never the fault icon |
 | Timing baseline | all constants of plan section 2 unchanged |
 | Per-entity inventory (plan section 10) | recorded in section 4; RSSI and overlapping handle projections reviewed, no change proposed |
-| Open finding | **F13-1** `EventDeviceClass.BUTTON` for rocker events (section 5) |
-| Self-assessment | Platinum-equivalent, final once F13-1 is closed or explicitly accepted; not an official rating |
+| Finding F13-1 | **closed** in this branch: rocker events use `EventDeviceClass.BUTTON` (section 5) |
+| Decision F13-2 | ownership and URLs stay with `kegelmeier` (section 5) |
+| Self-assessment | **Platinum-equivalent self-assessment reached**, subject to green CI on this branch; not an official rating |
 
 ## 2. Authorised changes and guardrails A1-A5
 
-Authorised: final text and documentation updates only. No change to
-integration code, tests, workflows, `manifest.json`, translations,
-`icons.json`, version or CHANGELOG.
+Authorised: final text and documentation updates, plus the F13-1 fix
+approved by the maintainer on 2026-10-20 (`EventDeviceClass.BUTTON` for
+rocker event entities, with tests). No change to workflows, `manifest.json`,
+translations, `icons.json`, version or CHANGELOG.
 
 | Guardrail | Effect |
 |-----------|--------|
-| A1 | No code change, so no publish, query, interval or retry change. The traffic baseline (`tests/test_traffic_baseline.py`) is unchanged. |
+| A1 | The device class is a class attribute; it adds no publish, query, subscription, timer, interval or retry. New tests assert that no topic addressed to the rocker is published. The traffic baseline (`tests/test_traffic_baseline.py`) is unchanged. |
 | A2 | Availability and health logic untouched. |
 | A3 | Serialisation, timeouts and pacing untouched (constants verified, section 3). |
-| A4 | Retain handling untouched. |
-| A5 | No entity, unique ID, category, default or registry change. |
+| A4 | Retain handling untouched; retained telegrams still never fire events. |
+| A5 | Unique ID `<EAG>_<DEV>`, event types, name (device name, explicit `_attr_name = None`), entity ID, category (none) and default (enabled) unchanged. Existing entries keep enablement, name and icon (tested, enabled and user-disabled). Only `original_device_class` and the frontend default icon change; a user-chosen icon wins. |
 
 ## 3. Audit method and code facts
 
@@ -90,7 +96,7 @@ means the source of the frontend icon. Unique IDs follow
 | switch | switch EEPs, per channel | – (domain) | – | – | `channel` or device name | domain | enabled |
 | cover | D2-05-xx, per channel | `blind` | – | – | `channel` or device name | class | enabled |
 | climate | HeatArea D1-4B-05/06/07 | – | – | – | device name | domain | enabled |
-| event | rockers F6-02-xx, F6-03-xx | **none (F13-1)** | – | – | device name | domain | enabled |
+| event | rockers F6-02-xx, F6-03-xx | `button` (F13-1, this phase) | – | – | device name | class | enabled |
 | lock `autolock` | D2-06-40, read-only | – | – | – | `autolock` | domain | enabled |
 | sensor `humidity` | HeatArea, A5-04-xx, OPUS motion | humidity | measurement | – | `humidity` | class | enabled |
 | sensor `feed_temperature` | D1-4B-05 | temperature | measurement | – | `feed_temperature` | class | enabled |
@@ -136,8 +142,8 @@ Review of the candidates named in plan section 10 (no automatic disablement):
 
 | ID | Finding | Rule impact | Proposal |
 |----|---------|-------------|----------|
-| F13-1 | Rocker event entities have no device class; `EventDeviceClass.BUTTON` fits (deferred by phase 9 to the metadata review, not decided there). | `entity-device-class` asks for classes "where possible". Kept `done` with an explicit comment; a strict review would likely request it. | Separate branch `fix/opus-q13-event-device-class`: set `_attr_device_class = EventDeviceClass.BUTTON` in `event.py`, test it. Registry metadata and default icon only: no unique ID, event type, traffic or enablement change (A1, A5). |
-| F13-2 | `manifest.json` `codeowners`, `documentation`, `issue_tracker` and several README links point to `kegelmeier/ha-opus-greennet`, while the plan's target is `fubu2k/ha-opus-greennet`. | `integration-owner` is formally satisfied (a code owner is declared). | Maintainer decision on ownership and URLs (plan section 1: review separately, not incidentally). Not changed here. |
+| F13-1 | Rocker event entities had no device class; `EventDeviceClass.BUTTON` fits (deferred by phase 9 to the metadata review, not decided there). | `entity-device-class` asks for classes "where possible". | **Closed** (maintainer approval 2026-10-20): `event.py` sets `_attr_device_class = EventDeviceClass.BUTTON`; tests in `tests/test_event_device_class.py`. Frontend default icon becomes the button icon. |
+| F13-2 | `manifest.json` `codeowners`, `documentation`, `issue_tracker` and several README links point to `kegelmeier/ha-opus-greennet`, while the plan's target is `fubu2k/ha-opus-greennet`. | `integration-owner` is satisfied (a code owner is declared). | **Decided** (maintainer, 2026-10-20): stays with `kegelmeier`, because the code is to be handed over to the upstream maintainer later. No change. |
 | F13-3 | All D2-05 covers use `CoverDeviceClass.BLIND`. Roller shutters without slats would fit `shutter`, but the profile cannot tell them apart and supports an angle. | None: a valid class is set. | Keep; revisit only with a reliable hardware distinction. |
 | F13-4 | `mechanics_fault` `off` and unknown share the neutral `mdi:cog-outline` (hassfest forbids a state icon equal to the default). The state text still differs ("OK" versus unknown). | None. | Keep (documented in phase 9). |
 
@@ -168,19 +174,21 @@ Status from existing tests and code; no new evidence produced in this phase.
 
 | File | Change |
 |------|--------|
-| `custom_components/opus_greennet/quality_scale.yaml` | header records the phase 13 audit; explicit comments for `appropriate-polling`, `docs-conditions`, `docs-triggers`, `docs-configuration-parameters`, `inject-websession`; `entity-device-class` gets a comment naming F13-1. Statuses unchanged. |
-| `docs/quality/quality-scale-evidence.md` | status section (audit base, method, result, F13-1); `appropriate-polling` and `entity-disabled-by-default` rows cite traffic and activation tests; `entity-device-class` row names F13-1; new sections "Exemption justifications" and "Limits of this evidence". |
-| `docs/quality/implementation-plan.md` | section 6: phase 6 metadata row completed (PR #10); section 7: phase 13 status; section 10: inventory pointer; section 15 heading. |
+| `custom_components/opus_greennet/event.py` | import `EventDeviceClass`; `_attr_device_class = EventDeviceClass.BUTTON` on `OpusGreenNetEvent` (F13-1) |
+| `tests/test_event_device_class.py` | **new**: class, unique ID, event types, category and default of the entity (F6-02-01, F6-03-01); new rocker registers the class with no request to the device; existing entry (enabled and user-disabled) keeps entity ID, enablement, name and icon, is not duplicated, and no request is sent |
+| `custom_components/opus_greennet/quality_scale.yaml` | header records the phase 13 audit; explicit comments for `appropriate-polling`, `docs-conditions`, `docs-triggers`, `docs-configuration-parameters`, `inject-websession`; `entity-device-class` comment. Statuses unchanged. |
+| `docs/quality/quality-scale-evidence.md` | status section (audit base, method, F13-1, result); `appropriate-polling`, `entity-device-class` and `entity-disabled-by-default` rows cite the additional tests; new sections "Exemption justifications" and "Limits of this evidence" |
+| `docs/quality/protocol-contract.md` | section 8: event row names the `button` device class |
+| `docs/quality/implementation-plan.md` | section 6: phase 6 metadata row completed (PR #10); section 7: phase 13 status; section 10: inventory pointer; section 15 heading |
+| `README.md` | Supported Device Types: event device class `button`; test list entry |
 | `docs/quality/phases/phase-13.md` | **new**, this report |
 
-README and protocol contract: no change needed. Their content was checked
-against the code and the matrix (inventory section 8 of the protocol contract
-matches section 4 above). Historical phase reports are left as recorded
-(plan section 6).
+Historical phase reports are left as recorded (plan section 6).
 
 ## 8. Gateway/cache versus radio counts
 
-Unchanged: no code change. The phase 8 traffic baseline remains the reference.
+Unchanged. The only code change is a class attribute; it publishes nothing.
+The phase 8 traffic baseline remains the reference.
 
 ## 9. Commands and results
 
@@ -189,18 +197,24 @@ Unchanged: no code change. The phase 8 traffic baseline remains the reference.
 | YAML parse, 54 keys, statuses 45 done / 9 exempt, every exempt comment at least 20 characters | passed | local, Python 3.13 |
 | Evidence rows equal YAML statuses (same regular expression as `test_evidence_matrix_lists_every_rule_with_its_status`) | passed (54 rows) | local |
 | Every referenced test file and function exists | passed | local script |
-| Ruff, strict mypy, pytest with coverage gates, three race repetitions, hassfest | **not executed locally**: the authoring environment cannot reach the Python package index | – |
+| `ruff check .`, `ruff format --check .` | passed (99 files) | local, ruff 0.16.9 (CI pins 0.16.3) |
+| Strict mypy, pytest (including `tests/test_event_device_class.py`) with coverage gates, three race repetitions, hassfest | **not executed locally**: the authoring environment cannot reach the Python package index | – |
 | Last full CI on identical code | passed: run `39315310796` on `main` head `e57cbd2` (fixed reference 2026.10.2, latest stable, reference hassfest, hassfest master), recorded in phase 12 section 13.4 | CI |
 | CI on this branch | **pending**; record the run ID here after the pull request runs | – |
 
-Because this phase changes only YAML comments and Markdown, the only tests
-that can react are `tests/test_quality_scale.py` (schema, statuses, evidence
-rows) and the README heading checks.
+Tests that can react: `tests/test_quality_scale.py` (schema, statuses,
+evidence rows, README headings), the new `tests/test_event_device_class.py`,
+and the event and translation suites (`test_event_entity.py`,
+`test_event_lifecycle.py`, `test_translations.py`), which the device class
+does not affect by design (name stays the device name). No test result is
+claimed until CI on the branch is green.
 
 ## 10. Registry and identity compatibility
 
-No entity, unique ID, category, default, translation, icon or device
-assignment changed. Existing user enablement and customisations are untouched.
+Rocker event entities gain `original_device_class = button`. Unique ID,
+entity ID, name, category, default, event types, translations and device
+assignment are unchanged; an existing entry keeps `disabled_by`, its custom
+name and its custom icon (tested). No other entity changed.
 
 ## 11. Hardware observations, unknowns and residual risks
 
@@ -215,8 +229,8 @@ assignment changed. Existing user enablement and customisations are untouched.
 
 ## 12. Review status and next step
 
-Awaiting CI on `docs/opus-q13-quality-acceptance` and maintainer review.
-Merge, versioning, CHANGELOG and release remain separate decisions.
-Recommended next step: decide F13-1 (small separate fix branch) and F13-2
-(ownership and URLs). After F13-1 is closed or explicitly accepted, the
-Platinum-equivalent self-assessment is final.
+Awaiting CI on `fix/opus-q13-event-device-class` and maintainer review;
+record the CI run ID in section 9. After a green run the branch can be merged
+into `main` of the fork; that closes the quality series. Versioning, CHANGELOG
+(the event device class is a user-visible icon change worth an "Unreleased"
+line) and release remain separate decisions.

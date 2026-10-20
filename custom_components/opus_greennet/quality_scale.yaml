@@ -9,7 +9,8 @@
 # to core integrations; manifest.json intentionally declares no quality_scale.
 # Evidence for every rule: docs/quality/quality-scale-evidence.md
 # Last full re-audit of all 54 rules: phase 13, 2026-10-20, base main 96510dd
-# (docs/quality/phases/phase-13.md). Statuses are unchanged by that audit.
+# (docs/quality/phases/phase-13.md). Statuses are unchanged by that audit;
+# finding F13-1 (rocker event device class) is closed in the same branch.
 rules:
   # Bronze
   action-setup:
@@ -144,9 +145,8 @@ rules:
   entity-device-class:
     status: done
     comment: >-
-      Device classes on sensors, binary sensors and covers. Rocker event
-      entities have none yet; EventDeviceClass.BUTTON is open finding F13-1
-      (docs/quality/phases/phase-13.md).
+      Device classes on sensors, binary sensors, covers and rocker events
+      (EventDeviceClass.BUTTON, phase 13 finding F13-1 closed).
   entity-disabled-by-default:
     status: done
     comment: >-

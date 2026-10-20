@@ -219,16 +219,18 @@ change) was approved by the maintainer and implemented on branch
 (`e57cbd2`), CI green on `main` (run `39315310796`), CHANGELOG "Unreleased".
 
 Status update 2026-10-20 (phase 13): base `main` `96510dd` (phase 12 merged,
-CHANGELOG "Unreleased"). Final rule audit on branch
-`docs/opus-q13-quality-acceptance`, report `phases/phase-13.md`. All 54 rules
-re-verified statically against the code: 45 done, 9 exempt, 0 todo, no status
-change; exemption comments made explicit; evidence matrix gains exemption
-justifications and evidence limits. The per-entity inventory of section 10 is
-recorded in the phase 13 report (documentation only; RSSI and overlapping
-handle projections reviewed, no change proposed). Documentation only: no
-change to code, tests, workflows, manifest, version or CHANGELOG. Open
-maintainer decisions (not rule blockers) are listed in the report. CI on the
-branch pending; not merged.
+CHANGELOG "Unreleased"). Final rule audit, report `phases/phase-13.md`, on
+branch `fix/opus-q13-event-device-class` (maintainer decision; it carries both
+the audit documentation and the F13-1 fix). All 54 rules re-verified against
+the code: 45 done, 9 exempt, 0 todo, no status change; exemption comments made
+explicit; evidence matrix gains exemption justifications and evidence limits.
+The per-entity inventory of section 10 is recorded in the phase 13 report
+(RSSI and overlapping handle projections reviewed, no change proposed).
+F13-1 closed: rocker event entities use `EventDeviceClass.BUTTON` (registry
+and frontend metadata only; no ID, event type, enablement or traffic change).
+F13-2 decided: `codeowners`, documentation and issue tracker stay with
+`kegelmeier` (planned hand-over of the code). No workflow, manifest, version or
+CHANGELOG change. CI on the branch pending; not merged.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:

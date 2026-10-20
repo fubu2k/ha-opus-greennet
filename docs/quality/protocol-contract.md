@@ -359,7 +359,7 @@ Device identifier: `(opus_greennet, "<EAG>_<DEV>")`; gateway: `(opus_greennet, "
 | switch | `entity_type == "switch"`, per channel | as light | enabled |
 | cover | `entity_type == "cover"`, per channel | as light | enabled |
 | climate | `entity_type == "climate"` | `<EAG>_<DEV>` | enabled |
-| event | `entity_type == "event"` (F6-02-xx, F6-03-xx) | `<EAG>_<DEV>` | enabled |
+| event | `entity_type == "event"` (F6-02-xx, F6-03-xx); device class `button` (phase 13) | `<EAG>_<DEV>` | enabled |
 | lock | D2-06-40 | `<EAG>_<DEV>_autolock` (read-only) | enabled |
 | sensor | HeatArea: `humidity`; D1-4B-05: `feed_temperature`; D1-4B-07: `energy_consumption`; SMS: `illuminance`, `battery_level`; handle: `handle_state` | `<EAG>_<DEV>_<suffix>` | enabled |
 | sensor | SMS (A5-07-01/03): `supply_voltage` (diagnostic, phase 6 metadata review) | `<EAG>_<DEV>_supply_voltage` | enabled; `EntityCategory.DIAGNOSTIC`; existing entries keep enablement and customisations |
