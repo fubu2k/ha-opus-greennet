@@ -115,7 +115,7 @@ priority was touched; only definitions moved and imports changed.
 | `39411796543` (workflow_dispatch) | `e80884c` | failure: both test jobs; 4 new tests failed in fixture setup (`_ComponentSet` of HA has no `discard`, `remove` is required). Hassfest fixed reference and moving hassfest green |
 | `39412756597` (workflow_dispatch) | `f71a07d` | failure (diagnostic run with a temporary annotation hook; revealed the 4 fixture errors above, no other failure) |
 | `39413541722` (workflow_dispatch) | `439cf11` | **success**: `validate`, `Hassfest at Home Assistant 2026.10.2 (fixed reference)`, `Home Assistant 2026.10.2 (fixed reference)`, `Home Assistant (latest stable)` |
-| final run on the branch head | see section 9 | see section 9 |
+| `39414974240` (workflow_dispatch) | `5db40a7` (branch head with report; code identical to `439cf11` plus the revert `bd66a9d`) | **success**: all four jobs green |
 
 A green test job covers ruff, `ruff format --check`, strict mypy, `pytest -v`
 with coverage (`fail_under = 97`), the per-module gate
@@ -190,8 +190,10 @@ No entity was added or removed.
 
 ## 9. Review status and next step
 
-- Final CI run on the branch head: to be recorded below after the documentation
-  commit (code identical to `439cf11` plus the revert of the temporary hook).
+- Final CI run `39414974240` on `5db40a7`: all four jobs green (section 5).
+  This commit only records that result; it changes no code, test or workflow.
+- Review: open a pull request with base `feature/rest-api-integration` and
+  compare `feat/opus-r2-rest-only-decoupling` after review.
 - Next REST phase: R1 (measurement, skipped for now) or R3 (REST client
   hardening), each with its own approval.
 - No merge, no PR and no release permission is implied.
