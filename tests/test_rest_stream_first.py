@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -408,12 +409,16 @@ async def test_unchanged_first_telegram_does_not_rewrite_entities(
     writes: list[str] = []
 
     @callback
-    def record(event: Event) -> None:
-        if event.data["entity_id"] == entity_id:
-            writes.append(event.event_type)
+    def only_this_entity(event_data: Any) -> bool:
+        return event_data["entity_id"] == entity_id
 
+    @callback
+    def record(event: Event) -> None:
+        writes.append(event.event_type)
+
+    # Home Assistant requires an event filter for state_reported listeners.
     for event_type in (EVENT_STATE_CHANGED, EVENT_STATE_REPORTED):
-        hass.bus.async_listen(event_type, record)
+        hass.bus.async_listen(event_type, record, event_filter=only_this_entity)
     # The same state again: no write.
     await gateway.push(telegram(SWITCH, [{"key": "switch", "value": "on"}]))
     await hass.async_block_till_done()
