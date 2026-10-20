@@ -14,7 +14,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.redact import REDACTED
 
 from .enocean_device import EnOceanDevice
-from .transport import entry_transport
 from .wire import JsonList, JsonObject, parse_json
 
 if TYPE_CHECKING:
@@ -25,13 +24,10 @@ TO_REDACT = {
     "address",
     "apikey",
     "authorization",
-    # REST system information (phase 14): base ID and HomeKit setup code.
-    "baseid",
     "deviceid",
     "eagid",
     "eurid",
     "friendlyid",
-    "homekitpin",
     "host",
     "hostname",
     "ip",
@@ -136,7 +132,7 @@ def log_entity_state_write(
     device: EnOceanDevice,
     channel_id: int | None = None,
 ) -> None:
-    """Log latency from telegram receipt (MQTT or REST) to the state write."""
+    """Log latency from MQTT receipt to the entity state write."""
     if not logger.isEnabledFor(logging.DEBUG):
         return
 
@@ -198,7 +194,6 @@ async def async_get_config_entry_diagnostics(
             },
             "gateway": {
                 "eag_id": coordinator.eag_id,
-                "transport": entry_transport(entry.data),
                 "available": coordinator.available,
                 "info": coordinator.gateway_info,
                 "uptime": coordinator.gateway_uptime,

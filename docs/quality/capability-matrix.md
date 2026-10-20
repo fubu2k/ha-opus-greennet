@@ -116,25 +116,3 @@ Firmware effects of `get/devices` (pure cache read or internal refresh) are
   sensor model.
 
 Resolving any of these requires separately approved hardware observation.
-
-## REST transport operations (phase 14)
-
-Applies only to config entries with `transport: rest`; MQTT entries keep the
-rows above unchanged. Scope column as in the legend; `HW-upstream` marks an
-observation of upstream `kegelmeier/ha-opus-greennet` (branch
-`feat/rest-transport`, OPUS-GW v1.21.31), not of this repository.
-
-| Operation | Endpoint | Scope | Trigger | Budget | Verification |
-|-----------|----------|-------|---------|--------|--------------|
-| System info | `GET /system/info` | gateway | setup, config flow | 1 per setup or form submit | code, mock test [`test_rest_config_flow.py`], HW-upstream |
-| Uptime probe | `GET /system/uptime` | gateway | setup, health | 1 per 60 s tick (same interval as MQTT) | code, mock test [`test_rest_requests.py`], HW-upstream |
-| Device list | `GET /devices` | cache (gateway model) | setup, every 30 min | 1 per 30 min; new on REST, no radio telegram | code, mock test [`test_rest_devices.py`], HW-upstream |
-| Event stream | `GET /devices/stream` | gateway | setup, after the stream ends, 15 min silence, restart | 1 open connection; retries 1–60 s after failures | code, mock test [`test_rest_stream.py`], HW-upstream |
-| Late device lookup | `GET /devices/{id}` | cache (gateway model) | telegram of an unlisted device | at most 1 per device per hour | code, mock test [`test_rest_stream.py`] |
-| Command | `PUT /devices/{id}/state` | radio | user | 1 per action, never repeated | code, mock test [`test_rest_commands.py`], HW-upstream |
-| Status query | `PUT /devices/{id}/state` (`query: status`) | radio? (profile-dependent) | recon | 2 per unconfirmed channel after `200` or a foreign command; none after `201` or an own echo | code, mock test [`test_rest_telegrams.py`, `test_transport_selection.py`] |
-| ReCom configuration/parameters | `GET`/`PUT /devices/{id}/configuration`, `GET …/parameters` | radio | user (service) | 1 per action | code, mock test [`test_rest_commands.py`], HW-upstream |
-
-No REST row adds a radio request compared with MQTT. The device list read every
-30 minutes replaces the retained metadata push of MQTT (battery level is not
-streamed on REST) and reads the gateway model only.

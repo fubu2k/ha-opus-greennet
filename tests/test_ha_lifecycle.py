@@ -15,7 +15,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.opus_greennet.const import DOMAIN
-from tests.ha_helpers import configure_bridge, start_user_flow, wait_for_entity
+from tests.ha_helpers import configure_bridge, wait_for_entity
 
 
 async def test_config_flow_creates_and_unloads_entry(
@@ -125,7 +125,9 @@ async def test_config_flow_aborts_without_mqtt(hass: HomeAssistant, mqtt_transpo
         "homeassistant.components.mqtt.async_wait_for_mqtt_client",
         new=AsyncMock(return_value=False),
     ):
-        result = await start_user_flow(hass, "mqtt_bridge")
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "mqtt_not_configured"
 

@@ -7,7 +7,6 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import aiohttp
 import pytest
 from homeassistant import loader
 from homeassistant.config_entries import ConfigEntries
@@ -19,18 +18,7 @@ from homeassistant.helpers import issue_registry as ir
 
 from custom_components.opus_greennet.coordinator import OpusGreenNetCoordinator
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
-from custom_components.opus_greennet.rest_coordinator import (
-    OpusGreenNetRestCoordinator,
-)
-from tests.fake_gateway import FakeGateway
 from tests.ha_helpers import MQTTTransport
-
-
-class _PlainResolver(aiohttp.ThreadedResolver):
-    """Home Assistant's resolver without zeroconf (no network component here)."""
-
-    async def real_close(self) -> None:
-        await self.close()
 
 
 @pytest.fixture
@@ -42,13 +30,6 @@ async def hass(tmp_path: Path) -> AsyncIterator[HomeAssistant]:
     """
     component_directory = Path(__file__).resolve().parents[1] / "custom_components"
     (tmp_path / "custom_components").symlink_to(component_directory)
-    # The REST transport uses Home Assistant's shared aiohttp session; its
-    # default resolver needs the network component, which is not started here.
-    resolver = patch(
-        "homeassistant.helpers.aiohttp_client._async_make_resolver",
-        side_effect=lambda hass: _PlainResolver(),
-    )
-    resolver.start()
     hass = HomeAssistant(str(tmp_path))
     loader.async_setup(hass)
     hass.config_entries = ConfigEntries(hass, {})
@@ -68,18 +49,6 @@ async def hass(tmp_path: Path) -> AsyncIterator[HomeAssistant]:
         for entry in hass.config_entries.async_entries("opus_greennet"):
             await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_stop(force=True)
-        resolver.stop()
-
-
-@pytest.fixture
-async def gateway() -> AsyncIterator[FakeGateway]:
-    """Run a fake OPUS gateway serving the REST API on a local port."""
-    fake = FakeGateway()
-    await fake.start()
-    try:
-        yield fake
-    finally:
-        await fake.stop()
 
 
 @pytest.fixture
@@ -147,13 +116,5 @@ def coordinator():
     """Create a coordinator with mocked hass and patched async_send_command."""
     hass = MagicMock()
     c = OpusGreenNetCoordinator(hass, "AABB0011")
-    c.async_send_command = AsyncMock()
-    return c
-
-
-@pytest.fixture
-def rest_coordinator():
-    """Create a REST coordinator with mocked hass, client and async_send_command."""
-    c = OpusGreenNetRestCoordinator(MagicMock(), MagicMock(), "AABB0011")
     c.async_send_command = AsyncMock()
     return c
