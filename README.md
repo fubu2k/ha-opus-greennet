@@ -812,6 +812,10 @@ GET  /devices/{Device-Identifier}/parameters     # ReCom: supported parameters
 
 Only `PUT …/state` and the ReCom requests can reach a radio device; they run
 one at a time, user commands first, and are never repeated automatically.
+An answer counts as success only if both the HTTP status line (2xx) and the
+document's `header.httpStatus` (`200` or `201`) report success; otherwise the
+action fails with both values in its error text. No request is retried after
+a timeout or an error.
 
 ## Telegram Payload Format
 
@@ -1042,7 +1046,7 @@ custom_components/opus_greennet/
 ├── coordinator.py        # MQTT transport: communication, discovery, and commands
 ├── mqtt_transport.py     # Confirmed subscriptions, requests, and gateway probing
 ├── rest_coordinator.py   # REST transport: event stream, health probe, and commands
-├── api.py                # REST client: requests, errors, stream splitter, priority lock
+├── api.py                # REST client: requests, errors, stream splitter (no HA imports)
 ├── protocol.py           # Pure helpers for REST gateway documents
 ├── enocean_device.py     # Device and channel data model
 ├── entity.py             # Shared entity and device-registry behavior
@@ -1081,6 +1085,8 @@ tests/
 ├── test_rest_config_flow.py     # REST user, reauth and reconfigure flows with recovery
 ├── test_transport_selection.py  # Transport selection, switching, ACK 201 and dimmer ramping
 ├── test_rest_only_decoupling.py # REST-only entries without the MQTT integration, import boundaries
+├── test_rest_client_hardening.py # REST client: HTTP vs. gateway status, no retries, no credentials in errors, library boundary
+├── test_rest_client_coordinator.py # REST client hardening as seen by the coordinator (commands, health check, queue)
 ├── test_enocean_device.py       # Device model tests
 ├── test_coordinator_helpers.py  # Pure helper and command tests
 ├── test_coordinator_mqtt.py     # MQTT finalization tests

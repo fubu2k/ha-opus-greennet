@@ -522,6 +522,14 @@ Wire- oder Verkehrsänderung auf MQTT oder REST. K7 bleibt offen (R8).
 
 ### R3 – REST-Client-Härtung und Bibliotheksgrenze
 
+**Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r3-rest-client-hardening`
+(Basis `feature/rest-api-integration` `b9c3fb0`), Bericht `phases/phase-17.md`;
+nicht gemergt. B-1 behoben (HTTP-Status und JSON-Status getrennt, Fehlerklasse
+mit `http_status` und `gateway_status`), B-6 behoben (`PriorityLock` und
+Prioritäten im REST-Koordinator; `api.py` importiert nur Standardbibliothek,
+aiohttp und `wire.py`). Keine Wiederholungen, Nebenläufigkeit und Timeouts
+unverändert (Begründung im Bericht, Abschnitt 2). MQTT-Pfad unverändert.
+
 - HTTP-Status zusätzlich zum JSON-Status auswerten (B-1); Fehlerklasse mit
   beiden Werten.
 - `PriorityLock` in den REST-Koordinator (B-6); `api.py` ohne
