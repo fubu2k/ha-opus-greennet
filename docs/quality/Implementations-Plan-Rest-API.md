@@ -445,6 +445,12 @@ kommt; Entscheidung in R5 nach Messung.
 
 ## 8. Phasenplan
 
+Arbeitszweig (Entscheidung 2026-10-20): Bis auf Weiteres wird nur auf
+`feature/rest-api-integration` gearbeitet. Jeder Phasen-Branch startet von
+dort und wird per PR mit Base `feature/rest-api-integration` zurückgeführt,
+nie nach `main`. Ein späterer Merge nach `main` braucht zuerst den Revert des
+Revert-Commits `32685d1` (PR #15).
+
 Jede Phase: eigener Branch (`feat/`/`fix/`), Tests zuerst, CI grün,
 Phasenbericht `phases/phase-NN.md` nach Abschnitt 20 von
 `implementation-plan.md`, keine Version, kein CHANGELOG ohne Freigabe.

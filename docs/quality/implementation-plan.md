@@ -281,8 +281,16 @@ protocol contract 12.9 and README "Known limitations". No code, timing or
 traffic change. Maintainer decision D3 recorded on the same branch: A1–A5
 bind only the MQTT transport; REST is developed in all further phases
 according to best practices and Home Assistant requirements (section 2 scope
-note, `Implementations-Plan-Rest-API.md` section 0.1). Not merged; the next
-REST phase needs its own approval.
+note, `Implementations-Plan-Rest-API.md` section 0.1). The next REST phase
+needs its own approval.
+
+Status update 2026-10-20 (branch policy): PR #14 merged
+`feature/rest-api-integration` into `main` by mistake (`112bc43`); it was
+reverted by PR #15 (`32685d1`, tree identical to `39b4c66`). Maintainer
+decision: until further notice all work happens on
+`feature/rest-api-integration`; phase branches start from it and are merged
+back into it, not into `main`. A later merge into `main` first needs a revert
+of the revert commit (`phases/phase-15.md` section 11).
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:

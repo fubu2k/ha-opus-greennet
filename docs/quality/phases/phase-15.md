@@ -143,3 +143,20 @@ Recorded on this branch after the R0 commit `4deef35`, documentation only.
   `protocol-contract.md` 12.8 and 12.9; `phases/phase-14.md` 9.1.
 - **No code change.** The decision changes what later phases may do on REST,
   not the current behaviour.
+
+## 11. Addendum: accidental merge into `main` and revert (2026-10-20)
+
+- PR #14 was opened with head `feature/rest-api-integration` and base `main`
+  instead of this branch into `feature/rest-api-integration`. It was merged
+  (merge commit `112bc43`) and brought the phase 14 REST transport and the
+  REST plan into `main`, but not this phase's commits. CI on `main` for
+  `112bc43` was green (run `39404177207`).
+- Maintainer decision: the REST transport stays off `main` for now; work
+  continues only on `feature/rest-api-integration`.
+- Revert: PR #15 (`revert/pr-14-rest-merge`, `git revert -m 1 112bc43`,
+  commit `32685d1`); the resulting tree of `main` is identical to `39b4c66`.
+- Consequence for a later merge of `feature/rest-api-integration` into `main`:
+  the revert commit must be reverted first, otherwise Git does not bring the
+  REST changes back.
+- This branch is merged into `feature/rest-api-integration` by a separate
+  pull request (base `feature/rest-api-integration`).
