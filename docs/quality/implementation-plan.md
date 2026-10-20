@@ -333,7 +333,18 @@ R7 brought forward at the maintainer's request): base
 `feature/rest-api-integration` `c4aa809`. Branch
 `feat/opus-r4-2-rest-first-menu`, report `phases/phase-19.md`. The manual
 setup menu lists the REST API first and the MQTT bridge second. No transport,
-entry, identity or traffic change (A1–A5). Not yet merged; CI pending.
+entry, identity or traffic change (A1–A5). Merged into
+`feature/rest-api-integration` via PR #23 (`c8573ef`); CI run `39434909485`
+green on the branch head `becd4d6`.
+
+Status update 2026-10-20 (phase 20 = REST plan R4.3, maintainer decision):
+base `feature/rest-api-integration` `c8573ef`. Branch
+`feat/opus-r4-3-rest-only-setup`, report `phases/phase-20.md`. New gateways
+are added over REST only: the manual setup shows the REST form directly and an
+MQTT-discovered gateway opens the same REST form (EURID suggested as
+password). Existing MQTT entries are not touched and can still be switched in
+the reconfigure flow (A5). No runtime, request or traffic change of either
+transport (A1–A4). Not yet merged; CI pending.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:

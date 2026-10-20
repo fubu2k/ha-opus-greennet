@@ -4,25 +4,7 @@
     "step": {
       "user": {
         "title": "Opus GreenNet Bridge",
-        "description": "Wähle, wie Home Assistant das Gateway erreicht. Bereits eingerichtete Gateways behalten ihre Verbindung.",
-        "menu_options": {
-          "rest_api": "Direkt über die REST-API des Gateways",
-          "mqtt_bridge": "Über den MQTT-Broker (EAG-Kennung)"
-        }
-      },
-      "mqtt_bridge": {
-        "title": "Opus GreenNet Bridge",
-        "description": "Konfiguriere die Bridge, die mit deinem MQTT-Broker verbunden ist. Beim Einrichten wird geprüft, ob die angegebene Bridge antwortet.",
-        "data": {
-          "eag_id": "EAG-Kennung"
-        },
-        "data_description": {
-          "eag_id": "Die achtstellige Bridge-Kennung, die in den MQTT-Topics verwendet wird, z. B. A1B2C3D4 (fiktiv)."
-        }
-      },
-      "rest_api": {
-        "title": "Opus GreenNet Bridge (REST API)",
-        "description": "Gib die Adresse der REST-API des Gateways ein. Beim Einrichten wird nur die Kennung des Gateways gelesen; dabei wird kein EnOcean-Gerät abgefragt.",
+        "description": "Gib die Adresse der REST-API des Gateways ein. Beim Einrichten wird nur die Kennung des Gateways gelesen; dabei wird kein EnOcean-Gerät abgefragt. Bereits eingerichtete Gateways behalten ihre Verbindung.",
         "data": {
           "host": "Host",
           "port": "Port",
@@ -37,8 +19,20 @@
         }
       },
       "discovery_confirm": {
-        "title": "Opus GreenNet Bridge",
-        "description": "Gateway {eag_id} einrichten? Es wurde in Gerätedaten auf deinem MQTT-Broker gefunden. Vor dem Anlegen des Eintrags wird geprüft, ob dieses Gateway antwortet. Dabei wird kein EnOcean-Gerät abgefragt."
+        "title": "Opus GreenNet Bridge {eag_id}",
+        "description": "Gateway {eag_id} wurde in Gerätedaten auf deinem MQTT-Broker gefunden. Gib die Adresse seiner REST-API ein, um es einzurichten. Die Adresse wird nur übernommen, wenn sich dort Gateway {eag_id} meldet; dabei wird kein EnOcean-Gerät abgefragt.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Benutzername",
+          "password": "Passwort"
+        },
+        "data_description": {
+          "host": "IP-Adresse oder Hostname des OPUS-Gateways in deinem Netzwerk.",
+          "port": "Port der REST-API des Gateways (Standard 8080).",
+          "username": "Benutzername der REST-API des Gateways (Herstellervorgabe: admin).",
+          "password": "Passwort der REST-API des Gateways. Herstellervorgabe ist die EURID des Gateways in Großbuchstaben."
+        }
       },
       "reauth_confirm": {
         "title": "Gateway {eag_id} erneut anmelden",
@@ -87,7 +81,6 @@
     },
     "error": {
       "cannot_connect": "Verbindung zum MQTT-Broker fehlgeschlagen",
-      "invalid_eag_id": "Die EAG-Kennung muss genau acht hexadezimale Zeichen enthalten",
       "unknown": "Unerwarteter Fehler",
       "gateway_unavailable": "Der MQTT-Broker ist verbunden, aber die Bridge antwortet nicht. Prüfe die Kennung und die MQTT-Bridge-Verbindung.",
       "cannot_connect_gateway": "Verbindung zum Gateway fehlgeschlagen. Prüfe Host und Port.",

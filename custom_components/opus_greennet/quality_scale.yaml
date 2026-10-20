@@ -129,9 +129,11 @@ rules:
     status: done
     comment: >-
       MQTT discovery: manifest mqtt filter EnOcean/+/stream/devices/+/friendlyId
-      and async_step_mqtt. A message names a candidate only; confirmation runs
-      the existing fresh uptime check. Requires bridged OPUS topics. REST
-      gateways are added manually (no discovery that provides credentials).
+      and async_step_mqtt. A message names a candidate only; since phase 20
+      (R4.3) the offer opens the REST form (address, user, password with the
+      EURID suggested) and accepts only an address that answers as the
+      announced gateway. Requires bridged OPUS topics; manual REST setup is
+      always available.
   discovery-update-info:
     status: exempt
     comment: >-

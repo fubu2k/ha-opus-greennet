@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from homeassistant import config_entries
@@ -91,11 +91,20 @@ async def test_cover_snapshot_configuration_disables_tilt_for_roller_shutter(
     assert state.attributes["supported_features"] == 15
 
 
-async def test_config_flow_rejects_invalid_id(hass: HomeAssistant, mqtt_transport):
-    """Validation errors are attached to the correct user input field."""
-    result = await configure_bridge(hass, "not-a-bridge")
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"eag_id": "invalid_eag_id"}
+async def test_manual_flow_offers_only_the_rest_form(
+    hass: HomeAssistant, mqtt_transport
+):
+    """Phase R4.3: adding a gateway asks for its REST address, never for MQTT.
+
+    Even with a connected MQTT broker no MQTT step is offered and nothing is
+    published; existing MQTT entries are created by earlier versions or the
+    reconfigure flow.
+    """
+    result = await start_user_flow(hass)
+    fields = [str(key) for key in result["data_schema"].schema]
+    assert fields == ["host", "port", "username", "password"]
+    assert result["errors"] == {}
+    assert mqtt_transport.published == []
     assert hass.config_entries.async_entries(DOMAIN) == []
 
 
@@ -107,42 +116,6 @@ async def test_config_flow_rejects_duplicate_id(hass: HomeAssistant, mqtt_transp
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
-
-
-async def test_config_flow_reports_disconnected_mqtt(
-    hass: HomeAssistant, mqtt_transport
-):
-    """A configured but disconnected broker keeps the setup form open."""
-    mqtt_transport.connected = False
-    result = await configure_bridge(hass)
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "cannot_connect"}
-
-
-async def test_config_flow_aborts_without_mqtt(hass: HomeAssistant, mqtt_transport):
-    """A missing MQTT integration produces the actionable abort reason."""
-    with patch(
-        "homeassistant.components.mqtt.async_wait_for_mqtt_client",
-        new=AsyncMock(return_value=False),
-    ):
-        result = await start_user_flow(hass, "mqtt_bridge")
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "mqtt_not_configured"
-
-
-async def test_config_flow_reports_unresponsive_gateway(
-    hass: HomeAssistant, mqtt_transport
-):
-    """A connected broker alone cannot validate an incorrect gateway ID."""
-    mqtt_transport.reply = False
-    with patch(
-        "custom_components.opus_greennet.mqtt_transport.SETUP_REQUEST_TIMEOUT", 0.01
-    ):
-        result = await configure_bridge(hass)
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "gateway_unavailable"}
-    assert hass.config_entries.async_entries(DOMAIN) == []
-    assert mqtt_transport.subscriptions == []
 
 
 async def test_setup_retries_and_cleans_subscriptions_for_unreachable_gateway(

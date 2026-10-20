@@ -23,7 +23,7 @@ A custom Home Assistant integration for the Opus GreenNet Bridge, enabling contr
 
 - **Two transports**: reach the gateway through your MQTT broker (Mosquitto bridge, unchanged default for existing entries) or directly through its REST API without any broker. Each gateway entry uses one transport; switching keeps all devices, entities and IDs (see [Switching the transport](#switching-the-transport))
 - **Auto-discovery**: Automatically discovers EnOcean devices connected to your Opus GreenNet Bridge
-- **Gateway discovery**: Offers bridged OPUS gateways found on your MQTT broker for one-click setup, after the same fresh check as manual setup
+- **Gateway discovery**: Offers bridged OPUS gateways found on your MQTT broker for setup; the offer asks for the gateway's REST address (password prefilled with the EURID)
 - **Immediate telemetry**: Flat battery-level and signal-strength updates bypass the multipart state debounce
 - **Real-time updates**: Receives state changes via MQTT push notifications, including device deltas, local-control telegrams, and bridge-originated command telegrams
 - **Connection recovery**: Checks that the gateway responds, marks entities unavailable during outages, and refreshes discovery and state after reconnection
@@ -345,12 +345,8 @@ After installing, add the integration:
 
 [![Add Integration][config-flow-badge]][config-flow]
 
-…or go to **Settings → Devices & Services → Add Integration → “Opus GreenNet Bridge”**
-and choose how Home Assistant reaches the gateway. The menu offers the REST
-API first and the MQTT broker second; both stay fully supported, and gateways
-that are already configured keep their connection.
-
-**Directly through the gateway's REST API**
+…or go to **Settings → Devices & Services → Add Integration → “Opus GreenNet Bridge”**.
+The dialog asks directly for the gateway's REST API connection:
 
 | Field | Description |
 |-------|-------------|
@@ -368,15 +364,11 @@ startup. Rejected credentials, or a different gateway answering at the stored
 address, start a **re-authentication** that asks for address and credentials
 and accepts them only if the gateway answers with the same EURID.
 
-**Through the MQTT broker (EAG identifier)**
-
-1. Enter your **EAG Identifier** (Bridge ID; fictional example: `A1B2C3D4`)
-2. Click **Submit**
-
-Setup waits for a response from that specific gateway. A connected Home Assistant
-MQTT broker alone is insufficient. If setup fails, check the identifier, gateway
-power, bridge credentials, and the directional topic rules above. Existing
-entries automatically retry when the gateway is unavailable during startup.
+New gateways are always added over the REST API. Gateways that were set up
+through the MQTT broker with an earlier version keep that connection and keep
+working unchanged; they can be moved to REST (and back) under
+[Switching the transport](#switching-the-transport). The MQTT broker is only
+needed for such entries.
 
 ### Switching the transport
 
@@ -404,15 +396,17 @@ block from the Mosquitto configuration (see
 Once the MQTT bridge forwards `EnOcean/<EAG-ID>/stream/#` (see
 [MQTT Bridge Setup](#mqtt-bridge-setup-required)), Home Assistant offers each
 gateway under **Settings → Devices & services → Discovered** as
-**Opus GreenNet Bridge** with its EAG identifier. Select **Add** and confirm.
+**Opus GreenNet Bridge** with its EAG identifier. Select **Add** and enter the
+gateway's IP address; port `8080`, user `admin` and the password (the EURID)
+are prefilled. The gateway is then connected over its REST API.
 
 - Discovery listens only to `EnOcean/+/stream/devices/+/friendlyId`, the
   retained device-model name that the gateway publishes for each paired device.
   It does not subscribe to the large retained snapshot.
 - Receiving the message publishes nothing and queries no device. A retained
   message only names a candidate; it is not taken as proof that the gateway is
-  online. Confirming runs the same single uptime check as manual setup, and the
-  entry is created only if that specific gateway answers.
+  online. The entry is created only if the entered address answers as that
+  specific gateway (same EURID).
 - Every device announces the same gateway, so each gateway is offered once.
   Configured, disabled and ignored gateways are not offered again. To have an
   ignored gateway offered again, stop ignoring it on the integration page.

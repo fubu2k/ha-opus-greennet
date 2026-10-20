@@ -73,32 +73,39 @@ async def _start_reconfigure(hass: HomeAssistant, entry: ConfigEntry, step: str)
 # ── User step ────────────────────────────────────────────────────────────────
 
 
-async def test_user_menu_offers_rest_first_and_mqtt_second(
-    hass: HomeAssistant,
-) -> None:
-    """Phase R4.2: REST is the first option, MQTT stays the second."""
+async def test_user_step_is_the_rest_form(hass: HomeAssistant) -> None:
+    """Phase R4.3: no transport menu; the REST form opens directly."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-    assert result["type"] is FlowResultType.MENU
+    assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
-    assert result["menu_options"] == ["rest_api", "mqtt_bridge"]
-    # Nothing is chosen automatically: the menu waits for the user.
+    assert [str(key) for key in result["data_schema"].schema] == [
+        "host",
+        "port",
+        "username",
+        "password",
+    ]
     assert not hass.config_entries.async_entries(DOMAIN)
 
 
-def test_translated_user_menu_lists_rest_first() -> None:
-    """The translation files list the options in the order of the menu."""
+def test_translations_offer_no_manual_mqtt_step() -> None:
+    """The user step is a form in every translation; no MQTT step is left."""
     base = Path(__file__).parent.parent / "custom_components" / "opus_greennet"
     for path in (
         base / "strings.json",
         base / "translations" / "en.json",
         base / "translations" / "de.json",
     ):
-        options = json.loads(path.read_text(encoding="utf-8"))["config"]["step"][
-            "user"
-        ]["menu_options"]
-        assert list(options) == ["rest_api", "mqtt_bridge"], path.name
+        config = json.loads(path.read_text(encoding="utf-8"))["config"]
+        user = config["step"]["user"]
+        assert "menu_options" not in user, path.name
+        assert list(user["data"]) == ["host", "port", "username", "password"]
+        assert "mqtt_bridge" not in config["step"], path.name
+        assert "rest_api" not in config["step"], path.name
+        assert list(config["step"]["discovery_confirm"]["data"]) == list(
+            user["data"]
+        ), path.name
 
 
 async def test_user_flow_creates_rest_entry_from_gateway_identity(
@@ -124,8 +131,7 @@ async def test_user_flow_creates_rest_entry_from_gateway_identity(
 
 
 async def test_user_flow_form_defaults(hass: HomeAssistant) -> None:
-    result = await start_user_flow(hass, "rest_api")
-    assert result["step_id"] == "rest_api"
+    result = await start_user_flow(hass)
     schema = result["data_schema"].schema
     defaults = {str(key): key.default() for key in schema if callable(key.default)}
     assert defaults == {"port": 8080, "username": "admin"}
@@ -148,7 +154,7 @@ async def test_user_flow_recovers_from_unreachable_gateway(
 ) -> None:
     config = gateway.config
     await gateway.stop()
-    result = await start_user_flow(hass, "rest_api")
+    result = await start_user_flow(hass)
     result = await hass.config_entries.flow.async_configure(result["flow_id"], config)
     assert result["errors"] == {"base": "cannot_connect_gateway"}
     await gateway.start()
