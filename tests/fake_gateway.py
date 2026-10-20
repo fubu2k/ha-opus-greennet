@@ -64,9 +64,10 @@ class FakeGateway:
     ``http_status`` (per path, the HTTP status line of an otherwise unchanged
     answer, so it can differ from ``header.httpStatus`` in the body),
     ``close_after_snapshot`` (end every event stream right after its device
-    list), ``snapshot_delay`` (seconds between opening a stream and writing
-    its device list) and ``accept_auth`` (reject every request with 401 when
-    False).
+    list), ``stream_without_configuration`` (stream the device list without
+    the ``configuration`` block, like real gateways), ``snapshot_delay``
+    (seconds between opening a stream and writing its device list) and
+    ``accept_auth`` (reject every request with 401 when False).
     """
 
     def __init__(self, eurid: str = EURID, password: str = PASSWORD) -> None:
@@ -86,6 +87,9 @@ class FakeGateway:
         self.stream_preamble: list[str] = []
         self.close_after_snapshot = False
         self.snapshot_delay = 0.0
+        # Real gateways stream the device list without ``configuration``
+        # (phase 21 hardware diagnostics); GET /devices carries it.
+        self.stream_without_configuration = False
         self._streams: list[asyncio.Queue[str | None]] = []
         self._stream_connected = asyncio.Event()
         self._stopping = False
@@ -265,7 +269,13 @@ class FakeGateway:
             # The stream is open (headers sent) but the list is not written yet.
             await asyncio.sleep(self.snapshot_delay)
         # Pretty-printed like the real gateway, without delimiters.
-        await response.write(json.dumps(self.devices_document(), indent=2).encode())
+        snapshot = self.devices_document()
+        if self.stream_without_configuration:
+            snapshot["devices"] = [
+                {key: value for key, value in device.items() if key != "configuration"}
+                for device in snapshot["devices"]
+            ]
+        await response.write(json.dumps(snapshot, indent=2).encode())
         if self.close_after_snapshot:
             # A gateway that ends every stream right after the device list.
             await response.write_eof()

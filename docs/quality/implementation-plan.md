@@ -355,7 +355,9 @@ reload (B-8, one device list fewer per start), 30 s deadline, measured time
 in diagnostics; the 30 min list keeps newer telegram metadata (B-5). REST
 behaviour changes disclosed under D3; MQTT path untouched (A1–A5). Merged
 into `feature/rest-api-integration` via PR #25 (`2d3cf9c`); CI run
-`39458477903` green.
+`39458477903` green. Hardware check (report section 7): first list after
+0.076 s; finding R5-H1 (stream list without cover configuration) fixed on
+`fix/opus-r5-movement-times` with one `GET /devices` right after setup.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:

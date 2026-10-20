@@ -457,9 +457,11 @@ zone does not by itself prove that it is currently heating.
 Entries on the REST transport keep one HTTP event stream to the gateway open
 (`GET /devices/stream`). Every stream starts with the complete device list,
 which resynchronises all state, and then delivers each telegram as the gateway
-handles it. At startup this first list is also the setup snapshot, so the
-device list is downloaded once per start, not twice; if it does not arrive
-within 30 seconds, Home Assistant retries the setup later. If the stream ends, it is reopened after a short pause; if the
+handles it. At startup this first list is the setup snapshot; if it does not
+arrive within 30 seconds, Home Assistant retries the setup later. Because the
+streamed list does not contain the cover movement times, the device list is
+read once more right after startup for these settings; it never changes live
+state. If the stream ends, it is reopened after a short pause; if the
 gateway cannot be reached, entities become unavailable. The pause starts at 1
 second, doubles after every attempt up to 60 seconds and is lengthened by a
 random share of up to 25 %. A stream that closes within 10 seconds of
