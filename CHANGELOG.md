@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+Changes on top of 1.0.0b1 (REST phases 01–04 of the quality series). No version number yet.
+
+### Changed
+- **More robust reconnects.** After the event stream ends, the integration waits 1 second before reconnecting, doubling the pause after every failed attempt up to 60 seconds, plus a random share of up to 25 %. A stream that closes within 10 seconds counts as a failed attempt, so a gateway that drops every connection at once cannot cause a reconnect loop. Rejected credentials are never retried.
+- **Faster, consistent start-up.** Device states are taken from the first document of the event stream; if it does not arrive within 30 seconds, Home Assistant retries the setup later. The device list is read once more right after start-up for the cover movement times, which the stream does not carry.
+- A device list from the gateway now updates the known devices in place. Entities and running commands keep a valid device, so a command error can no longer get lost when a list arrives during the command.
+- The 30-minute device list keeps a newer signal strength and last-seen time reported by a telegram in the meantime.
+
+### Fixed
+- The first telegram after start-up no longer rewrites every entity of the device once.
+- HTTP errors and gateway errors are told apart: the HTTP status line and the gateway's own status are checked separately, and errors name both without exposing credentials.
+- Every streamed document is limited to 8 MB, also when it arrives in one chunk.
+
+### Added
+- Diagnostics: `first_device_list_seconds` (time from opening the stream to its first device list), and per cover `last_vertical_movement_time` (the last run duration the gateway reports, if any) and `position_origin` per channel (`device list`, `reported`, `estimated` or `assumed`). Diagnostic values only; they never change state and cause no request.
+- Diagnostics also redact the HomeKit QR setup payload (`homekitQR`).
+- CI tests every change against a fixed Home Assistant 2026.10.2 (with hassfest built from the same core commit and an icon check) in addition to the latest stable release.
+
+### Unchanged
+- No additional radio traffic, intervals or command repetitions; the 5-second grace period after a cover's travel time stays. Entity IDs, unique IDs and settings are unchanged.
+
 ## [1.0.0b1] - 2026-10-20
 
 Second beta of 1.0 (REST). It is based on the final MQTT release v0.8.0, so v0.8.0 is now the stable release and the MQTT fallback, and an update from v0.8.0 works like one from v0.7.0 (enter the gateway address once).
