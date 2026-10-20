@@ -599,7 +599,8 @@ Neue Gateways werden nur noch über REST eingerichtet. Der Einrichtungsdialog
 zeigt direkt Host, Port, Benutzer und Passwort (kein Menü), auch ein über MQTT
 entdecktes Gateway führt in dieses REST-Formular. MQTT bleibt für bestehende
 Einträge und als Wahl im Neu-konfigurieren-Menü. Branch
-`feat/opus-r4-3-rest-only-setup`, Bericht `phases/phase-20.md`. Damit ist der
+`feat/opus-r4-3-rest-only-setup`, Bericht `phases/phase-20.md`; gemergt über
+PR #24 (`bcb6276`), CI-Lauf `39449339335` grün. Damit ist der
 Menüteil von R7 erledigt; ein „Fallback“-Hinweis entfällt.
 
 - Optional: REST als erste Menüoption (**erledigt**, R4.2; ersetzt durch R4.3: REST als einzige Einrichtung); MQTT-Hinweis „Fallback“ (entfällt).

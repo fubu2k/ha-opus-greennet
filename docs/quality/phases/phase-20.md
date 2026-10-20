@@ -1,7 +1,8 @@
 # Phase 20 – REST plan R4.3: REST-only setup of new gateways
 
-- **Status:** implemented on branch `feat/opus-r4-3-rest-only-setup`, not yet
-  merged. CI section 5. No version change, no CHANGELOG entry, no release;
+- **Status:** completed. Branch `feat/opus-r4-3-rest-only-setup` merged by the
+  maintainer into `feature/rest-api-integration` via PR #24 (merge commit
+  `bcb6276`, 2026-10-20). CI section 5. No version change, no CHANGELOG entry, no release;
   `main` untouched (branch policy of 2026-10-20).
 - **Origin:** maintainer request of 2026-10-20: the branch should set up a
   gateway like the working upstream build `opus-greennet-v1.0.0b0.zip`, with
@@ -86,5 +87,7 @@ tests, the `config_flow.py` 100 % coverage gate and Hassfest run in CI.
 
 ## 7. Next step
 
-PR base `feature/rest-api-integration`, never `main`. After the merge, record
-the CI run here and in both plans. No release permission is implied.
+Merged via PR #24 (`bcb6276`) into `feature/rest-api-integration`, not into
+`main`; CI run `39449339335` green on the code commit `ae43b7d` (the merged
+head adds only this report's CI record). Next: manual check in Home Assistant
+that only the REST dialog appears. No release permission is implied.

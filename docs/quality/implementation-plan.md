@@ -344,7 +344,8 @@ are added over REST only: the manual setup shows the REST form directly and an
 MQTT-discovered gateway opens the same REST form (EURID suggested as
 password). Existing MQTT entries are not touched and can still be switched in
 the reconfigure flow (A5). No runtime, request or traffic change of either
-transport (A1–A4). Not yet merged; CI pending.
+transport (A1–A4). Merged into `feature/rest-api-integration` via PR #24
+(`bcb6276`); CI run `39449339335` green on the branch.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
