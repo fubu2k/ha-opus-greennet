@@ -495,7 +495,7 @@ without a readable gateway document reports its HTTP status instead of
 
 | Method and path | Trigger | Scope |
 |-----------------|---------|-------|
-| `GET /system/info` | Config flow, setup | Gateway (EURID, version, base ID, HomeKit setup code; the latter two redacted in diagnostics) |
+| `GET /system/info` | Config flow, setup | Gateway (EURID, version, base ID, HomeKit setup code and HomeKit QR payload; the latter three redacted in diagnostics) |
 | `GET /system/uptime` | Setup, health check every 60 s (`GATEWAY_HEALTH_INTERVAL`, same as MQTT) | Gateway |
 | `GET /devices` | Device list refresh every 30 min (`DEVICE_LIST_REFRESH_INTERVAL`); no longer at setup (phase 21/R5) | Gateway device model, no radio telegram **[HW-upstream]** |
 | `GET /devices/stream` | Setup (its first document is the setup snapshot, phase 21/R5); long-lived, reopened after it ends or after 15 min without data | Gateway |
