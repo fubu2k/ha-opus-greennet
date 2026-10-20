@@ -1,7 +1,7 @@
 # Phase 22 – REST plan R6: domain model (in-place update, run duration, position origin, regressions)
 
-- **Status:** implemented on branch `feat/opus-r6-domain-model`, not yet
-  merged. CI pending (section 5). No version change, no release; `main`
+- **Status:** implemented on branch `feat/opus-r6-domain-model`, PR #33,
+  not yet merged. CI green (section 5). No version change, no release; `main`
   untouched.
 - **Plan:** `Implementations-Plan-Rest-API.md` phase R6, design decision E6,
   finding B-4, section 3.3 (run duration), section 2.7 (test gaps R7/R8).
@@ -74,7 +74,8 @@ Unchanged for MQTT and REST: no request added or removed.
 
 | Run | Head | Result |
 |-----|------|--------|
-| pending | – | – |
+| [39483080675](https://github.com/fubu2k/ha-opus-greennet/actions/runs/39483080675) | `9f868c2` | failed: two existing cases in `tests/test_rest_devices.py` still expected a new device object (fixed, section 3) |
+| [39486085846](https://github.com/fubu2k/ha-opus-greennet/actions/runs/39486085846) | `4b105e7` | passed: Home Assistant 2026.10.2 and latest stable, Hassfest, HACS validate |
 
 ## 6. Registry and identity compatibility
 

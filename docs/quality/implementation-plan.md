@@ -366,7 +366,7 @@ place (E6, B-4), last vertical run duration as a REST diagnostic value,
 regression tests R7/R8. No traffic or visible behaviour change; MQTT path
 untouched (A1–A5). R6b decided as 1a + 2a and implemented on the same
 branch: position origin in REST diagnostics only, 5 s grace period
-unchanged. Not yet merged; CI pending.
+unchanged. PR #33, CI green; not yet merged.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
