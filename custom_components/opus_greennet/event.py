@@ -18,11 +18,11 @@ from .const import (
 )
 from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
-    OpusGreenNetCoordinator,
 )
 from .diagnostics import log_entity_state_write
 from .enocean_device import EnOceanDevice
 from .entity import OpusGreenNetEntity
+from .transport import OpusCoordinator
 
 # Events are pushed by the coordinator.
 PARALLEL_UPDATES = 0
@@ -95,7 +95,7 @@ class OpusGreenNetEvent(OpusGreenNetEntity, EventEntity):
 
     def __init__(
         self,
-        coordinator: OpusGreenNetCoordinator,
+        coordinator: OpusCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,

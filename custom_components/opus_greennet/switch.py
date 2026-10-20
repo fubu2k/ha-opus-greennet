@@ -16,10 +16,10 @@ from .const import CONF_EAG_ID, DEFAULT_CHANNEL
 from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
     CommandDelivery,
-    OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanDevice
 from .entity import OpusGreenNetEntity, migrate_legacy_multichannel_entity
+from .transport import OpusCoordinator
 
 # The coordinator serializes commands per device; entities receive pushed state.
 PARALLEL_UPDATES = 0
@@ -86,7 +86,7 @@ class OpusGreenNetSwitch(OpusGreenNetEntity, SwitchEntity):
 
     def __init__(
         self,
-        coordinator: OpusGreenNetCoordinator,
+        coordinator: OpusCoordinator,
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,

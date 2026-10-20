@@ -316,14 +316,25 @@ def test_discovery_status_matches_the_code() -> None:
     assert implemented is (STATUS["discovery"] == "done")
 
 
-def test_reconfiguration_exemption_matches_the_code() -> None:
-    """Exempt because the only field is the unique ID of the entry."""
-    assert STATUS["reconfiguration-flow"] == "exempt"
-    flow_source = (INTEGRATION / "config_flow.py").read_text(encoding="utf-8")
-    assert "async_step_reconfigure" not in flow_source
-    schema_fields = re.findall(r"vol\.(?:Required|Optional)\((\w+)\)", flow_source)
-    assert schema_fields == ["CONF_EAG_ID"]
-    assert "async_set_unique_id(eag_id)" in flow_source
+def test_reauth_and_reconfigure_flows_verify_the_gateway_identity() -> None:
+    """reauthentication-flow and reconfiguration-flow (phase 14, REST)."""
+    assert STATUS["reauthentication-flow"] == STATUS["reconfiguration-flow"] == "done"
+    flow = _module("config_flow")
+    steps = {
+        node.name for node in ast.walk(flow) if isinstance(node, ast.AsyncFunctionDef)
+    }
+    assert {"async_step_reauth", "async_step_reauth_confirm"} <= steps
+    assert {
+        "async_step_reconfigure",
+        "async_step_reconfigure_rest",
+        "async_step_reconfigure_mqtt",
+    } <= steps
+    source = (INTEGRATION / "config_flow.py").read_text(encoding="utf-8")
+    assert 'errors["base"] = "wrong_gateway"' in source
+    assert _calls(flow, "async_update_reload_and_abort")
+    assert "async_set_unique_id(eag_id)" in source
+    init_source = (INTEGRATION / "__init__.py").read_text(encoding="utf-8")
+    assert "raise ConfigEntryAuthFailed(" in init_source
 
 
 # ── Rule-specific evidence ───────────────────────────────────────────────────
@@ -337,6 +348,8 @@ def test_brands() -> None:
 
 def test_common_modules() -> None:
     assert (INTEGRATION / "coordinator.py").is_file()
+    assert (INTEGRATION / "rest_coordinator.py").is_file()
+    assert (INTEGRATION / "transport.py").is_file()
     assert (INTEGRATION / "entity.py").is_file()
     for module in PLATFORM_MODULES:
         source = Path(module.__file__).read_text(encoding="utf-8")
@@ -346,7 +359,7 @@ def test_common_modules() -> None:
 def test_no_requirements_for_dependency_rules() -> None:
     """dependency-transparency, async-dependency and inject-websession."""
     assert MANIFEST["requirements"] == []
-    forbidden = {"aiohttp", "httpx", "requests", "urllib3"}
+    forbidden = {"httpx", "requests", "urllib3", "paho"}
     for path in INTEGRATION.glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -357,6 +370,14 @@ def test_no_requirements_for_dependency_rules() -> None:
             else:
                 continue
             assert not names & forbidden, (path.name, names)
+            if "aiohttp" in names:
+                # Only the REST client speaks HTTP (phase 14).
+                assert path.name == "api.py", path.name
+        # Never create an own session; use Home Assistant's shared one.
+        assert not _calls(tree, "ClientSession"), path.name
+    for module in ("__init__", "config_flow"):
+        source = (INTEGRATION / f"{module}.py").read_text(encoding="utf-8")
+        assert "async_get_clientsession(hass)" in source, module
 
 
 def test_integration_owner() -> None:
@@ -400,7 +421,16 @@ def test_every_entity_class_has_entity_name_and_no_polling() -> None:
 def test_stale_devices_and_diagnostics_entry_points() -> None:
     assert callable(integration_package.async_remove_config_entry_device)
     assert callable(diagnostics.async_get_config_entry_diagnostics)
-    assert {"eagid", "deviceid", "password", "token"} <= diagnostics.TO_REDACT
+    assert {
+        "baseid",
+        "eagid",
+        "deviceid",
+        "homekitpin",
+        "host",
+        "password",
+        "token",
+        "username",
+    } <= diagnostics.TO_REDACT
 
 
 def test_actions_are_set_up_in_async_setup() -> None:

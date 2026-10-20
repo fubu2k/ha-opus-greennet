@@ -7,7 +7,13 @@ from dataclasses import dataclass
 
 import probatio as vol
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.const import Platform
+from homeassistant.const import (
+    CONF_HOST,
+    CONF_PASSWORD,
+    CONF_PORT,
+    CONF_USERNAME,
+    Platform,
+)
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -15,18 +21,29 @@ from homeassistant.core import (
     SupportsResponse,
 )
 from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     HomeAssistantError,
     ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_EAG_ID, DOMAIN
+from .api import OpusApiError, OpusAuthError, OpusGatewayClient
+from .const import (
+    CONF_EAG_ID,
+    DEFAULT_PORT,
+    DEFAULT_USERNAME,
+    DOMAIN,
+    TRANSPORT_REST,
+)
 from .coordinator import OpusGreenNetCoordinator
 from .entity import async_delete_config_entry_issues
+from .rest_coordinator import GatewayMismatchError, OpusGreenNetRestCoordinator
+from .transport import OpusCoordinator, entry_transport
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,7 +88,7 @@ SERVICE_SET_CONFIG_SCHEMA = vol.Schema(
 class OpusGreenNetRuntimeData:
     """Runtime objects owned by one config entry."""
 
-    coordinator: OpusGreenNetCoordinator
+    coordinator: OpusCoordinator
     gateway_device_id: str
 
 
@@ -118,18 +135,14 @@ def _loaded_entry(
     return loaded_entries[0]
 
 
-def _coordinator_for_call(
-    hass: HomeAssistant, call: ServiceCall
-) -> OpusGreenNetCoordinator:
+def _coordinator_for_call(hass: HomeAssistant, call: ServiceCall) -> OpusCoordinator:
     """Return the coordinator selected by a service call."""
     return _loaded_entry(
         hass, call.data.get(ATTR_CONFIG_ENTRY_ID)
     ).runtime_data.coordinator
 
 
-def _validate_service_device(
-    coordinator: OpusGreenNetCoordinator, device_id: str
-) -> None:
+def _validate_service_device(coordinator: OpusCoordinator, device_id: str) -> None:
     """Validate that a requested device belongs to the selected gateway."""
     if coordinator.get_device(device_id) is None:
         raise ServiceValidationError(
@@ -150,8 +163,54 @@ def _describe_setup_failure(err: Exception) -> str:
 async def async_setup_entry(
     hass: HomeAssistant, entry: OpusGreenNetConfigEntry
 ) -> bool:
-    """Set up Opus GreenNet Bridge from a config entry."""
+    """Set up Opus GreenNet Bridge from a config entry.
+
+    The entry's transport decides the coordinator (phase 14). Entries without
+    an explicit REST transport take the unchanged MQTT path.
+    """
     eag_id = entry.data[CONF_EAG_ID]
+    coordinator: OpusCoordinator
+    sw_version: str | None = None
+    if entry_transport(entry.data) == TRANSPORT_REST:
+        coordinator = await _async_setup_rest_coordinator(hass, entry)
+        version = coordinator.gateway_info.get("version")
+        sw_version = version if isinstance(version, str) else None
+    else:
+        coordinator = await _async_setup_mqtt_coordinator(hass, eag_id)
+
+    try:
+        device_registry = dr.async_get(hass)
+        gateway_device = device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, eag_id)},
+            manufacturer="OPUS",
+            model="GreenNet Bridge",
+            name=entry.title,
+            serial_number=eag_id,
+        )
+        if sw_version is not None:
+            # REST entries know the gateway firmware; MQTT entries leave the
+            # registry device exactly as before phase 14.
+            device_registry.async_update_device(
+                gateway_device.id, sw_version=sw_version
+            )
+        entry.runtime_data = OpusGreenNetRuntimeData(
+            coordinator=coordinator,
+            gateway_device_id=gateway_device.id,
+        )
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except BaseException:
+        await coordinator.async_unload()
+        raise
+
+    _LOGGER.info("Opus GreenNet Bridge setup complete: %s", eag_id)
+    return True
+
+
+async def _async_setup_mqtt_coordinator(
+    hass: HomeAssistant, eag_id: str
+) -> OpusGreenNetCoordinator:
+    """Start the MQTT coordinator of an entry (behaviour before phase 14)."""
     coordinator = OpusGreenNetCoordinator(hass, eag_id)
 
     try:
@@ -174,28 +233,54 @@ async def async_setup_entry(
     except BaseException:
         await coordinator.async_unload()
         raise
+    return coordinator
+
+
+async def _async_setup_rest_coordinator(
+    hass: HomeAssistant, entry: OpusGreenNetConfigEntry
+) -> OpusGreenNetRestCoordinator:
+    """Start the REST coordinator of an entry with Home Assistant's websession."""
+    eag_id = entry.data[CONF_EAG_ID]
+    client = OpusGatewayClient(
+        async_get_clientsession(hass),
+        entry.data[CONF_HOST],
+        entry.data.get(CONF_PORT, DEFAULT_PORT),
+        entry.data.get(CONF_USERNAME, DEFAULT_USERNAME),
+        entry.data[CONF_PASSWORD],
+    )
+    coordinator = OpusGreenNetRestCoordinator(
+        hass, client, eag_id, on_auth_failed=lambda: entry.async_start_reauth(hass)
+    )
 
     try:
-        device_registry = dr.async_get(hass)
-        gateway_device = device_registry.async_get_or_create(
-            config_entry_id=entry.entry_id,
-            identifiers={(DOMAIN, eag_id)},
-            manufacturer="OPUS",
-            model="GreenNet Bridge",
-            name=entry.title,
-            serial_number=eag_id,
+        await coordinator.async_setup()
+    except OpusAuthError as err:
+        await coordinator.async_unload()
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="invalid_auth"
+        ) from err
+    except GatewayMismatchError as err:
+        await coordinator.async_unload()
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="wrong_gateway"
+        ) from err
+    except OpusApiError as err:
+        await coordinator.async_unload()
+        # The translated ConfigEntryNotReady text is deliberately generic;
+        # the log keeps the precise cause.
+        _LOGGER.warning(
+            "OPUS gateway %s is not ready, Home Assistant will retry: %s",
+            eag_id,
+            err,
         )
-        entry.runtime_data = OpusGreenNetRuntimeData(
-            coordinator=coordinator,
-            gateway_device_id=gateway_device.id,
-        )
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN,
+            translation_key="gateway_unavailable",
+        ) from err
     except BaseException:
         await coordinator.async_unload()
         raise
-
-    _LOGGER.info("Opus GreenNet Bridge setup complete: %s", eag_id)
-    return True
+    return coordinator
 
 
 async def async_unload_entry(
