@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{eag_id}",
     "step": {
       "user": {
         "title": "Opus GreenNet Bridge",
@@ -10,6 +11,10 @@
         "data_description": {
           "eag_id": "The eight-character bridge identifier used in MQTT topics, for example A1B2C3D4 (fictional)."
         }
+      },
+      "discovery_confirm": {
+        "title": "Opus GreenNet Bridge",
+        "description": "Set up the gateway {eag_id}? It was found in device data on your MQTT broker. Before the entry is created, setup checks that this gateway responds. No EnOcean device is queried."
       }
     },
     "error": {
@@ -20,7 +25,8 @@
     },
     "abort": {
       "already_configured": "This bridge is already configured",
-      "mqtt_not_configured": "Set up and connect the MQTT integration before adding this bridge"
+      "mqtt_not_configured": "Set up and connect the MQTT integration before adding this bridge",
+      "invalid_discovery_info": "The MQTT message does not identify an OPUS gateway"
     }
   },
   "entity": {
@@ -172,6 +178,19 @@
     },
     "autolock_read_only": {
       "message": "AutoLock control via MQTT is disabled pending manufacturer clarification. Only the reported lock state is available."
+    }
+  },
+  "issues": {
+    "duplicate_beta_entity": {
+      "title": "Duplicate entity {removed_entity_id} was removed",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Update references to {removed_entity_id}",
+            "description": "While adopting the upstream unique IDs, the integration found two registry entries for the same device and gateway. It kept your existing entity {preserved_entity_id} with its entity ID, name and settings, and removed the duplicate entity {removed_entity_id}.\n\nAutomations, scripts, scenes and dashboards that still use {removed_entity_id} no longer work. Replace that entity ID with {preserved_entity_id}, then select Submit to dismiss this message. Nothing is sent to the gateway or the device."
+          }
+        }
+      }
     }
   },
   "services": {

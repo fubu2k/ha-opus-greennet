@@ -46,7 +46,8 @@ def reconciliation_timers(monkeypatch):
 
 @pytest.mark.parametrize(
     ("eep", "channel", "status"),
-    [("D2-05-00", 0, 200), ("D2-05-01", 1, 201), ("D2-05-02", 2, 200)],
+    # A deferred Stop (ACK 201) schedules no checks: test_ack_device_health.py.
+    [("D2-05-00", 0, 200), ("D2-05-01", 1, 200), ("D2-05-02", 2, 200)],
 )
 async def test_stop_wire_command_waits_for_ack_then_queries_same_channel(
     hass,

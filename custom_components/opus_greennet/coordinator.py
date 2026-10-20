@@ -9,6 +9,7 @@ import re
 from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 from time import monotonic
 
 from homeassistant.components import mqtt
@@ -117,6 +118,14 @@ DEVICE_STREAM_FINALIZE_DELAY = 0.02
 TELEGRAM_FINALIZE_DELAY = 0.15
 RAW_MQTT_DEBUG_PAYLOAD_LIMIT = 500
 OUTBOUND_STATE_RECONCILIATION_DELAYS = (5, 20)
+# Gateway acknowledgement "SoftSmartAck" (vendor reference 3.3): the gateway
+# accepted the telegram for deferred delivery and transmits it later. It is
+# neither a radio transmission nor device feedback.
+ACK_STATUS_DEFERRED = 201
+# Command keys whose deferred value is compared numerically with feedback.
+NUMERIC_COMMAND_KEYS = frozenset(
+    {"dimValue", "position", "angle", "temperatureSetpoint"}
+)
 # Internal reason for a background status check dropped before publish.
 SUPERSEDED = "superseded"
 GATEWAY_HEALTH_INTERVAL = timedelta(seconds=60)
@@ -147,6 +156,19 @@ DEVICE_STREAM_TOPIC_PATTERN = re.compile(r"EnOcean/([^/]+)/stream/device/([^/]+)
 PUT_ANSWER_STATE_TOPIC_PATTERN = re.compile(
     r"EnOcean/([^/]+)/putAnswer/devices/([^/]+)/state"
 )
+
+
+class CommandDelivery(StrEnum):
+    """What a positive gateway acknowledgement says about one command.
+
+    Neither value confirms physical execution: only a device report (a radio
+    telegram or a device-model update) for the commanded field does that.
+    """
+
+    # httpStatus 200: the gateway transmitted the telegram.
+    SENT = "sent"
+    # httpStatus 201 (SoftSmartAck): queued by the gateway for later delivery.
+    DEFERRED = "deferred"
 
 
 @dataclass
@@ -187,6 +209,8 @@ class OpusGreenNetCoordinator:
         self._pending_device_streams: dict[str, Callable[[], None] | None] = {}
         self._telegram_received_at: dict[str, float] = {}
         self._device_stream_received_at: dict[str, float] = {}
+        # Delta windows that so far contain retained replays only.
+        self._device_stream_replay_windows: set[str] = set()
         self._pending_reconciliation_queries: dict[
             tuple[str, int], list[Callable[[], None]]
         ] = {}
@@ -213,6 +237,14 @@ class OpusGreenNetCoordinator:
         self._control_topics: list[str] = []
         self._stream_topics: list[str] = []
         self._last_reconnect_at: float | None = None
+        # Field provenance for retained replays (phase 10). Per device, the
+        # (channel, key) fields that received a live (non-retained) value or
+        # an answer to this session's own request. Only valid while the
+        # session is uninterrupted and every stream wildcard is subscribed:
+        # then every gateway publication reaches the coordinator live, so a
+        # later retained replay of such a field cannot be newer.
+        self._live_fields: dict[str, set[tuple[int, str]]] = {}
+        self._replay_guard_armed = False
         # Gateway info
         self.gateway_info: JsonObject = {}
         self.gateway_uptime: str | None = None
@@ -234,6 +266,7 @@ class OpusGreenNetCoordinator:
             self._telegram_paths,
         ):
             cache.pop(device_id, None)
+        self._device_stream_replay_windows.discard(device_id)
         for timers in (self._pending_telegrams, self._pending_device_streams):
             if cancel := timers.pop(device_id, None):
                 cancel()
@@ -241,6 +274,9 @@ class OpusGreenNetCoordinator:
         for key in list(self._feedback_revisions):
             if key[0] == device_id:
                 self._feedback_revisions.pop(key)
+        # A re-added device starts without provenance: its first snapshot,
+        # retained or not, initialises state again.
+        self._live_fields.pop(device_id, None)
         self._requests.async_cancel_device(device_id)
         async_dispatcher_send(
             self.hass, f"{SIGNAL_DEVICE_REMOVED}_{self.eag_id}", device_id
@@ -525,6 +561,11 @@ class OpusGreenNetCoordinator:
         # uptime request is awaited, which attribute narrowing cannot see.
         if self._unloaded or self._bridge_reported_offline():
             raise request_error("gateway_unavailable", self.eag_id)
+        # The answer arrived on a topic Home Assistant (re)subscribes after
+        # every stream wildcard, so all retained replays of this connection
+        # were queued before it. Arm before the snapshot request so its
+        # answer counts as fresher than any later replay.
+        self._arm_replay_guard()
         if resync:
             self._resync_requested_at = monotonic()
             await mqtt.async_publish(
@@ -581,6 +622,11 @@ class OpusGreenNetCoordinator:
         self._device_stream_data.clear()
         self._telegram_received_at.clear()
         self._device_stream_received_at.clear()
+        self._device_stream_replay_windows.clear()
+        # Publications during an interruption may be newer than anything seen
+        # live before it; after reconnect, retained replays apply as before.
+        self._replay_guard_armed = False
+        self._live_fields.clear()
 
     async def async_unload(self) -> None:
         """Unload the coordinator and unsubscribe from MQTT."""
@@ -638,31 +684,39 @@ class OpusGreenNetCoordinator:
                 return
 
             received_at = monotonic()
-            if not getattr(msg, "retain", False):
+            retained = bool(getattr(msg, "retain", False))
+            if not retained:
                 self._log_latency_received(
                     "stream/devices", device_id, property_path, received_at
                 )
+
+            payload = payload_text(msg.payload)
+            if retained and self._drop_stale_replay(
+                "stream/devices", device_id, property_path, payload
+            ):
+                return
 
             if device_id not in self._device_data:
                 self._device_data[device_id] = {"deviceId": device_id}
                 if self._find_device_by_id(device_id) is None:
                     self._pending_devices.add(device_id)
 
-            payload = payload_text(msg.payload)
             self._set_nested_property(
                 self._device_data[device_id], property_path, payload
             )
+            if not retained:
+                self._record_live_property(device_id, property_path)
 
             if self.get_device(device_id) is not None and re.match(
                 r"(?:states|transmitModes|configuration/parameters)/\d+/", property_path
             ):
                 self._buffer_device_stream_property(
-                    device_id, property_path, payload, received_at
+                    device_id, property_path, payload, received_at, retained=retained
                 )
                 return
 
             if self._apply_known_device_state_property(
-                device_id, property_path, payload, received_at
+                device_id, property_path, payload, received_at, retained=retained
             ):
                 return
 
@@ -698,25 +752,38 @@ class OpusGreenNetCoordinator:
                 return
 
             received_at = monotonic()
-            if not getattr(msg, "retain", False):
+            retained = bool(getattr(msg, "retain", False))
+            if not retained:
                 self._log_latency_received(
                     "stream/device", device_id, property_path, received_at
                 )
 
             payload = payload_text(msg.payload)
+            if retained and self._drop_stale_replay(
+                "stream/device", device_id, property_path, payload
+            ):
+                return
             if self._apply_scalar_telemetry(
-                device_id, property_path, payload, received_at
+                device_id, property_path, payload, received_at, retained=retained
             ):
                 return
             self._buffer_device_stream_property(
-                device_id, property_path, payload, received_at
+                device_id, property_path, payload, received_at, retained=retained
             )
+            if not retained:
+                self._record_live_property(device_id, property_path)
 
         except Exception as err:
             _LOGGER.exception("Error handling device stream message: %s", err)
 
     def _apply_scalar_telemetry(
-        self, device_id: str, property_path: str, payload: str, received_at: float
+        self,
+        device_id: str,
+        property_path: str,
+        payload: str,
+        received_at: float,
+        *,
+        retained: bool = False,
     ) -> bool:
         """Apply standalone battery/RSSI readings without a debounce timer."""
         device = self.devices.get(device_id)
@@ -741,6 +808,8 @@ class OpusGreenNetCoordinator:
             value = number
         cached = self._device_data.setdefault(device_id, {"deviceId": device_id})
         cached[property_path] = value
+        if not retained:
+            self._record_live_fields(device_id, {(0, property_path)})
         # A buffered older scalar must not overwrite this newer reading later.
         self._device_stream_data.get(device_id, {}).pop(property_path, None)
         if property_path == "dbm":
@@ -757,15 +826,32 @@ class OpusGreenNetCoordinator:
         if changed:
             signal = f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}"
             self._mark_and_log_dispatch(
-                device, "stream/device", signal, received_at, received_at
+                device,
+                "stream/device",
+                signal,
+                received_at,
+                received_at,
+                retained=retained,
             )
             async_dispatcher_send(self.hass, signal, device)
         return True
 
     def _buffer_device_stream_property(
-        self, device_id: str, property_path: str, payload: str, received_at: float
+        self,
+        device_id: str,
+        property_path: str,
+        payload: str,
+        received_at: float,
+        *,
+        retained: bool = False,
     ) -> None:
         """Collect indexed state metadata before applying its value and channel."""
+        # A window opened by a retained replay stays a replay window until a
+        # live message joins it (see _finalize_device_stream).
+        if not retained:
+            self._device_stream_replay_windows.discard(device_id)
+        elif device_id not in self._device_stream_data:
+            self._device_stream_replay_windows.add(device_id)
         self._device_stream_received_at.setdefault(device_id, received_at)
         stream_data = self._device_stream_data.setdefault(
             device_id, {"deviceId": device_id}
@@ -791,6 +877,8 @@ class OpusGreenNetCoordinator:
         stream_data = self._device_stream_data.pop(device_id)
         self._pending_device_streams.pop(device_id, None)
         received_at = self._device_stream_received_at.pop(device_id, None)
+        replay_window = device_id in self._device_stream_replay_windows
+        self._device_stream_replay_windows.discard(device_id)
         finalized_at = monotonic()
 
         device = self.devices.get(device_id)
@@ -849,14 +937,21 @@ class OpusGreenNetCoordinator:
             self._log_latency_finalized(
                 "stream/device", device_id, received_at, finalized_at, len(functions)
             )
-            if self._record_confirmed_feedback(device_id, functions):
+            if self._record_confirmed_feedback(
+                device_id, functions, live=not replay_window
+            ):
                 device.last_command_error = None
             telegram = {"functions": functions}
             device.update_from_telegram(telegram)
 
             signal = f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}"
             self._mark_and_log_dispatch(
-                device, "stream/device", signal, received_at, finalized_at
+                device,
+                "stream/device",
+                signal,
+                received_at,
+                finalized_at,
+                retained=replay_window,
             )
             async_dispatcher_send(self.hass, signal, device)
 
@@ -918,6 +1013,15 @@ class OpusGreenNetCoordinator:
                 if device_id:
                     self._device_data[device_id] = device_data
                     self._pending_devices.add(device_id)
+                    # Answers this session requested; a later retained replay
+                    # must not overwrite them in the cache before discovery
+                    # finalises. Applying them still follows the resync rule.
+                    self._record_live_fields(
+                        device_id,
+                        self._function_fields(
+                            self._device_state_functions(device_data)
+                        ),
+                    )
 
             # Reset discovery timer
             if self._discovery_timer:
@@ -1095,11 +1199,20 @@ class OpusGreenNetCoordinator:
         signal: str,
         received_at: float | None,
         finalized_at: float | None,
+        *,
+        retained: bool = False,
     ) -> None:
-        """Stamp a device update and log just before dispatcher notification."""
+        """Stamp a device update and log just before dispatcher notification.
+
+        A retained replay is not a live update: it keeps the last live receipt
+        time, which the rediscovery freshness rule compares with the resync
+        request. Otherwise a replay arriving after the request would suppress
+        the fresher snapshot answer.
+        """
         dispatched_at = monotonic()
-        device.last_update_source = source
-        device.last_update_received_monotonic = received_at
+        device.last_update_source = f"{source} (retained)" if retained else source
+        if not retained:
+            device.last_update_received_monotonic = received_at
         device.last_update_finalized_monotonic = finalized_at
         device.last_update_dispatched_monotonic = dispatched_at
 
@@ -1130,6 +1243,8 @@ class OpusGreenNetCoordinator:
         property_path: str,
         payload: str,
         received_at: float | None = None,
+        *,
+        retained: bool = False,
     ) -> bool:
         """Apply stream/devices state updates immediately for known devices.
 
@@ -1155,7 +1270,7 @@ class OpusGreenNetCoordinator:
         _, device = device_entry
         value = self._parse_value(payload)
         if self._record_confirmed_feedback(
-            device_id, [{"key": state_key, "value": value}]
+            device_id, [{"key": state_key, "value": value}], live=not retained
         ):
             device.last_command_error = None
         device.update_from_telegram(
@@ -1174,7 +1289,12 @@ class OpusGreenNetCoordinator:
             "stream/devices", device_id, received_at, received_at or monotonic(), 1
         )
         self._mark_and_log_dispatch(
-            device, "stream/devices", signal, received_at, received_at
+            device,
+            "stream/devices",
+            signal,
+            received_at,
+            received_at,
+            retained=retained,
         )
         _LOGGER.debug(
             "Fast stream/devices state update for %s: %s=%r",
@@ -1849,9 +1969,19 @@ class OpusGreenNetCoordinator:
         return expected
 
     def _record_confirmed_feedback(
-        self, device_id: str, functions: Sequence[WireFunction]
+        self,
+        device_id: str,
+        functions: Sequence[WireFunction],
+        *,
+        live: bool = True,
     ) -> bool:
-        """Confirm only reported fields on their own channel, including during ACK."""
+        """Confirm only reported fields on their own channel, including during ACK.
+
+        ``live`` is False for retained values. They keep their reconciliation
+        accounting (A1) but cannot confirm delivery of a deferred command.
+        """
+        if live:
+            self._clear_delivered_deferred(device_id, functions)
         confirmed = self._confirmed_fields_by_channel(functions)
         for channel_id, fields in confirmed.items():
             if "position" in fields:
@@ -1866,6 +1996,270 @@ class OpusGreenNetCoordinator:
             if not expected:
                 self._cancel_reconciliation_queries(device_id, channel_id)
         return bool(confirmed)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Deferred delivery, ACK 201 (implementation plan, phase 11)
+    # ──────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _command_values_by_channel(
+        functions: Sequence[WireFunction],
+    ) -> dict[int, dict[str, object]]:
+        """Return the raw values of state keys and Stop, per channel."""
+        default = OpusGreenNetCoordinator._channel_from_functions(functions)
+        values: dict[int, dict[str, object]] = {}
+        for function in functions:
+            key, value = function.get("key"), function.get("value")
+            if not isinstance(key, str) or key in (KEY_CHANNEL, KEY_QUERY):
+                continue
+            if key not in KNOWN_STATE_KEYS and key != KEY_STOP:
+                continue
+            channel = EnOceanDevice._parse_number(
+                function.get("channel", default), minimum=0, integer=True
+            )
+            if channel is None or value is None:
+                continue
+            values.setdefault(int(channel), {})[key] = value
+        return values
+
+    @staticmethod
+    def _wire_value_matches(key: str, commanded: str, reported: object) -> bool:
+        """Return whether a reported value equals a commanded wire value."""
+        if key in NUMERIC_COMMAND_KEYS:
+            expected = EnOceanDevice._parse_number(commanded)
+            actual = EnOceanDevice._parse_number(reported)
+            return expected is not None and expected == actual
+        if isinstance(reported, bool):
+            reported = "true" if reported else "false"
+        return isinstance(reported, str) and reported == commanded
+
+    def _record_command_delivery(
+        self,
+        device: EnOceanDevice,
+        functions: Sequence[WireFunction],
+        delivery: CommandDelivery,
+        unconfirmed: dict[int, set[str]],
+    ) -> None:
+        """Track which commanded values are still queued at the gateway.
+
+        A transmitted (200) command supersedes an older deferred marker for the
+        same key; whether the gateway still delivers the older telegram later
+        cannot be observed (no request identifier). A deferred (201) command
+        records its values, except fields the device already reported while
+        the acknowledgement was awaited.
+        """
+        for channel_id, values in self._command_values_by_channel(functions).items():
+            markers = device.deferred_commands.get(channel_id, {})
+            if delivery is CommandDelivery.SENT:
+                for key in values:
+                    markers.pop(key, None)
+            else:
+                pending = unconfirmed.get(channel_id, set())
+                for key, value in values.items():
+                    if key == KEY_STOP or key in pending:
+                        # Outbound values are always wire strings.
+                        markers[key] = str(value)
+            if markers:
+                device.deferred_commands[channel_id] = markers
+            else:
+                device.deferred_commands.pop(channel_id, None)
+
+    def _clear_delivered_deferred(
+        self, device_id: str, functions: Sequence[WireFunction]
+    ) -> None:
+        """Clear deferred markers whose value the device or gateway reported.
+
+        Called for live device reports and for the gateway's outbound telegram,
+        which shows that a queued telegram was finally transmitted. A report
+        with a different value leaves the marker in place.
+        """
+        device = self.devices.get(device_id)
+        if device is None or not device.deferred_commands:
+            return
+        for channel_id, values in self._command_values_by_channel(functions).items():
+            markers = device.deferred_commands.get(channel_id)
+            if not markers:
+                continue
+            for key, reported in values.items():
+                commanded = markers.get(key)
+                if commanded is not None and self._wire_value_matches(
+                    key, commanded, reported
+                ):
+                    markers.pop(key)
+            if not markers:
+                device.deferred_commands.pop(channel_id, None)
+
+    def _handle_deferred_command(
+        self,
+        device: EnOceanDevice,
+        functions: Sequence[WireFunction],
+        unconfirmed: dict[int, set[str]],
+        started_movements: dict[int, CoverMovement],
+    ) -> None:
+        """Apply SoftSmartAck semantics without assuming or polling (finding O1).
+
+        The telegram has not reached the device yet, so no travel estimate
+        runs and no status query is scheduled for this command: a query would
+        itself wait for the device and add radio traffic without confirming
+        anything (A1). When the gateway finally transmits, its outbound
+        telegram follows the existing bridge-native path, which applies the
+        values optimistically and schedules the usual two status checks.
+        """
+        device_id = device.device_id
+        for channel_id, movement in started_movements.items():
+            key = (device_id, channel_id)
+            if self._cover_movements.get(key) is movement:
+                self._clear_cover_movement(device_id, channel_id)
+            # Starting the movement stopped the timers of fields still
+            # unconfirmed from earlier accepted commands. Restore them; this
+            # command's own fields are not added.
+            if self._pending_reconciliation_fields.get(
+                key
+            ) and not self._pending_reconciliation_queries.get(key):
+                self._schedule_reconciliation_queries(device_id, channel_id)
+        self._record_command_delivery(
+            device, functions, CommandDelivery.DEFERRED, unconfirmed
+        )
+        _LOGGER.debug(
+            "OPUS gateway deferred delivery of a command to %s (SoftSmartAck); "
+            "pending values: %s",
+            device_id,
+            device.deferred_commands,
+        )
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Field provenance for retained replays (implementation plan, phase 10)
+    # ──────────────────────────────────────────────────────────────────────
+
+    @callback
+    def _arm_replay_guard(self) -> None:
+        """Enable replay protection once every stream wildcard is subscribed."""
+        if len(self._stream_topics) == len(self._stream_subscriptions()):
+            self._replay_guard_armed = True
+
+    @staticmethod
+    def _function_fields(functions: Sequence[WireFunction]) -> set[tuple[int, str]]:
+        """Resolve state functions to (channel, key) like feedback matching."""
+        default = OpusGreenNetCoordinator._channel_from_functions(functions)
+        fields: set[tuple[int, str]] = set()
+        for function in functions:
+            key = function.get("key")
+            if not isinstance(key, str) or key == KEY_CHANNEL or key in BUTTON_KEYS:
+                continue
+            channel = EnOceanDevice._parse_number(
+                function.get("channel", default), minimum=0, integer=True
+            )
+            if channel is not None:
+                fields.add((int(channel), key))
+        return fields
+
+    def _record_live_fields(self, device_id: str, fields: set[tuple[int, str]]) -> None:
+        """Remember fields this armed session received live or requested."""
+        if self._replay_guard_armed and fields:
+            self._live_fields.setdefault(device_id, set()).update(fields)
+
+    def _record_live_property(self, device_id: str, property_path: str) -> None:
+        """Remember the field that a live flattened value message has set."""
+        if (field := self._property_field(device_id, property_path)) is not None:
+            self._record_live_fields(device_id, {field})
+
+    def _property_field(
+        self, device_id: str, property_path: str
+    ) -> tuple[int, str] | None:
+        """Resolve a flattened value path to the (channel, key) it sets.
+
+        Resolved are fast-path scalars, named known states and the value of an
+        indexed state whose key is known from the cached device model or the
+        current delta window; the channel follows _indexed_changed_functions.
+        Metadata, keys, channel selectors, buttons and configuration return
+        None, so they are never treated as stale.
+        """
+        if property_path in FAST_PATH_PROPERTIES:
+            return 0, property_path
+        parts = property_path.split("/")
+        if len(parts) == 2 and parts[0] == "states" and not parts[1].isdigit():
+            return (0, parts[1]) if parts[1] in KNOWN_STATE_KEYS else None
+        if (
+            len(parts) != 3
+            or parts[0] not in INDEXED_STATE_CONTAINERS
+            or not parts[1].isdigit()
+            or parts[2] != "value"
+        ):
+            return None
+        container, index = parts[0], int(parts[1])
+        cached: list[object] = list(
+            as_list(self._device_data.get(device_id, {}).get(container)) or []
+        )
+        device = self.devices.get(device_id)
+        if (
+            container == "transmitModes"
+            and device is not None
+            and device.is_smoke_detector
+        ):
+            cached = self._rwm_transmit_modes(cached)
+        buffered: list[object] = list(
+            as_list(self._device_stream_data.get(device_id, {}).get(container)) or []
+        )
+
+        def entry(position: int) -> dict[str, object]:
+            merged: dict[str, object] = {}
+            for source in (cached, buffered):
+                if position < len(source) and isinstance(
+                    item := source[position], dict
+                ):
+                    merged.update(item)
+            return merged
+
+        channel: object = 0
+        for position in range(index):
+            if (current := entry(position)).get("key") == KEY_CHANNEL:
+                channel = current.get("value")
+        target = entry(index)
+        key = target.get("key")
+        if not isinstance(key, str) or key in ("", KEY_CHANNEL, *BUTTON_KEYS):
+            return None
+        parsed = EnOceanDevice._parse_number(
+            target.get("channel", channel), minimum=0, integer=True
+        )
+        return None if parsed is None else (int(parsed), key)
+
+    def _drop_stale_replay(
+        self, source: str, device_id: str, property_path: str, payload: str
+    ) -> bool:
+        """Discard a retained value for a field this session already knows.
+
+        Within one armed session every gateway publication reaches the
+        coordinator live, so a retained replay of a field that already has a
+        live value (or an answer to this session's request) cannot be newer.
+        The stale value is neither applied nor written to the cached device
+        model. Feedback accounting is unchanged (A1): the replay still counts
+        for pending reconciliation exactly as it did before phase 10.
+        """
+        if not self._replay_guard_armed:
+            return False
+        known = self._live_fields.get(device_id)
+        if not known:
+            return False
+        field = self._property_field(device_id, property_path)
+        if field is None or field not in known:
+            return False
+        channel, key = field
+        device = self.devices.get(device_id)
+        if device is not None and self._record_confirmed_feedback(
+            device_id,
+            [{"channel": channel, "key": key, "value": self._parse_value(payload)}],
+            live=False,
+        ):
+            device.last_command_error = None
+        _LOGGER.debug(
+            "Ignoring retained %s replay for %s channel %d %s: field already "
+            "updated live in this session",
+            source,
+            device_id,
+            channel,
+            key,
+        )
+        return True
 
     def _apply_initial_state(self, device: EnOceanDevice, data: WireMapping) -> None:
         """Apply initial state from device discovery data."""
@@ -2108,6 +2502,10 @@ class OpusGreenNetCoordinator:
             )
         if not is_outbound_command:
             self._record_confirmed_feedback(device_id, functions)
+        else:
+            # The gateway transmitted the telegram now, e.g. a SoftSmartAck
+            # delivery: that value is no longer queued.
+            self._clear_delivered_deferred(device_id, functions)
 
         update_source = (
             "stream/telegram/to" if is_outbound_command else "stream/telegram/from"
@@ -2159,10 +2557,11 @@ class OpusGreenNetCoordinator:
                 len(functions),
                 functions,
             )
+        applied_functions = functions
         if is_outbound_command:
             estimated = self._start_cover_commands(device, functions)
             default_channel = self._channel_from_functions(functions)
-            telegram["functions"] = [
+            applied_functions = [
                 function
                 for function in functions
                 if not (
@@ -2175,7 +2574,10 @@ class OpusGreenNetCoordinator:
                     in estimated
                 )
             ]
+            telegram["functions"] = applied_functions
         device.update_from_telegram(telegram)
+        # Telegrams are always live here (retained ones are discarded above).
+        self._record_live_fields(device_id, self._function_fields(applied_functions))
         if not is_outbound_command and self._has_operational_state(functions):
             device.last_command_error = None
 
@@ -2208,7 +2610,7 @@ class OpusGreenNetCoordinator:
         *,
         background: bool = False,
         still_needed: Callable[[], bool] | None = None,
-    ) -> None:
+    ) -> CommandDelivery:
         """Send a command to a device using JSON state message.
 
         All requests pass the transport's global send queue (one in flight).
@@ -2216,6 +2618,9 @@ class OpusGreenNetCoordinator:
         dispatched when no user command or interactive query is waiting.
         ``still_needed`` (background only) is checked right before publish; a
         superseded check is dropped without being sent.
+
+        Returns how the gateway accepted the command. ``DEFERRED`` (201) means
+        the telegram is queued: callers must not assume the commanded state.
         """
         topic = TOPIC_PUT_STATE.format(
             base=TOPIC_BASE, eag_id=self.eag_id, device_id=device_id
@@ -2269,7 +2674,7 @@ class OpusGreenNetCoordinator:
         self._command_waiters[device_id] = self._command_waiters.get(device_id, 0) + 1
         try:
             try:
-                await self._requests.async_request(
+                response = await self._requests.async_request(
                     topic,
                     f"{TOPIC_BASE}/{self.eag_id}/putAnswer/devices/{device_id}/state",
                     device_id,
@@ -2291,7 +2696,14 @@ class OpusGreenNetCoordinator:
                     "status query" if is_query else "command",
                 )
                 raise request_error("request_timeout", device_id) from err
+            # The transport accepted only 200 or 201 (decode_response).
+            delivery = (
+                CommandDelivery.DEFERRED
+                if response_status(response) == ACK_STATUS_DEFERRED
+                else CommandDelivery.SENT
+            )
             if device is not None:
+                unconfirmed_by_channel: dict[int, set[str]] = {}
                 for channel_id, fields in fields_by_channel.items():
                     unconfirmed = {
                         field
@@ -2302,13 +2714,24 @@ class OpusGreenNetCoordinator:
                         == revisions[channel_id, field]
                     }
                     if unconfirmed:
-                        self._schedule_reconciliation_queries(
-                            device_id, channel_id, fields=unconfirmed
-                        )
+                        unconfirmed_by_channel[channel_id] = unconfirmed
+                if delivery is CommandDelivery.DEFERRED:
+                    self._handle_deferred_command(
+                        device, functions, unconfirmed_by_channel, started_movements
+                    )
+                    return delivery
+                self._record_command_delivery(
+                    device, functions, delivery, unconfirmed_by_channel
+                )
+                for channel_id, unconfirmed in unconfirmed_by_channel.items():
+                    self._schedule_reconciliation_queries(
+                        device_id, channel_id, fields=unconfirmed
+                    )
                 for channel_id, movement in started_movements.items():
                     movement.accepted = True
                     if movement.elapsed:
                         self._finish_cover_movement(device_id, channel_id, movement)
+            return delivery
         except BaseException:
             for channel_id, movement in started_movements.items():
                 if self._cover_movements.get((device_id, channel_id)) is movement:
@@ -2340,7 +2763,7 @@ class OpusGreenNetCoordinator:
         channel: int = 0,
         brightness: int | None = None,
         is_dimmable: bool = False,
-    ) -> None:
+    ) -> CommandDelivery:
         """Turn on a switch or light."""
         functions: list[WireFunction]
         if brightness is not None:
@@ -2352,14 +2775,14 @@ class OpusGreenNetCoordinator:
             functions = [{"key": "switch", "value": "on"}]
 
         functions = self._with_channel_if_needed(device_id, functions, channel)
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
     async def async_turn_off(
         self,
         device_id: str,
         channel: int = 0,
         is_dimmable: bool = False,
-    ) -> None:
+    ) -> CommandDelivery:
         """Turn off a switch or light."""
         functions: list[WireFunction]
         if is_dimmable:
@@ -2368,37 +2791,39 @@ class OpusGreenNetCoordinator:
         else:
             functions = [{"key": "switch", "value": "off"}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
     async def async_set_cover_position(
         self,
         device_id: str,
         position: int,
         channel: int = 0,
-    ) -> None:
+    ) -> CommandDelivery:
         """Set OPUS position (0 = open, 100 = closed)."""
         functions: list[WireFunction] = [{"key": "position", "value": str(position)}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
     async def async_set_cover_tilt(
         self,
         device_id: str,
         tilt: int,
         channel: int = 0,
-    ) -> None:
+    ) -> CommandDelivery:
         """Set cover tilt angle."""
         functions: list[WireFunction] = [{"key": "angle", "value": str(tilt)}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
-    async def async_stop_cover(self, device_id: str, channel: int = 0) -> None:
+    async def async_stop_cover(
+        self, device_id: str, channel: int = 0
+    ) -> CommandDelivery:
         """Stop cover movement."""
         self._clear_cover_movement(device_id, channel)
         self._cancel_reconciliation_queries(device_id, channel)
         functions: list[WireFunction] = [{"key": KEY_STOP, "value": "true"}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
     async def async_query_device_status(
         self,
@@ -2407,16 +2832,17 @@ class OpusGreenNetCoordinator:
         *,
         background: bool = False,
         still_needed: Callable[[], bool] | None = None,
-    ) -> None:
+    ) -> CommandDelivery:
         """Query the current device status."""
         functions: list[WireFunction] = [{"key": KEY_QUERY, "value": "status"}]
         functions = self._with_channel_if_needed(device_id, functions, channel)
         if still_needed is None:
-            await self.async_send_command(device_id, functions, background=background)
-        else:
-            await self.async_send_command(
-                device_id, functions, background=background, still_needed=still_needed
+            return await self.async_send_command(
+                device_id, functions, background=background
             )
+        return await self.async_send_command(
+            device_id, functions, background=background, still_needed=still_needed
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # Climate commands
@@ -2426,26 +2852,26 @@ class OpusGreenNetCoordinator:
         self,
         device_id: str,
         temperature: float,
-    ) -> None:
+    ) -> CommandDelivery:
         """Set the temperature setpoint for a climate device."""
         functions = [{"key": "temperatureSetpoint", "value": str(temperature)}]
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
     async def async_set_climate_mode(
         self,
         device_id: str,
         mode: str,
-    ) -> None:
+    ) -> CommandDelivery:
         """Set the heater mode for a climate device."""
         functions = [{"key": "heaterMode", "value": mode}]
-        await self.async_send_command(device_id, functions)
+        return await self.async_send_command(device_id, functions)
 
     async def async_query_climate_status(
         self,
         device_id: str,
-    ) -> None:
+    ) -> CommandDelivery:
         """Query the current status of a climate device."""
-        await self.async_query_device_status(device_id)
+        return await self.async_query_device_status(device_id)
 
     # ──────────────────────────────────────────────────────────────────────
     # Device profile queries
@@ -2517,6 +2943,10 @@ class OpusGreenNetCoordinator:
     def get_device(self, device_id: str) -> EnOceanDevice | None:
         """Get a device by ID."""
         return self.devices.get(device_id)
+
+    def late_answer_diagnostics(self, owner: str) -> dict[str, int]:
+        """Return late-answer counters of a device or the gateway (diagnostics)."""
+        return self._requests.late_answer_diagnostics(owner)
 
     def get_devices_by_type(self, entity_type: str) -> list[EnOceanDevice]:
         """Get all devices of a specific entity type."""
