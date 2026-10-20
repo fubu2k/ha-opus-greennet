@@ -62,8 +62,9 @@ class FakeGateway:
     ``status`` (per path, a forced HTTP status), ``delays`` (per path, seconds
     before answering), ``responses`` (per path, a JSON body override),
     ``http_status`` (per path, the HTTP status line of an otherwise unchanged
-    answer, so it can differ from ``header.httpStatus`` in the body) and
-    ``accept_auth`` (reject every request with 401 when False).
+    answer, so it can differ from ``header.httpStatus`` in the body),
+    ``close_after_snapshot`` (end every event stream right after its device
+    list) and ``accept_auth`` (reject every request with 401 when False).
     """
 
     def __init__(self, eurid: str = EURID, password: str = PASSWORD) -> None:
@@ -81,6 +82,7 @@ class FakeGateway:
         self.requests: list[tuple[str, str, Any]] = []
         self.on_request: Callable[[str, str, Any], Awaitable[None]] | None = None
         self.stream_preamble: list[str] = []
+        self.close_after_snapshot = False
         self._streams: list[asyncio.Queue[str | None]] = []
         self._stream_connected = asyncio.Event()
         self._stopping = False
@@ -257,6 +259,10 @@ class FakeGateway:
             await response.write(text.encode())
         # Pretty-printed like the real gateway, without delimiters.
         await response.write(json.dumps(self.devices_document(), indent=2).encode())
+        if self.close_after_snapshot:
+            # A gateway that ends every stream right after the device list.
+            await response.write_eof()
+            return response
         self._streams.append(queue)
         self._stream_connected.set()
         try:

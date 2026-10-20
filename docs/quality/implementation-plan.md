@@ -318,6 +318,15 @@ body reports 200 (decision D3, disclosed in the report). MQTT path untouched
 (A1–A5). Merged into `feature/rest-api-integration` via PR #18 (`1c30105`);
 CI run `39423057097` green on the merged head.
 
+Status update 2026-10-20 (phase 18 = REST plan R4): base
+`feature/rest-api-integration` `e5b609e`. Branch
+`feat/opus-r4-stream-lifecycle`, report `phases/phase-18.md`. REST event
+stream lifecycle: bounded exponential backoff with jitter after every stream
+end, short-lived streams (< 10 s) count as failures (B-2), size check for
+complete documents (B-3), connection generation and `aclosing` for replaced
+readers. REST behaviour changes disclosed under decision D3. MQTT path
+untouched (A1–A5). Not yet merged; CI pending.
+
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
 phase 8 -> phase 9 -> resumed phase 6 -> phases 10, 11, 12 -> phase 13.

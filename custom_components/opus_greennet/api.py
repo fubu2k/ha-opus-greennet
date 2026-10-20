@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import base64
 import codecs
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, Mapping
 from math import isfinite
 from typing import Final
 from urllib.parse import quote
@@ -195,6 +195,8 @@ class JsonDocumentSplitter:
     The gateway writes pretty-printed objects without any delimiter between
     them. The splitter tracks nesting and string state character by character,
     so each document is parsed exactly once and partial chunks are buffered.
+    Every document is limited to ``max_size`` characters, whether it arrives in
+    one chunk or grows across several (phase R4).
     """
 
     def __init__(self, max_size: int = MAX_DOCUMENT_SIZE) -> None:
@@ -235,10 +237,15 @@ class JsonDocumentSplitter:
                 self._depth -= 1
                 if self._depth == 0:
                     self._parts.append(text[start : index + 1])
-                    documents.append("".join(self._parts))
+                    document = "".join(self._parts)
                     self._parts.clear()
                     self._size = 0
                     start = None
+                    # A complete document inside one chunk is bounded too, not
+                    # only a remainder growing across chunks (finding B-3).
+                    if len(document) > self._max_size:
+                        raise OpusResponseError("An event stream document is too large")
+                    documents.append(document)
         if start is not None:
             tail = text[start:]
             self._parts.append(tail)
@@ -321,8 +328,11 @@ class OpusGatewayClient:
             err.http_status = response.status
             raise
 
-    async def async_stream(self) -> AsyncIterator[JsonObject]:
-        """Yield every document of ``GET /devices/stream`` until it ends."""
+    async def async_stream(self) -> AsyncGenerator[JsonObject]:
+        """Yield every document of ``GET /devices/stream`` until it ends.
+
+        Closing the generator (``aclose``) releases the HTTP response at once.
+        """
         splitter = JsonDocumentSplitter()
         try:
             async with self._session.get(
