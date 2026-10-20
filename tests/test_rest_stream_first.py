@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_STATE_CHANGED, EVENT_STATE_REPORTED
+from homeassistant.core import Event, HomeAssistant, callback
 
 from custom_components.opus_greennet.api import (
     OpusAuthError,
@@ -390,3 +392,44 @@ async def test_forgotten_device_drops_its_telegram_time() -> None:
         coord._handle_telegram(_report(-55))  # noqa: SLF001
         coord.async_forget_device(SWITCH)
     assert SWITCH not in coord._telegram_metadata_at  # noqa: SLF001
+
+
+# ── Initial write as the baseline (phase 21, port review) ─────────────────
+
+
+async def test_unchanged_first_telegram_does_not_rewrite_entities(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    """Without a list after entity creation, the initial write is the baseline."""
+    gateway.devices = [_switch("on")]
+    await setup_rest_bridge(hass, gateway)
+    entity_id = await wait_for_entity(hass, "switch", f"AABB0011_{SWITCH}")
+    await hass.async_block_till_done()
+    writes: list[str] = []
+
+    @callback
+    def record(event: Event) -> None:
+        if event.data["entity_id"] == entity_id:
+            writes.append(event.event_type)
+
+    for event_type in (EVENT_STATE_CHANGED, EVENT_STATE_REPORTED):
+        hass.bus.async_listen(event_type, record)
+    # The same state again: no write.
+    await gateway.push(telegram(SWITCH, [{"key": "switch", "value": "on"}]))
+    await hass.async_block_till_done()
+    assert writes == []
+    # A real change is written once.
+    await gateway.push(telegram(SWITCH, [{"key": "switch", "value": "off"}]))
+    await wait_until(lambda: hass.states.get(entity_id).state == "off")
+    assert writes == [EVENT_STATE_CHANGED]
+
+
+def test_only_the_rest_coordinator_opts_into_the_initial_baseline() -> None:
+    """MQTT entities keep their behaviour (guardrail A5/A1 scope, section 0.1)."""
+    # Read the MQTT coordinator's source instead of importing it, so this test
+    # does not load the MQTT integration (test_rest_only_decoupling).
+    integration = Path(__file__).parents[1] / "custom_components" / "opus_greennet"
+    assert OpusGreenNetRestCoordinator.initial_write_is_baseline is True
+    assert "initial_write_is_baseline" not in (
+        integration / "coordinator.py"
+    ).read_text(encoding="utf-8")

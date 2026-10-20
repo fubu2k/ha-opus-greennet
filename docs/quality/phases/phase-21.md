@@ -179,7 +179,26 @@ Conclusions:
   adjusted (`test_setup_takes_state_from_the_stream`,
   `test_each_start_reads_the_device_list_once`).
 
-### 7.3 Other notes
+### 7.3 Follow-up from the upstream port review (branch `fix/opus-r5-initial-write-baseline`)
+
+Porting R3–R5 to the upstream 1.0 beta (`kegelmeier/ha-opus-greennet`
+`feat/rest-beta-100`, port branch `fubu2k:feat/rest-hardening-from-fork`, CI
+green) exposed two points that apply to this fork as well:
+
+- The configuration read after setup (7.2) is now **awaited** inside
+  `async_setup` instead of running as a background task: entities start with
+  their movement times, and request counts are deterministic. A failure is
+  only logged (the 30 min refresh tries again); setup does not fail on it.
+- **Redundant first write (finding R5-H2):** with the stream-first start no
+  device list is dispatched after the entities are created, so the first
+  telegram repeating the current state rewrote every entity of the device
+  once. REST entities now take their initial write as the projection
+  baseline (`entity.py`, enabled by `OpusGreenNetRestCoordinator.
+  initial_write_is_baseline`; transport-bound per section 0.1, MQTT entities
+  unchanged). Tests: `test_unchanged_first_telegram_does_not_rewrite_entities`,
+  `test_only_the_rest_coordinator_opts_into_the_initial_baseline`.
+
+### 7.4 Other notes
 
 - `homekitQR` was still unredacted in the second file: that build predates
   the redaction fix (PR #27, merged afterwards).
