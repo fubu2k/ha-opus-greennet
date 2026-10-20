@@ -17,7 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import OpusGreenNetConfigEntry
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL
-from .coordinator import (
+from .domain import (
     SIGNAL_DEVICE_DISCOVERED,
     CommandDelivery,
 )

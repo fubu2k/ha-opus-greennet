@@ -69,7 +69,7 @@ from .const import (
     RAMPING_MODE_FADE,
     RAMPING_MODE_SWITCH,
 )
-from .coordinator import (
+from .domain import (
     ACK_STATUS_DEFERRED,
     GATEWAY_HEALTH_INTERVAL,
     OUTBOUND_STATE_RECONCILIATION_DELAYS,
@@ -80,9 +80,9 @@ from .coordinator import (
     SUPERSEDED,
     CommandDelivery,
     CoverMovement,
+    request_error,
 )
 from .enocean_device import EnOceanDevice
-from .mqtt_transport import request_error
 from .wire import JsonObject, WireFunction, WireMapping, as_object, object_items
 
 _LOGGER = logging.getLogger(__name__)

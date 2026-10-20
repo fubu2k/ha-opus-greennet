@@ -22,7 +22,7 @@ from homeassistant.util.color import brightness_to_value, value_to_brightness
 
 from . import OpusGreenNetConfigEntry
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL
-from .coordinator import (
+from .domain import (
     SIGNAL_DEVICE_DISCOVERED,
     CommandDelivery,
 )

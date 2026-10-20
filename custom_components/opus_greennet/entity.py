@@ -16,11 +16,11 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_registry import EntityRegistry
 
 from .const import DOMAIN
-from .coordinator import (
+from .diagnostics import log_entity_state_write
+from .domain import (
     SIGNAL_AVAILABILITY_UPDATE,
     SIGNAL_DEVICE_STATE_UPDATE,
 )
-from .diagnostics import log_entity_state_write
 from .enocean_device import EnOceanDevice
 from .transport import OpusCoordinator
 
