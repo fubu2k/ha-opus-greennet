@@ -15,6 +15,7 @@ from . import OpusGreenNetConfigEntry
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL
 from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
+    CommandDelivery,
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanDevice
@@ -113,13 +114,24 @@ class OpusGreenNetSwitch(OpusGreenNetEntity, SwitchEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         snapshot = self._device.snapshot_channel_state(self._channel_id)
-        await self._coordinator.async_turn_on(self._device.device_id, self._channel_id)
-        if self._device.apply_switch_estimate(snapshot, True):
+        delivery = await self._coordinator.async_turn_on(
+            self._device.device_id, self._channel_id
+        )
+        # Queued for a sleeping device (201): keep the reported state.
+        if (
+            delivery is not CommandDelivery.DEFERRED
+            and self._device.apply_switch_estimate(snapshot, True)
+        ):
             self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         snapshot = self._device.snapshot_channel_state(self._channel_id)
-        await self._coordinator.async_turn_off(self._device.device_id, self._channel_id)
-        if self._device.apply_switch_estimate(snapshot, False):
+        delivery = await self._coordinator.async_turn_off(
+            self._device.device_id, self._channel_id
+        )
+        if (
+            delivery is not CommandDelivery.DEFERRED
+            and self._device.apply_switch_estimate(snapshot, False)
+        ):
             self.async_write_ha_state()

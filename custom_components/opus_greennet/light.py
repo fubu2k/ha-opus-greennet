@@ -24,6 +24,7 @@ from . import OpusGreenNetConfigEntry
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL
 from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
+    CommandDelivery,
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanDevice
@@ -154,7 +155,7 @@ class OpusGreenNetLight(OpusGreenNetEntity, LightEntity):
 
         if brightness is not None and self._device.is_dimmable:
             brightness_pct = max(1, round(brightness_to_value((1, 100), brightness)))
-            await self._coordinator.async_turn_on(
+            delivery = await self._coordinator.async_turn_on(
                 self._device.device_id,
                 self._channel_id,
                 brightness_pct,
@@ -162,12 +163,15 @@ class OpusGreenNetLight(OpusGreenNetEntity, LightEntity):
                 transition=transition,
             )
         else:
-            await self._coordinator.async_turn_on(
+            delivery = await self._coordinator.async_turn_on(
                 self._device.device_id,
                 self._channel_id,
                 is_dimmable=self._device.is_dimmable,
                 transition=transition,
             )
+        if delivery is CommandDelivery.DEFERRED:
+            # Queued for a sleeping device (201): keep the reported state.
+            return
 
         if self._device.is_dimmable:
             applied = self._device.apply_dim_estimate(
@@ -181,12 +185,14 @@ class OpusGreenNetLight(OpusGreenNetEntity, LightEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
         snapshot = self._device.snapshot_channel_state(self._channel_id)
-        await self._coordinator.async_turn_off(
+        delivery = await self._coordinator.async_turn_off(
             self._device.device_id,
             self._channel_id,
             is_dimmable=self._device.is_dimmable,
             transition=bool(kwargs.get(ATTR_TRANSITION)),
         )
+        if delivery is CommandDelivery.DEFERRED:
+            return
         if self._device.is_dimmable:
             applied = self._device.apply_dim_estimate(snapshot, 0)
         else:

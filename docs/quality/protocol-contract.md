@@ -15,7 +15,11 @@ Verification legend: **[Code]** read from source, **[Test]** covered by tests,
   password = gateway EURID in upper case. Wrong credentials: HTTP 401 with an
   empty body. **[HW][Code][Test]**
 - Every JSON answer carries `header.httpStatus`; `200` and `201` (SoftSmartAck)
-  count as success. Error answers carry `header.code` and `header.message`
+  count as success. `201` means the gateway queued a state command until the
+  sleeping device wakes up and fetches it: lights, switches and covers keep
+  their reported state (no estimate, no travel estimate) and no status checks
+  follow; the device's report arrives on the stream later. **[Ref][Code][Test]**
+  Which devices answer `201` is unverified on hardware. Error answers carry `header.code` and `header.message`
   (e.g. 400 `no matching group found` for an unknown function, 500
   `internal error (java.lang.NullPointerException)` for an unknown device).
   `decode_response` rejects anything else; the gateway message becomes the

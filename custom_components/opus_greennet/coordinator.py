@@ -22,6 +22,7 @@ import logging
 from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 from time import monotonic, time
 
 from homeassistant.core import HomeAssistant, callback
@@ -43,6 +44,7 @@ from .api import (
     OpusTimeoutError,
     PriorityLock,
     gateway_uptime_value,
+    response_status,
 )
 from .const import (
     COVER_MOVEMENT_GRACE_SECONDS,
@@ -65,6 +67,20 @@ _LOGGER = logging.getLogger(__name__)
 # Dispatcher signals
 SIGNAL_DEVICE_REMOVED = f"{DOMAIN}_device_removed"
 SIGNAL_DEVICE_DISCOVERED = f"{DOMAIN}_device_discovered"
+
+# Gateway answer to a state command.
+SOFT_SMART_ACK_STATUS = 201
+
+
+class CommandDelivery(StrEnum):
+    """How the gateway handled an accepted state command."""
+
+    SENT = "sent"  # 200: the telegram went out over the radio.
+    # 201 (SoftSmartAck): queued until the sleeping device wakes up and asks
+    # for it. The device has not received anything yet.
+    DEFERRED = "deferred"
+
+
 SIGNAL_DEVICE_STATE_UPDATE = f"{DOMAIN}_device_state_update"
 SIGNAL_AVAILABILITY_UPDATE = f"{DOMAIN}_availability_update"
 
@@ -983,13 +999,17 @@ class OpusGreenNetCoordinator:
         *,
         background: bool = False,
         still_needed: Callable[[], bool] | None = None,
-    ) -> None:
+    ) -> CommandDelivery:
         """Send state functions to a device and wait for the acknowledgement.
 
         ``background`` marks delayed reconciliation queries, which are only
         sent when no user command or interactive query is waiting.
         ``still_needed`` (background only) is checked right before sending; a
         superseded check is dropped without being sent.
+
+        A deferred command (status 201) gets no estimate and no status
+        queries: until the device fetches the telegram, a query would be
+        deferred as well, and the stream delivers the device's report later.
         """
         device = self.get_device(device_id)
         fields_by_channel = protocol.command_fields_by_channel(functions, device)
@@ -1028,7 +1048,7 @@ class OpusGreenNetCoordinator:
         self._command_waiters[device_id] = self._command_waiters.get(device_id, 0) + 1
         try:
             try:
-                await self._async_radio_request(
+                response = await self._async_radio_request(
                     device_id,
                     lambda: self.client.async_put(
                         OpusGatewayClient.device_path(device_id, "state"), body
@@ -1051,6 +1071,22 @@ class OpusGreenNetCoordinator:
                         "status query" if is_query else "command",
                     )
                 raise
+            delivery = (
+                CommandDelivery.DEFERRED
+                if response_status(response) == SOFT_SMART_ACK_STATUS
+                else CommandDelivery.SENT
+            )
+            if delivery is CommandDelivery.DEFERRED:
+                _LOGGER.debug(
+                    "OPUS gateway queued the command for %s until the device "
+                    "wakes up (SoftSmartAck)",
+                    device_id,
+                )
+                for channel_id, movement in started_movements.items():
+                    if self._cover_movements.get((device_id, channel_id)) is movement:
+                        self._clear_cover_movement(device_id, channel_id)
+                started_movements.clear()
+                fields_by_channel = {}
             if device is not None:
                 if device.last_command_error is not None:
                     device.last_command_error = None
@@ -1072,6 +1108,7 @@ class OpusGreenNetCoordinator:
                     movement.accepted = True
                     if movement.elapsed:
                         self._finish_cover_movement(device_id, channel_id, movement)
+            return delivery
         except BaseException:
             for channel_id, movement in started_movements.items():
                 if self._cover_movements.get((device_id, channel_id)) is movement:
@@ -1126,7 +1163,7 @@ class OpusGreenNetCoordinator:
         is_dimmable: bool = False,
         *,
         transition: bool = False,
-    ) -> None:
+    ) -> CommandDelivery:
         """Turn on a switch or light.
 
         Dimmers use dimValue, not switch (OPUS reference section 5.3).
@@ -1141,7 +1178,7 @@ class OpusGreenNetCoordinator:
             )
         else:
             functions = [{"key": "switch", "value": "on"}]
-        await self.async_send_command(
+        return await self.async_send_command(
             device_id, self._with_channel_if_needed(device_id, functions, channel)
         )
 
@@ -1152,14 +1189,14 @@ class OpusGreenNetCoordinator:
         is_dimmable: bool = False,
         *,
         transition: bool = False,
-    ) -> None:
+    ) -> CommandDelivery:
         """Turn off a switch or light (dimmers: dimValue 0)."""
         functions: list[WireFunction]
         if is_dimmable:
             functions = self._dim_functions(device_id, 0, transition=transition)
         else:
             functions = [{"key": "switch", "value": "off"}]
-        await self.async_send_command(
+        return await self.async_send_command(
             device_id, self._with_channel_if_needed(device_id, functions, channel)
         )
 
@@ -1168,10 +1205,10 @@ class OpusGreenNetCoordinator:
         device_id: str,
         position: int,
         channel: int = 0,
-    ) -> None:
+    ) -> CommandDelivery:
         """Set OPUS position (0 = open, 100 = closed)."""
         functions: list[WireFunction] = [{"key": "position", "value": str(position)}]
-        await self.async_send_command(
+        return await self.async_send_command(
             device_id, self._with_channel_if_needed(device_id, functions, channel)
         )
 
@@ -1180,19 +1217,21 @@ class OpusGreenNetCoordinator:
         device_id: str,
         tilt: int,
         channel: int = 0,
-    ) -> None:
+    ) -> CommandDelivery:
         """Set cover tilt angle."""
         functions: list[WireFunction] = [{"key": "angle", "value": str(tilt)}]
-        await self.async_send_command(
+        return await self.async_send_command(
             device_id, self._with_channel_if_needed(device_id, functions, channel)
         )
 
-    async def async_stop_cover(self, device_id: str, channel: int = 0) -> None:
+    async def async_stop_cover(
+        self, device_id: str, channel: int = 0
+    ) -> CommandDelivery:
         """Stop cover movement."""
         self._clear_cover_movement(device_id, channel)
         self._cancel_reconciliation_queries(device_id, channel)
         functions: list[WireFunction] = [{"key": KEY_STOP, "value": "true"}]
-        await self.async_send_command(
+        return await self.async_send_command(
             device_id, self._with_channel_if_needed(device_id, functions, channel)
         )
 
@@ -1203,10 +1242,10 @@ class OpusGreenNetCoordinator:
         *,
         background: bool = False,
         still_needed: Callable[[], bool] | None = None,
-    ) -> None:
+    ) -> CommandDelivery:
         """Query the current device status."""
         functions: list[WireFunction] = [{"key": KEY_QUERY, "value": "status"}]
-        await self.async_send_command(
+        return await self.async_send_command(
             device_id,
             self._with_channel_if_needed(device_id, functions, channel),
             background=background,
@@ -1217,9 +1256,9 @@ class OpusGreenNetCoordinator:
         self,
         device_id: str,
         temperature: float,
-    ) -> None:
+    ) -> CommandDelivery:
         """Set the temperature setpoint for a climate device."""
-        await self.async_send_command(
+        return await self.async_send_command(
             device_id, [{"key": "temperatureSetpoint", "value": str(temperature)}]
         )
 
@@ -1227,9 +1266,11 @@ class OpusGreenNetCoordinator:
         self,
         device_id: str,
         mode: str,
-    ) -> None:
+    ) -> CommandDelivery:
         """Set the heater mode for a climate device."""
-        await self.async_send_command(device_id, [{"key": "heaterMode", "value": mode}])
+        return await self.async_send_command(
+            device_id, [{"key": "heaterMode", "value": mode}]
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # ReCom service requests
