@@ -619,6 +619,15 @@ run `39462018715` green.
 
 ### R6 – Domain model
 
+**Status 2026-10-20:** split into R6a and R6b.
+**R6a** implemented on branch `feat/opus-r6-domain-model` (base
+`feature/rest-api-integration` `da80334`), report `phases/phase-22.md`: in-place
+update (E6, B-4 fixed) with a field classification test,
+`lastVerticalMovementTime` as a REST diagnostic value, regression tests for
+R7/R8 of section 2.7. No visible behaviour change. **R6b** (origin of the
+position, O-4 grace period) waits for the maintainer's decision; decision
+template in `phases/phase-22.md` section 8.
+
 - In-place update (E6) with a test "field list completely taken over".
 - Origin of the position (`reported`/`estimated`/`assumed`) at first only in
   diagnostics (A-5); no visible behaviour change without a decision.

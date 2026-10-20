@@ -359,6 +359,14 @@ into `feature/rest-api-integration` via PR #25 (`2d3cf9c`); CI run
 0.076 s; finding R5-H1 (stream list without cover configuration) fixed on
 `fix/opus-r5-movement-times` with one `GET /devices` right after setup.
 
+Status update 2026-10-20 (phase 22 = REST plan R6a): base
+`feature/rest-api-integration` `da80334`. Branch `feat/opus-r6-domain-model`,
+report `phases/phase-22.md`. REST device lists update the existing device in
+place (E6, B-4), last vertical run duration as a REST diagnostic value,
+regression tests R7/R8. No traffic or visible behaviour change; MQTT path
+untouched (A1–A5). R6b (position origin, grace period O-4) awaits a
+maintainer decision. Not yet merged; CI pending.
+
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
 phase 8 -> phase 9 -> resumed phase 6 -> phases 10, 11, 12 -> phase 13.

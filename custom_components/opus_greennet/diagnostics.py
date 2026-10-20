@@ -166,6 +166,10 @@ async def async_get_config_entry_diagnostics(
     coordinator = runtime_data.coordinator
 
     devices: list[dict[str, Any]] = []
+    # REST only (phase R6): last vertical run duration per channel from the
+    # device list. MQTT coordinators have no such attribute; their diagnostics
+    # keep their exact keys.
+    movement_times = getattr(coordinator, "last_vertical_movement_times", None)
     for device in coordinator.devices.values():
         devices.append(
             {
@@ -191,6 +195,10 @@ async def async_get_config_entry_diagnostics(
                 },
             }
         )
+        if isinstance(movement_times, dict):
+            devices[-1]["last_vertical_movement_time"] = dict(
+                movement_times.get(device.device_id, {})
+            )
 
     return _redact_diagnostics(
         {

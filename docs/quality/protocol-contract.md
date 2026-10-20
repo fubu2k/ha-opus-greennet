@@ -569,6 +569,16 @@ never repeated and are dropped when superseded or queued before an outage.
   gateway availability (A2, A3). HTTP 401 at runtime makes the gateway
   unavailable once and starts one reauthentication flow. **[Code][Test]**
 
+- Device lists update the existing device object in place
+  (`EnOceanDevice.apply_listed_metadata`, phase 22/R6a): only the list
+  metadata (`LISTED_METADATA_FIELDS`) is replaced; channels, deferred markers,
+  the last command error and update timestamps stay. **[Code][Test]**
+- `configuration.parameters` key `lastVerticalMovementTime` (duration of the
+  last vertical run, seconds) is kept per device and channel and shown in
+  REST diagnostics as `last_vertical_movement_time`. It is never used for
+  estimates, timers or queries and causes no request. Present only in
+  `GET /devices`, not in the streamed list. **[Upstream note][Code][Test]**
+
 ### 12.5 Acknowledgements and deferred delivery (phase 11 semantics)
 
 - `200` = transmitted, `201` = SoftSmartAck (deferred). `async_send_command`

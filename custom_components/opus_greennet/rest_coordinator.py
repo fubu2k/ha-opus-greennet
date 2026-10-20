@@ -254,6 +254,10 @@ class OpusGreenNetRestCoordinator:
         # list requested before it never replaces its signal strength and
         # last-seen time (finding B-5).
         self._telegram_metadata_at: dict[str, float] = {}
+        # Last vertical run duration per device and channel, from the device
+        # list (diagnostics only; phase R6, plan section 3.3). Never used for
+        # estimates, timers or queries.
+        self.last_vertical_movement_times: dict[str, dict[int, float]] = {}
         self._probe_task: asyncio.Task[None] | None = None
         self._refresh_task: asyncio.Task[None] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
@@ -654,8 +658,7 @@ class OpusGreenNetRestCoordinator:
             return
         self._unknown_devices.pop(device_id, None)
         existing = self.devices.get(device_id)
-        dbm = EnOceanDevice._parse_integer(data.get("dbm"))
-        device = EnOceanDevice(
+        listed = EnOceanDevice(
             device_id=device_id,
             friendly_id=protocol.metadata_text(data.get("friendlyId")) or device_id,
             eeps=object_items(data.get("eeps")),
@@ -663,38 +666,27 @@ class OpusGreenNetRestCoordinator:
             physical_device=protocol.metadata_text(data.get("physicalDevice")),
             first_seen=protocol.metadata_text(data.get("firstSeen")),
             last_seen=protocol.metadata_text(data.get("lastSeen")),
-            dbm=dbm,
+            dbm=EnOceanDevice._parse_integer(data.get("dbm")),
         )
-        if existing is not None:
-            device.channels = existing.channels
-            # A device list refreshes metadata and state, never a previous
-            # rocker occurrence.
-            device.clear_button_occurrence()
-            device.profile = existing.profile
-            device.last_update_source = existing.last_update_source
-            device.last_update_received_monotonic = (
-                existing.last_update_received_monotonic
-            )
-            device.last_update_finalized_monotonic = (
-                existing.last_update_finalized_monotonic
-            )
-            device.last_update_dispatched_monotonic = (
-                existing.last_update_dispatched_monotonic
-            )
-            device.last_command_error = existing.last_command_error
-            # Deferred (ACK 201) markers survive a device list: a snapshot is
-            # not a report that the queued telegram was delivered (phase 11).
-            device.deferred_commands = existing.deferred_commands
+        was_known = existing is not None and bool(existing.eeps)
+        if existing is None:
+            device = listed
+        else:
+            # Update in place (phase R6, E6/B-4): channels, deferred (ACK 201)
+            # markers, the last command error and update timestamps stay on the
+            # same object that entities and running commands hold.
+            device = existing
             telegram_at = self._telegram_metadata_at.get(device_id)
             newer_telegram = (
                 requested_at is not None
                 and telegram_at is not None
                 and telegram_at >= requested_at
             )
-            if dbm is None or newer_telegram:
-                device.dbm = existing.dbm
-            if not device.last_seen or newer_telegram:
-                device.last_seen = existing.last_seen
+            device.apply_listed_metadata(listed, keep_signal=newer_telegram)
+            # A device list refreshes metadata and state, never a previous
+            # rocker occurrence.
+            device.clear_button_occurrence()
+        self._record_last_movement_times(device_id, data)
         functions = (
             protocol.device_state_functions(data)
             if authoritative or existing is None
@@ -705,7 +697,7 @@ class OpusGreenNetRestCoordinator:
             if authoritative or existing is None:
                 device.last_update_source = "device list"
         self.devices[device_id] = device
-        if existing is None or not existing.eeps:
+        if not was_known:
             _LOGGER.info(
                 "Device discovered: %s (%s) - EEPs: %s - Type: %s",
                 device.friendly_id,
@@ -720,6 +712,14 @@ class OpusGreenNetRestCoordinator:
             self._dispatch_state(device)
 
     @callback
+    def _record_last_movement_times(self, device_id: str, data: JsonObject) -> None:
+        """Keep the last run durations a device list reports (diagnostics)."""
+        if durations := protocol.last_vertical_movement_times(data):
+            self.last_vertical_movement_times.setdefault(device_id, {}).update(
+                durations
+            )
+
+    @callback
     def async_forget_device(self, device_id: str) -> None:
         """Discard only this child's state and queued work, without gateway writes."""
         for did, channel_id in list(self._cover_movements):
@@ -727,6 +727,7 @@ class OpusGreenNetRestCoordinator:
                 self._clear_cover_movement(did, channel_id, notify=False)
         self.devices.pop(device_id, None)
         self._telegram_metadata_at.pop(device_id, None)
+        self.last_vertical_movement_times.pop(device_id, None)
         self._cancel_reconciliation_queries(device_id)
         self._sent_commands.pop(device_id, None)
         for key in list(self._feedback_revisions):
