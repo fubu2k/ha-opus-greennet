@@ -41,23 +41,18 @@ class OpusCoordinator(Protocol):
     @property
     def available(self) -> bool:
         """Return whether the gateway can currently be reached."""
-        ...
 
     def get_device(self, device_id: str) -> EnOceanDevice | None:
         """Return a known device of this gateway."""
-        ...
 
     def late_answer_diagnostics(self, owner: str) -> dict[str, int]:
         """Return the late-answer counters of a device or the gateway."""
-        ...
 
     def async_forget_device(self, device_id: str) -> None:
         """Forget a child device locally (registry removal)."""
-        ...
 
     async def async_unload(self) -> None:
         """Stop all work of the coordinator."""
-        ...
 
     async def async_turn_on(
         self,
@@ -67,7 +62,6 @@ class OpusCoordinator(Protocol):
         is_dimmable: bool = False,
     ) -> CommandDelivery:
         """Switch a channel on, optionally to a brightness."""
-        ...
 
     async def async_turn_off(
         self,
@@ -76,7 +70,6 @@ class OpusCoordinator(Protocol):
         is_dimmable: bool = False,
     ) -> CommandDelivery:
         """Switch a channel off."""
-        ...
 
     async def async_set_cover_position(
         self,
@@ -85,7 +78,6 @@ class OpusCoordinator(Protocol):
         channel: int = 0,
     ) -> CommandDelivery:
         """Move a cover to a Home Assistant position."""
-        ...
 
     async def async_set_cover_tilt(
         self,
@@ -94,13 +86,11 @@ class OpusCoordinator(Protocol):
         channel: int = 0,
     ) -> CommandDelivery:
         """Set the slat angle of a cover."""
-        ...
 
     async def async_stop_cover(
         self, device_id: str, channel: int = 0
     ) -> CommandDelivery:
         """Stop a moving cover."""
-        ...
 
     async def async_set_climate_setpoint(
         self,
@@ -108,7 +98,6 @@ class OpusCoordinator(Protocol):
         temperature: float,
     ) -> CommandDelivery:
         """Set the temperature setpoint of a HeatArea."""
-        ...
 
     async def async_set_climate_mode(
         self,
@@ -116,21 +105,17 @@ class OpusCoordinator(Protocol):
         mode: str,
     ) -> CommandDelivery:
         """Set the heater mode of a HeatArea."""
-        ...
 
     async def async_get_device_configuration(self, device_id: str) -> JsonObject:
         """Read the configuration of a device (explicit user action)."""
-        ...
 
     async def async_set_device_configuration(
         self, device_id: str, config: WireMapping
     ) -> None:
         """Write the configuration of a device (explicit user action)."""
-        ...
 
     async def async_get_device_parameters(self, device_id: str) -> JsonObject:
         """Read the parameters of a device (explicit user action)."""
-        ...
 
 
 def entry_transport(data: Mapping[str, object]) -> str:
