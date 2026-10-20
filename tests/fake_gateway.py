@@ -60,7 +60,9 @@ class FakeGateway:
 
     Behaviour is configured through attributes: ``devices``, ``uptime``,
     ``status`` (per path, a forced HTTP status), ``delays`` (per path, seconds
-    before answering), ``responses`` (per path, a JSON body override) and
+    before answering), ``responses`` (per path, a JSON body override),
+    ``http_status`` (per path, the HTTP status line of an otherwise unchanged
+    answer, so it can differ from ``header.httpStatus`` in the body) and
     ``accept_auth`` (reject every request with 401 when False).
     """
 
@@ -75,6 +77,7 @@ class FakeGateway:
         self.status: dict[str, int] = {}
         self.delays: dict[str, float] = {}
         self.responses: dict[str, Any] = {}
+        self.http_status: dict[str, int] = {}
         self.requests: list[tuple[str, str, Any]] = []
         self.on_request: Callable[[str, str, Any], Awaitable[None]] | None = None
         self.stream_preamble: list[str] = []
@@ -175,6 +178,13 @@ class FakeGateway:
         )
 
     async def _handle(self, request: web.Request) -> web.StreamResponse:
+        response = await self._answer_request(request)
+        path = f"/{request.match_info['path']}"
+        if (code := self.http_status.get(path)) is not None and not response.prepared:
+            response.set_status(code)
+        return response
+
+    async def _answer_request(self, request: web.Request) -> web.StreamResponse:
         path = f"/{request.match_info['path']}"
         body = await request.json() if request.can_read_body else None
         self.requests.append((request.method, path, body))
