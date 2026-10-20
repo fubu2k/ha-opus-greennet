@@ -25,13 +25,16 @@ TO_REDACT = {
     "address",
     "apikey",
     "authorization",
-    # REST system information (phase 14): base ID and HomeKit setup code.
+    # REST system information (phase 14): base ID and HomeKit setup code,
+    # also as the setup payload of the HomeKit QR code (X-HM://...), which
+    # encodes the same code and allows pairing the gateway.
     "baseid",
     "deviceid",
     "eagid",
     "eurid",
     "friendlyid",
     "homekitpin",
+    "homekitqr",
     "host",
     "hostname",
     "ip",

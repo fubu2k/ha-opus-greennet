@@ -466,8 +466,10 @@ async def test_rest_diagnostics_redact_the_connection(
     assert data["transport"] == "rest"
     assert result["gateway"]["transport"] == "rest"
     assert result["gateway"]["info"]["homekitPin"] == REDACTED
+    assert result["gateway"]["info"]["homekitQR"] == REDACTED
     clean = {"unanswered_requests": 0, "possibly_late_answers": 0}
     assert result["gateway"]["late_answers"] == clean
     assert result["devices"][0]["late_answers"] == clean
     assert result["devices"][0]["deferred_commands"] == {}
     assert "111-22-333" not in str(result)
+    assert "X-HM://" not in str(result)

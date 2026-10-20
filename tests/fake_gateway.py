@@ -224,6 +224,7 @@ class FakeGateway:
                     "version": "OPUS-GW test",
                     "eurid": self.eurid,
                     "homekitPin": "111-22-333",
+                    "homekitQR": "X-HM://0TESTSETUPPAYLOAD",
                     **self.system_info,
                 },
             }
