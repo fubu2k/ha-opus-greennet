@@ -364,8 +364,9 @@ Status update 2026-10-20 (phase 22 = REST plan R6a): base
 report `phases/phase-22.md`. REST device lists update the existing device in
 place (E6, B-4), last vertical run duration as a REST diagnostic value,
 regression tests R7/R8. No traffic or visible behaviour change; MQTT path
-untouched (A1–A5). R6b (position origin, grace period O-4) awaits a
-maintainer decision. Not yet merged; CI pending.
+untouched (A1–A5). R6b decided as 1a + 2a and implemented on the same
+branch: position origin in REST diagnostics only, 5 s grace period
+unchanged. Not yet merged; CI pending.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:

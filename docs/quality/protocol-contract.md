@@ -578,6 +578,13 @@ never repeated and are dropped when superseded or queued before an outage.
   REST diagnostics as `last_vertical_movement_time`. It is never used for
   estimates, timers or queries and causes no request. Present only in
   `GET /devices`, not in the streamed list. **[Upstream note][Code][Test]**
+- REST diagnostics show per cover channel `position_origin` (phase 22/R6b,
+  decision 1a): `device list` (from a device list), `reported` (device
+  report or device document), `estimated` (foreign command or entity
+  estimate after an acknowledgement), `assumed` (travel estimate ended after
+  movement time + 5 s without a report). `unknown` changes neither the
+  position nor its origin. Diagnostics only; no entity attribute, no
+  request. **[Code][Test]**
 
 ### 12.5 Acknowledgements and deferred delivery (phase 11 semantics)
 
@@ -685,8 +692,10 @@ Delayed end position after full cover travel:
   the visibility of assumed positions needs a separate decision (REST plan R6,
   O-4). No extra status query is sent. On MQTT none may be added (A1); on
   REST a change follows plan section 0.1 (D3) and is disclosed with its traffic.
-- `lastVerticalMovementTime` of the device list is not read by the code; only
-  `verticalMovementTime` and `rotationTime` are used **[Code]**.
+- `lastVerticalMovementTime` of the device list is shown in REST diagnostics
+  only (phase 22); estimates use only `verticalMovementTime` and
+  `rotationTime` **[Code]**. The grace period stays 5 s on both transports
+  (decision O-4 = 2a, phase 22).
 
 Not verified in this repository:
 

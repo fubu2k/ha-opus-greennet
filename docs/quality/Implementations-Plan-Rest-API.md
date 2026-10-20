@@ -624,9 +624,11 @@ run `39462018715` green.
 `feature/rest-api-integration` `da80334`), report `phases/phase-22.md`: in-place
 update (E6, B-4 fixed) with a field classification test,
 `lastVerticalMovementTime` as a REST diagnostic value, regression tests for
-R7/R8 of section 2.7. No visible behaviour change. **R6b** (origin of the
-position, O-4 grace period) waits for the maintainer's decision; decision
-template in `phases/phase-22.md` section 8.
+R7/R8 of section 2.7. No visible behaviour change. **R6b** decided by the
+maintainer on 2026-10-20 as **1a + 2a** (`phases/phase-22.md` section 8):
+REST diagnostics show the origin of each cover position (`device list`,
+`reported`, `estimated`, `assumed`); no entity change; the 5 s grace period
+stays unchanged. Implemented on the same branch.
 
 - In-place update (E6) with a test "field list completely taken over".
 - Origin of the position (`reported`/`estimated`/`assumed`) at first only in
@@ -702,7 +704,7 @@ steps and the MQTT tests; platforms and device model stay unchanged (goal 5).
 | O-1 | Does Home Assistant start the integration without a configured MQTT integration with `after_dependencies`, and does Hassfest then accept the `mqtt` discovery key? | **Settled in R2** (`phases/phase-16.md` section 5): yes; `manifest.json` changed |
 | O-2 | Effect and support of the stream parameters (incl. whether `levelOfDetail=high` adds the configuration block, R5-H1) | hardware comparison, separate approval |
 | O-3 | Cause of the end-position delay: explained by the upstream note as actuator overrun (section 3.3); confirmation on the maintainer's installation open | R1 |
-| O-4 | Should the position estimate (A-5) stay visible, and how is the 5 s grace period handled for an overrun > 5 s? | decision after R6 |
+| O-4 | Should the position estimate (A-5) stay visible, and how is the 5 s grace period handled for an overrun > 5 s? | **Decided** 2026-10-20 (R6b, 1a + 2a): origin in REST diagnostics only, grace period unchanged; revisit 2b/2c after R1 |
 | O-5 | REST as the default for new entries | **Decided** (D4): REST only for new entries (R4.3) |
 | O-6 | Which commit ran in the field test? | R1 (A-4) |
 | O-7 | Discovery for REST gateways | R8 (MQTT discovery leads to the REST form since R4.3) |

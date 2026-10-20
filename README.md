@@ -1089,7 +1089,7 @@ tests/
 ├── test_rest_stream_backoff.py  # REST stream backoff with jitter, short-lived streams, connection generation
 ├── test_rest_stream_first.py    # REST stream-first setup, first device list deadline, fresh list metadata
 ├── test_rest_soft_smart_ack.py  # REST ACK 201 (SoftSmartAck): no estimate, no travel estimate, no status checks
-├── test_rest_domain_model.py    # REST in-place device update, last run duration, rocker and cover regression cases
+├── test_rest_domain_model.py    # REST in-place device update, last run duration, position origin, rocker and cover regression cases
 ├── test_rest_telegrams.py       # REST telegrams, foreign commands and own echoes
 ├── test_rest_edge_cases.py      # REST coordinator edge cases
 ├── test_rest_lifecycle.py       # End-to-end REST lifecycle through Home Assistant

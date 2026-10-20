@@ -21,6 +21,7 @@ from custom_components.opus_greennet import protocol
 from custom_components.opus_greennet.diagnostics import (
     async_get_config_entry_diagnostics,
 )
+from custom_components.opus_greennet.domain import CoverMovement
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
 from custom_components.opus_greennet.rest_coordinator import (
     OpusGreenNetRestCoordinator,
@@ -223,6 +224,76 @@ async def test_diagnostics_show_the_last_run_duration(
     assert result["devices"][0]["last_vertical_movement_time"] == {0: 31.14}
     # No request beyond the usual device list read.
     assert len(gateway.requests_to("GET", "/devices")) == 1
+
+
+# ── R6b decision 1a: origin of the position (diagnostics only) ─────────────
+
+
+def _report(coord, value: object, *, direction: str = "from") -> None:
+    coord._handle_telegram(  # noqa: SLF001
+        telegram(COVER, [{"key": "position", "value": value}], direction=direction)[
+            "telegram"
+        ]
+    )
+
+
+def test_position_origin_follows_the_source(coord) -> None:
+    assert coord.position_origin(COVER, 0) is None
+    coord._apply_device_list(_list(_cover()), authoritative=True)  # noqa: SLF001
+    assert coord.position_origin(COVER, 0) == "device list"
+    _report(coord, 40)
+    assert coord.position_origin(COVER, 0) == "reported"
+    # "unknown" changes neither the position nor its origin.
+    _report(coord, "unknown")
+    assert coord.devices[COVER].channels[0].position == 40
+    assert coord.position_origin(COVER, 0) == "reported"
+
+
+def test_foreign_command_and_entity_estimate_are_estimated(coord) -> None:
+    coord._apply_device_list(_list(_cover()), authoritative=True)  # noqa: SLF001
+    with patch.object(coord, "_schedule_reconciliation_queries"):
+        _report(coord, 30, direction="to")
+    assert coord.devices[COVER].channels[0].position == 30
+    assert coord.position_origin(COVER, 0) == "estimated"
+    _report(coord, 30)
+    assert coord.position_origin(COVER, 0) == "reported"
+    # An entity estimate writes the channel directly: no record matches.
+    coord.devices[COVER].channels[0].position = 70
+    assert coord.position_origin(COVER, 0) == "estimated"
+
+
+def test_elapsed_movement_is_assumed_and_forget_clears(coord) -> None:
+    coord._apply_device_list(_list(_cover()), authoritative=True)  # noqa: SLF001
+    movement = CoverMovement(100, 20, 0.0, 1.0)
+    coord._cover_movements[(COVER, 0)] = movement  # noqa: SLF001
+    coord._finish_cover_movement(COVER, 0, movement)  # noqa: SLF001
+    assert coord.devices[COVER].channels[0].position == 20
+    assert coord.position_origin(COVER, 0) == "assumed"
+    coord.async_forget_device(COVER)
+    assert coord._position_origins == {}  # noqa: SLF001
+
+
+def test_device_document_is_reported(coord) -> None:
+    coord._apply_device_list(_list(_cover()), authoritative=True)  # noqa: SLF001
+    coord._apply_device_object(  # noqa: SLF001
+        device_object(COVER, ["D2-05-02"], states=[{"key": "position", "value": 60}]),
+        authoritative=True,
+        position_origin="reported",
+    )
+    assert coord.position_origin(COVER, 0) == "reported"
+
+
+async def test_diagnostics_show_the_position_origin(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    gateway.devices = [_cover()]
+    entry = await setup_rest_bridge(hass, gateway)
+    result = await async_get_config_entry_diagnostics(hass, entry)
+    assert result["devices"][0]["position_origin"] == {0: "device list"}
+    await gateway.push(telegram(COVER, [{"key": "position", "value": 50}]))
+    await hass.async_block_till_done()
+    result = await async_get_config_entry_diagnostics(hass, entry)
+    assert result["devices"][0]["position_origin"] == {0: "reported"}
 
 
 # ── Regression tests for the field baseline (plan 2.7, R7 and R8) ─────────

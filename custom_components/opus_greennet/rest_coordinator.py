@@ -258,6 +258,10 @@ class OpusGreenNetRestCoordinator:
         # list (diagnostics only; phase R6, plan section 3.3). Never used for
         # estimates, timers or queries.
         self.last_vertical_movement_times: dict[str, dict[int, float]] = {}
+        # Where the current cover position came from, recorded with the value
+        # it set (phase R6b, decision 1a: diagnostics only). A position that
+        # differs from the recorded value was written by an entity estimate.
+        self._position_origins: dict[tuple[str, int], tuple[str, int]] = {}
         self._probe_task: asyncio.Task[None] | None = None
         self._refresh_task: asyncio.Task[None] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
@@ -548,7 +552,9 @@ class OpusGreenNetRestCoordinator:
                     self._record_confirmed_feedback(
                         device_id, protocol.device_state_functions(data)
                     )
-                self._apply_device_object(data, authoritative=True)
+                self._apply_device_object(
+                    data, authoritative=True, position_origin="reported"
+                )
         elif content == "telegram":
             if (telegram := as_object(document.get("telegram"))) is not None:
                 self._handle_telegram(telegram)
@@ -646,6 +652,7 @@ class OpusGreenNetRestCoordinator:
         *,
         authoritative: bool,
         requested_at: float | None = None,
+        position_origin: str = "device list",
     ) -> None:
         """Create or refresh one device from its gateway object.
 
@@ -696,6 +703,7 @@ class OpusGreenNetRestCoordinator:
             device.update_from_telegram({"functions": functions})
             if authoritative or existing is None:
                 device.last_update_source = "device list"
+                self._note_position_origin(device, functions, position_origin)
         self.devices[device_id] = device
         if not was_known:
             _LOGGER.info(
@@ -710,6 +718,54 @@ class OpusGreenNetRestCoordinator:
             )
         else:
             self._dispatch_state(device)
+
+    @callback
+    def _note_position_origin(
+        self, device: EnOceanDevice, functions: Sequence[WireFunction], origin: str
+    ) -> None:
+        """Record the origin of every valid position in ``functions``.
+
+        Only numeric positions count: ``unknown`` leaves the position and its
+        recorded origin unchanged. Diagnostics only (phase R6b).
+        """
+        default = protocol.channel_from_functions(functions)
+        for function in functions:
+            if function.get("key") != KEY_POSITION:
+                continue
+            if (
+                EnOceanDevice._parse_number(
+                    function.get("value"), minimum=0, maximum=100
+                )
+                is None
+            ):
+                continue
+            channel_id = protocol.function_channel(function, default)
+            channel = (
+                device.channels.get(channel_id) if channel_id is not None else None
+            )
+            if channel_id is None or channel is None or channel.position is None:
+                continue
+            self._position_origins[(device.device_id, channel_id)] = (
+                origin,
+                channel.position,
+            )
+
+    def position_origin(self, device_id: str, channel_id: int) -> str | None:
+        """Return where a channel's current position came from (diagnostics).
+
+        ``device list`` (a snapshot), ``reported`` (device report),
+        ``assumed`` (end of a travel estimate, plan A-5) or ``estimated``
+        (acknowledged command or a foreign command telegram). None without a
+        position. Never used for state, timers or queries.
+        """
+        device = self.devices.get(device_id)
+        channel = device.channels.get(channel_id) if device is not None else None
+        if channel is None or channel.position is None:
+            return None
+        recorded = self._position_origins.get((device_id, channel_id))
+        if recorded is None or recorded[1] != channel.position:
+            return "estimated"
+        return recorded[0]
 
     @callback
     def _record_last_movement_times(self, device_id: str, data: JsonObject) -> None:
@@ -728,6 +784,8 @@ class OpusGreenNetRestCoordinator:
         self.devices.pop(device_id, None)
         self._telegram_metadata_at.pop(device_id, None)
         self.last_vertical_movement_times.pop(device_id, None)
+        for origin_key in [k for k in self._position_origins if k[0] == device_id]:
+            del self._position_origins[origin_key]
         self._cancel_reconciliation_queries(device_id)
         self._sent_commands.pop(device_id, None)
         for key in list(self._feedback_revisions):
@@ -864,6 +922,11 @@ class OpusGreenNetRestCoordinator:
             update["telegramInfo"] = telegram.get("telegramInfo")
             self._telegram_metadata_at[device_id] = received_at
         device.update_from_telegram(update)
+        # A foreign command is applied optimistically; a device report is
+        # feedback (phase R6b, diagnostics only).
+        self._note_position_origin(
+            device, applied, "estimated" if is_outbound else "reported"
+        )
         if not is_outbound and protocol.has_operational_state(functions):
             device.last_command_error = None
 
@@ -1014,6 +1077,10 @@ class OpusGreenNetRestCoordinator:
             channel = device.get_or_create_channel(channel_id)
             channel.position = movement.target  # Assumed, not physical feedback.
             channel.state_revision += 1
+            self._position_origins[(device_id, channel_id)] = (
+                "assumed",
+                movement.target,
+            )
             self._dispatch_state(device)
 
     def _start_cover_commands(

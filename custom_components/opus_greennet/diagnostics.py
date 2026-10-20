@@ -199,6 +199,16 @@ async def async_get_config_entry_diagnostics(
             devices[-1]["last_vertical_movement_time"] = dict(
                 movement_times.get(device.device_id, {})
             )
+        # REST only (phase R6b, decision 1a): where each cover position came
+        # from: device list, reported, estimated or assumed.
+        if callable(origin := getattr(coordinator, "position_origin", None)) and (
+            isinstance(movement_times, dict)
+        ):
+            devices[-1]["position_origin"] = {
+                channel_id: origin(device.device_id, channel_id)
+                for channel_id, channel in device.channels.items()
+                if channel.position is not None
+            }
 
     return _redact_diagnostics(
         {
