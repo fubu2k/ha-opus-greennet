@@ -47,7 +47,7 @@ def reconciliation_timers(monkeypatch):
 async def test_stop_wire_command_waits_for_ack_then_queries_same_channel(
     radio, stop_coordinator, reconciliation_timers, eep, channel, status
 ):
-    """The EEP's stop=true string gets two status checks only after acceptance."""
+    """The EEP's stop=true string gets two status checks only after a 200."""
     device = EnOceanDevice(DEVICE_ID, "Cover", [{"eep": eep}])
     device_channel = device.get_or_create_channel(channel)
     device_channel.position = 42
@@ -69,6 +69,13 @@ async def test_stop_wire_command_waits_for_ack_then_queries_same_channel(
 
         radio.respond({"header": {"httpStatus": status}})
         await task
+        if status == 201:
+            # Deferred delivery (phase 11): no status query until the gateway
+            # transmits; the stop stays recorded as a deferred value.
+            assert reconciliation_timers == []
+            assert device.deferred_commands == {channel: {"stop": "true"}}
+            assert device_channel.position == 42
+            return
         assert [delay for delay, _ in reconciliation_timers] == [5, 20]
         assert device_channel.position == 42
         assert KEY_STOP not in KNOWN_STATE_KEYS
