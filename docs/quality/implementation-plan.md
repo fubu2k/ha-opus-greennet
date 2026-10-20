@@ -282,7 +282,8 @@ traffic change. Maintainer decision D3 recorded on the same branch: A1–A5
 bind only the MQTT transport; REST is developed in all further phases
 according to best practices and Home Assistant requirements (section 2 scope
 note, `Implementations-Plan-Rest-API.md` section 0.1). The next REST phase
-needs its own approval.
+needs its own approval. Merged into `feature/rest-api-integration` by PR #16
+(`4014b1c`, 2026-10-20); not merged into `main`.
 
 Status update 2026-10-20 (branch policy): PR #14 merged
 `feature/rest-api-integration` into `main` by mistake (`112bc43`); it was
@@ -301,7 +302,9 @@ decoupling: new transport-neutral `domain.py` (re-exported unchanged by
 `config_flow.py`, `manifest.json` `dependencies: ["mqtt"]` changed to
 `after_dependencies: ["mqtt"]` after evidence for open question O-1. No
 behaviour, timing, wire or traffic change on MQTT or REST (A1–A5 for MQTT
-under decision D3). Not merged; merge approval remains separate.
+under decision D3). Merged into `feature/rest-api-integration` by PR #17
+(`b9c3fb0`, 2026-10-20); not merged into `main`. The next REST phase (R1 or
+R3) needs its own approval.
 
 Status update 2026-10-20 (phase 17 = REST plan R3): base
 `feature/rest-api-integration` `b9c3fb0` (R2 merged by PR #17). Branch

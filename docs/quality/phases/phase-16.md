@@ -1,10 +1,12 @@
 # Phase 16 – REST plan R2: REST-only decoupling
 
-- **Status:** implemented on branch `feat/opus-r2-rest-only-decoupling`. Not
-  merged; no pull request opened, no version change, no CHANGELOG entry, no
-  release. Merge approval remains separate (`implementation-plan.md` sections 4
-  and 5); the merge target is `feature/rest-api-integration`, not `main`
-  (branch policy of 2026-10-20).
+- **Status:** implemented on branch `feat/opus-r2-rest-only-decoupling`. No
+  version change, no CHANGELOG entry, no release. Release approval remains
+  separate (`implementation-plan.md` sections 4 and 5).
+- **Merge record (added 2026-10-20 after review):** merged into
+  `feature/rest-api-integration` by PR #17, merge commit `b9c3fb0`
+  (parents `4014b1c`, `65d359d`). Not merged into `main` (branch policy of
+  2026-10-20). Section 9 keeps the pre-merge wording as a historical record.
 - **Plan:** `Implementations-Plan-Rest-API.md` phase R2 (section 8), design
   decisions E2–E4 (section 5.1), couplings K1–K6 (section 2.3), open question
   O-1 (section 10). Guardrails per decision D3 (section 0.1): A1–A5 for the MQTT

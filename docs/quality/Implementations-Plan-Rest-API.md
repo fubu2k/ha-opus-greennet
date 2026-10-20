@@ -461,7 +461,9 @@ Home-Assistant-Vorgaben für den REST-Transport.
 ### R0 – Dokumentationsnachzug (nur Doku)
 
 **Status 2026-10-20:** umgesetzt auf Branch `docs/opus-r0-rest-documentation`
-(Basis `1847f88`), Bericht `phases/phase-15.md`; nicht gemergt. Erledigt damit
+(Basis `1847f88`), Bericht `phases/phase-15.md`. **Gemergt** in
+`feature/rest-api-integration` über PR #16 (Merge-Commit `4014b1c`,
+2026-10-20); nicht in `main`. Erledigt damit
 A-1 und A-6 aus Abschnitt 2.5.
 
 - D2 eintragen: `implementation-plan.md` Abschnitt 3 (Ergänzung „genehmigt
@@ -500,7 +502,9 @@ Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
 
 **Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r2-rest-only-decoupling`
 (Basis `feature/rest-api-integration` `4014b1c`), Bericht `phases/phase-16.md`;
-nicht gemergt. K1–K6 aufgelöst: `domain.py` (E2), `OpusCoordinator` als
+**gemergt** in `feature/rest-api-integration` über PR #17
+(Merge-Commit `b9c3fb0`, 2026-10-20); nicht in `main`. K1–K6 aufgelöst:
+`domain.py` (E2), `OpusCoordinator` als
 `Protocol` (E3), MQTT-Importe nur bei Bedarf in `__init__`/`config_flow` (E4),
 Fixture `hass_without_mqtt` (K5). O-1 geklärt: `after_dependencies: ["mqtt"]`
 mit Belegen (Hassfest am Referenzcommit grün, MQTT-Discovery und MQTT-Einträge
