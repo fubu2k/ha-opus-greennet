@@ -346,17 +346,9 @@ After installing, add the integration:
 [![Add Integration][config-flow-badge]][config-flow]
 
 …or go to **Settings → Devices & Services → Add Integration → “Opus GreenNet Bridge”**
-and choose how Home Assistant reaches the gateway.
-
-**Through the MQTT broker (EAG identifier)**
-
-1. Enter your **EAG Identifier** (Bridge ID; fictional example: `A1B2C3D4`)
-2. Click **Submit**
-
-Setup waits for a response from that specific gateway. A connected Home Assistant
-MQTT broker alone is insufficient. If setup fails, check the identifier, gateway
-power, bridge credentials, and the directional topic rules above. Existing
-entries automatically retry when the gateway is unavailable during startup.
+and choose how Home Assistant reaches the gateway. The menu offers the REST
+API first and the MQTT broker second; both stay fully supported, and gateways
+that are already configured keep their connection.
 
 **Directly through the gateway's REST API**
 
@@ -375,6 +367,16 @@ Existing entries automatically retry when the gateway is unavailable during
 startup. Rejected credentials, or a different gateway answering at the stored
 address, start a **re-authentication** that asks for address and credentials
 and accepts them only if the gateway answers with the same EURID.
+
+**Through the MQTT broker (EAG identifier)**
+
+1. Enter your **EAG Identifier** (Bridge ID; fictional example: `A1B2C3D4`)
+2. Click **Submit**
+
+Setup waits for a response from that specific gateway. A connected Home Assistant
+MQTT broker alone is insufficient. If setup fails, check the identifier, gateway
+power, bridge credentials, and the directional topic rules above. Existing
+entries automatically retry when the gateway is unavailable during startup.
 
 ### Switching the transport
 

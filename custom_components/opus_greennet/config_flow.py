@@ -203,9 +203,13 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Let the user choose how Home Assistant reaches the gateway."""
+        """Let the user choose how Home Assistant reaches the gateway.
+
+        The REST API is offered first (phase R4.2); the MQTT bridge stays
+        available as the second option. Existing entries are never switched.
+        """
         return self.async_show_menu(
-            step_id="user", menu_options=[STEP_MQTT_BRIDGE, STEP_REST_API]
+            step_id="user", menu_options=[STEP_REST_API, STEP_MQTT_BRIDGE]
         )
 
     # ──────────────────────────────────────────────────────────────────────

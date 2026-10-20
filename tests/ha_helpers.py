@@ -107,7 +107,8 @@ async def start_user_flow(hass: HomeAssistant, transport_step: str) -> dict:
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
     assert result["type"] is FlowResultType.MENU
-    assert result["menu_options"] == ["mqtt_bridge", "rest_api"]
+    # REST first, MQTT second (phase R4.2).
+    assert result["menu_options"] == ["rest_api", "mqtt_bridge"]
     return await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": transport_step}
     )

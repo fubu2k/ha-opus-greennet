@@ -7,6 +7,8 @@ their own tests in ``test_config_flow_recovery.py`` and ``test_discovery.py``.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -69,6 +71,34 @@ async def _start_reconfigure(hass: HomeAssistant, entry: ConfigEntry, step: str)
 
 
 # ── User step ────────────────────────────────────────────────────────────────
+
+
+async def test_user_menu_offers_rest_first_and_mqtt_second(
+    hass: HomeAssistant,
+) -> None:
+    """Phase R4.2: REST is the first option, MQTT stays the second."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "user"
+    assert result["menu_options"] == ["rest_api", "mqtt_bridge"]
+    # Nothing is chosen automatically: the menu waits for the user.
+    assert not hass.config_entries.async_entries(DOMAIN)
+
+
+def test_translated_user_menu_lists_rest_first() -> None:
+    """The translation files list the options in the order of the menu."""
+    base = Path(__file__).parent.parent / "custom_components" / "opus_greennet"
+    for path in (
+        base / "strings.json",
+        base / "translations" / "en.json",
+        base / "translations" / "de.json",
+    ):
+        options = json.loads(path.read_text(encoding="utf-8"))["config"]["step"][
+            "user"
+        ]["menu_options"]
+        assert list(options) == ["rest_api", "mqtt_bridge"], path.name
 
 
 async def test_user_flow_creates_rest_entry_from_gateway_identity(
