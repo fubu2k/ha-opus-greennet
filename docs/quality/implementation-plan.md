@@ -86,6 +86,16 @@ a request to a battery-powered device.
 | Incoming streams/telegrams | Existing publications | Local parsing must not publish requests. |
 | Diagnostics/icons/enablement | HA representation | No device polling or configuration reads/writes. |
 
+Phase 14 amendment (optional REST transport, 2026-10-20; requires maintainer
+review before merge): for config entries with `transport: rest` the same rules
+apply to the REST endpoints (`protocol-contract.md` section 12). `GET
+/system/uptime` keeps the 60 s interval. `GET /devices` is read at setup, at
+the start of every event stream and additionally every 30 minutes, because the
+gateway does not stream battery level, signal strength and movement times; it
+is a read of the gateway model without radio telegram (upstream hardware
+observation). `PUT …/state` and ReCom keep the policies above. MQTT entries are
+unaffected; no entry switches transport without an explicit user action.
+
 Create a profile/operation capability matrix: EEP/profile, operation, reference,
 cache-versus-radio behaviour, known power source, support and verification
 status (`reference`, `code`, `mock test`, `hardware`). Unknown radio effects
@@ -233,6 +243,15 @@ F13-2 decided: `codeowners`, documentation and issue tracker stay with
 change. Completed: merged via PR #13 (`2e46bfd`), CI green on the pull request
 (run `39376442882`) and on `main` (run `39376460361`), CHANGELOG
 "Unreleased". This closes the quality series.
+
+Status update 2026-10-20 (phase 14): base `main` `39b4c66`. At the
+maintainer's request the REST transport of upstream `kegelmeier/ha-opus-greennet`
+(branch `feat/rest-transport`, `20b34c9`) is integrated as an optional second
+transport next to the unchanged MQTT transport, on branch
+`feature/rest-api-integration`, report `phases/phase-14.md` (section 15a).
+Quality scale: `reauthentication-flow`, `reconfiguration-flow` and
+`inject-websession` change from exempt to done (48 done, 6 exempt, 0 todo).
+Not merged; merge and release approval remain separate.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
@@ -559,6 +578,35 @@ necessarily tier blockers; assess actual rule/correctness impact. Acceptance:
 no unreasoned applicable todo, no false hardware guarantee, reviewed compatibility
 and traffic evidence; release authorisation remains separate.
 
+## 15a. Phase 14 – Optional REST transport (implemented, review pending)
+
+Branch: `feature/rest-api-integration` (name chosen by the maintainer).
+
+- Scope: add the upstream REST transport (`api.py`, `protocol.py`,
+  `rest_coordinator.py`) as an opt-in per config entry (`transport.py`). The
+  MQTT coordinator, `mqtt_transport.py`, MQTT discovery and phases 10–12 stay
+  unchanged and remain the path of every existing entry.
+- A1: no new radio request; REST reuses the 60 s health interval and the two
+  status checks; own-command echoes schedule no extra check. The 30 min device
+  list read is a gateway-model read on REST entries only (section 3
+  amendment).
+- A2: gateway health never confirms device state; a command timeout fails only
+  its action.
+- A3: one request in flight, no write retries, no cooldowns.
+- A4: unchanged on MQTT; REST has no retained messages (contract 12.3).
+- A5: identities, entity IDs and registry settings unchanged; switching the
+  transport only in the reconfigure flow; existing entries are never switched
+  automatically.
+- Phase 11 semantics are kept on REST (ACK 201: no estimate, no travel
+  estimate, no status query). Phase 12 diagnostics keep their keys (always
+  zero on REST).
+- Upstream's D2-01 `rampingMode` fix is applied to REST only; porting it to
+  MQTT would change MQTT wire values and needs a separate decision.
+
+Acceptance: CI green on the branch (both jobs, hassfest, coverage gates,
+repeated race suites including the REST suites), unchanged MQTT tests apart
+from the new config-flow menu, documentation and evidence updated.
+
 ## 16. Mandatory acceptance matrix
 
 | Scenario | Required result |
@@ -621,7 +669,9 @@ for run in 1 2 3; do
 done
 ```
 
-Add freshness/ACK/late-response suites when implemented. Record commands,
+Add freshness/ACK/late-response suites when implemented. Phase 14 adds
+`test_rest_stream.py`, `test_rest_requests.py`, `test_rest_lifecycle.py` and
+`test_transport_selection.py` to the repeated suites. Record commands,
 environment, exit status, coverage, traffic and local/CI origin. Keep individual
 evidence even if a different combined job fails.
 

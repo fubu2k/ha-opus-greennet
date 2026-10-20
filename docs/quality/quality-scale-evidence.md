@@ -153,7 +153,7 @@ address and credentials and use Home Assistant's websession.
   (`tests/fake_gateway.py`). The REST transport was ported from upstream
   `kegelmeier/ha-opus-greennet` branch `feat/rest-transport` (`20b34c9`), whose
   hardware observations (OPUS-GW v1.21.31, API 2.6.3.0) are recorded in
-  `protocol-contract.md` section 10; this repository has not observed the REST
+  `protocol-contract.md` section 12; this repository has not observed the REST
   transport on hardware.
 - Not observed on hardware: MQTT discovery, ACK 201 (SoftSmartAck) delivery,
   late-answer frequency, battery impact of any change.

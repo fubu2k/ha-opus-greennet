@@ -91,7 +91,7 @@ _LOGGER = logging.getLogger(__name__)
 # refreshes slowly changing metadata (battery level, signal, movement times),
 # which the gateway does not stream, and picks up newly paired devices. It is
 # a read of the gateway's device model and causes no radio telegram (protocol
-# contract section 10.2).
+# contract section 12.2).
 DEVICE_LIST_REFRESH_INTERVAL = timedelta(minutes=30)
 # Pause before the next stream attempt after consecutive failures (seconds).
 # A stream that ended after it had connected is reopened immediately.
