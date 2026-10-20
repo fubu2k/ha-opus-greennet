@@ -9,6 +9,7 @@ from typing import Final
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.components.binary_sensor.const import BinarySensorDeviceClass
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -158,6 +159,8 @@ async def async_setup_entry(
                     )
                 )
             if device.has_autolock:
+                # Mechanics fault (Mechanik-Fehler) serves troubleshooting: a
+                # diagnostic entity, disabled only for NEW registry entries.
                 entities.append(
                     OpusGreenNetStateBinarySensor(
                         coordinator,
@@ -167,6 +170,8 @@ async def async_setup_entry(
                         "mechanics_fault",
                         "mechanics_fault",
                         BinarySensorDeviceClass.PROBLEM,
+                        entity_category=EntityCategory.DIAGNOSTIC,
+                        enabled_by_default=False,
                     )
                 )
 
@@ -271,11 +276,18 @@ class OpusGreenNetStateBinarySensor(OpusGreenNetBaseBinarySensor):
         suffix: str,
         attr_name: str,
         device_class: BinarySensorDeviceClass | None,
+        *,
+        entity_category: EntityCategory | None = None,
+        enabled_by_default: bool = True,
     ) -> None:
         super().__init__(coordinator, eag_id, gateway_device_id, device, suffix, suffix)
         # Typed accessor instead of getattr(); an unknown name fails at setup.
         self._read_state = BOOLEAN_CHANNEL_STATES[attr_name]
         self._attr_device_class = device_class
+        # Registry metadata only. HA applies enabled_by_default solely when it
+        # creates a registry entry; existing user enablement is never changed.
+        self._attr_entity_category = entity_category
+        self._attr_entity_registry_enabled_default = enabled_by_default
 
     @property
     def is_on(self) -> bool | None:

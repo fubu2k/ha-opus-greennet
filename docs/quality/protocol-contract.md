@@ -33,6 +33,21 @@ characters, normalised to upper case by the config flow.
 SUBACKs of the stream group are advisory only (`required=False`); a missing
 SUBACK does not fail the health probe. **[Code][Test]**
 
+### 1.1a Discovery subscription (phase 9, Home Assistant MQTT integration)
+
+`manifest.json` declares `"mqtt": ["EnOcean/+/stream/devices/+/friendlyId"]`.
+The Home Assistant MQTT integration (not the coordinator) subscribes to this
+filter and starts a config flow per new topic/payload pair. `async_step_mqtt`
+accepts only `EnOcean/<EAG>/stream/devices/<DEV>/friendlyId` with a non-empty
+payload and an EAG segment already in canonical upper-case form
+(`discovery.py`); everything else aborts with `invalid_discovery_info`.
+Retained and live messages are equal candidates; neither is a health signal.
+Receipt publishes nothing. Known, disabled and ignored gateways abort with
+`already_configured` before a unique ID is set (no discovery-key update, no
+reload of a retrying entry). Confirmation runs the existing
+`async_probe_gateway` uptime request once, exactly as manual setup. The payload
+(device name) is neither stored nor logged. **[Code][Test]**
+
 Temporary subscriptions (QoS 1) are created by `MQTTRequestManager` only for
 answer topics not covered by a registered route (profile, configuration,
 parameters). Registered routes: the uptime answer and `putAnswer/devices/+/state`. **[Code]**
@@ -41,7 +56,7 @@ parameters). Registered routes: the uptime answer and `putAnswer/devices/+/state
 
 | Topic | Payload | QoS / retain | Trigger |
 |-------|---------|--------------|---------|
-| `…/get/config/system/uptime` | `""` | 1 / false | setup, health tick, reconnect, config flow |
+| `…/get/config/system/uptime` | `""` | 1 / false | setup, health tick, reconnect, config flow (manual submit or discovery confirmation) |
 | `…/get/devices` | `""` | 1 / false | resync only |
 | `…/get/config/system/info` | `""` | 1 / false | resync only, answer not awaited |
 | `…/put/devices/<DEV>/state` | `{"state": {"functions": [...]}}` | 1 / false | commands and status queries |
@@ -61,6 +76,10 @@ Unused constants in `const.py`: `TOPIC_STREAM_TELEGRAM`, `TOPIC_STREAM_DEVICE`,
   is present or `require_status=True`, `header.httpStatus` must be an integer
   (no `bool`, no non-integral `float`) equal to **200 or 201** (201 = SoftSmartAck
   per reference). **[Code][Test][Ref]**
+- State commands (`putAnswer/devices/<DEV>/state`) distinguish the two accepted
+  statuses since phase 11: `200` = `CommandDelivery.SENT`, `201` =
+  `CommandDelivery.DEFERRED` (section 7.1). Both clear `last_command_error`;
+  neither is device feedback. **[Code][Test][Ref]**
 - Uptime: `systemUptimeResponse.uptime` must be `str`, `int` or `float` (no `bool`),
   finite and ≥ 0; stored as `str(value)`. **[Code][Test]**
 - Bridge status: only payloads `"0"` and `"1"` are evaluated; anything else is ignored. **[Code][Test]**
@@ -118,7 +137,9 @@ without their own valid channel are then dropped (`_parse_channel_id`). **[Code]
 | `lock` | `locked`/`unlocked` | – | **sets `None`** |
 | `unlockRequest`, AutoLock `unlock` | `requested`/`notRequested`, bool | – | **sets `None`** |
 | `mechanicsFault`, AutoLock `mechanics` | `error`/`ok`, bool | – | **sets `None`** |
-| `temperature`, `temperatureSetpoint` | 0–40 | **sets `None`** | ignored |
+| `temperature`, `temperatureSetpoint` | 0–40 (HeatArea, A5-04-01) | **sets `None`** | ignored |
+| `temperature` on A5-04-02/03 | −20–60 | **sets `None`** | ignored |
+| `contact` (D5-00-01 only) | `open` → on / `closed` → off | – | **sets `None`** |
 | `humidity` | 0–100 | **sets `None`** | ignored |
 | `feedTemperature` | 0–80 | **sets `None`** | ignored |
 | `energyConsumption` | 0–10 | **sets `None`** | ignored |
@@ -132,6 +153,7 @@ without their own valid channel are then dropped (`_parse_channel_id`). **[Code]
 | `missingTemperature` | `info` / `warning` / `error` / `reset` | ignored | ignored |
 | `circuitInUse` | `error` / `reset` | ignored | ignored |
 | `buttonA0`, `buttonAI`, `buttonB0`, `buttonBI`, `multipleButtons` | `pressed` / `released` | – | ignored |
+| OPUS motion detector (F6-02-01 + A5-04-01): `buttonAI` / `buttonA0` | `pressed` → motion on / off; `released` keeps the state | – | ignored |
 
 Profile-bound aliases (IQ-DOT 1.21.30): `alarm` only for F6-05-02,
 `motionDetected`/`illumination` only for A5-07-01/03, `handle` only for handle
@@ -156,7 +178,8 @@ RWM (F6-05-02): value-only slots in `transmitModes` are resolved as `smokeAlarm`
 - `to` (outbound) is discarded while a local command awaits its ACK
   (`_command_waiters`); otherwise it is applied optimistically (bridge-native or
   HomeKit commands), restricted to `KNOWN_STATE_KEYS`, `channel` and `stop`, and
-  reconciliation is scheduled afterwards.
+  reconciliation is scheduled afterwards. Since phase 11 a matching value also
+  clears the deferred marker of a SoftSmartAck command (section 7.1).
 - Unknown device with a telegram: a placeholder device is created; a discovery
   signal is only sent if an `entity_type` can be determined. **[Code][Test]**
 
@@ -164,8 +187,8 @@ RWM (F6-05-02): value-only slots in `transmitModes` are resolved as `smokeAlarm`
 
 | Input | Retained message |
 |-------|------------------|
-| `stream/devices/#` | processed (snapshot, discovery); raw debug log suppressed |
-| `stream/device/#` | processed; raw debug log suppressed; latency log only for live messages |
+| `stream/devices/#` | processed (snapshot, discovery); raw debug log suppressed; since phase 10 a state value for a field already known in the armed session is discarded (6.1) |
+| `stream/device/#` | processed; raw debug log suppressed; latency log only for live messages; phase 10 rule 6.1 as for `stream/devices` |
 | `stream/telegram/#` | **discarded** (no events, no state) |
 | `getAnswer/devices/#` | **discarded** |
 | `putAnswer/devices/+/state` | routed to the request manager (which ignores retained), no state |
@@ -176,7 +199,52 @@ RWM (F6-05-02): value-only slots in `transmitModes` are resolved as `smokeAlarm`
 Additional existing freshness rule: on rediscovery of a known device, the
 snapshot state is only applied if the last live update is not newer than
 `_resync_requested_at`; otherwise only `rotationTime`/`channel` are applied.
+Since phase 10, "live" means a non-retained message: an applied retained replay
+keeps `last_update_received_monotonic` unchanged and is reported as
+`<source> (retained)` in `last_update_source`, so a replay arriving after the
+resync request no longer suppresses the requested snapshot answer. A delta
+window (`_device_stream_data`) opened by a retained message counts as retained
+until a live message joins it (`_device_stream_replay_windows`).
 Button keys from `stream/devices` are never treated as occurrences. **[Code][Test]**
+
+### 6.1 Field-level freshness of retained replays (phase 10)
+
+Basis: an established subscription receives every publication with retain=0;
+retain=1 is only set for messages sent because a subscription was made
+(MQTT 3.1.1 [MQTT-3.3.1-8/9]). Home Assistant re-subscribes each wildcard one
+at a time and exact topics afterwards (`_async_perform_subscriptions`, HA
+2026.10.2), and keeps every subscription until disconnect. **[Ref][Code]**
+
+- **Session.** Armed (`_replay_guard_armed`) at the end of a successful
+  `_async_refresh_gateway` health probe, after its uptime answer and before the
+  optional `get/devices` request, and only if all four stream wildcards are in
+  `_stream_topics`. Disarmed and cleared by `_cancel_background_work` (MQTT
+  disconnect, bridge `0`, unload). A failed probe does not disarm or arm.
+- **Provenance.** `_live_fields[device] = {(channel, key)}`, recorded only while
+  armed, from: non-retained `stream/devices` and `stream/device` value
+  messages (field resolved at receipt), fast-path `batteryLevel`/`dbm`,
+  applied telegram functions (`from` and optimistic `to`, without estimated
+  cover positions), and non-retained `getAnswer/devices` answers. No wire
+  timestamps or sequence numbers are used. **[Code][Test]**
+- **Field resolution.** Fast-path scalars → `(0, key)`; named
+  `states/<key>` → `(0, key)` for `KNOWN_STATE_KEYS` only; indexed
+  `states|transmitModes/<n>/value` → key from the cached model or the open
+  delta window, channel as in `_indexed_changed_functions` (RWM value-only
+  slots resolved for F6-05-02). Metadata, `key`/`channel` paths, buttons and
+  configuration parameters are never resolved and therefore never discarded.
+- **Rule.** A retained value whose resolved field is in `_live_fields` is
+  neither applied nor written to `_device_data`. Everything else is processed
+  exactly as in the table above: first snapshots, other fields, other channels,
+  devices without provenance, replays before arming and after an interruption.
+- **Feedback parity (A1).** A discarded replay is still passed to
+  `_record_confirmed_feedback` (known devices only), so pending reconciliation is
+  cancelled exactly as before phase 10 and no additional query is published.
+- **Cleanup.** `async_forget_device` removes the device's provenance; size is
+  bounded by devices × reported fields and reset on every interruption.
+- **Residual risk [unverified].** A stream-wildcard SUBACK that times out
+  during setup phase 2 still arms the session; a Mosquitto bridge reconnect
+  forwards the gateway's retained topics to Home Assistant as live messages,
+  which this rule cannot distinguish. Hardware ordering was not observed.
 
 ## 7. Availability, health and timing (frozen by A1–A3)
 
@@ -195,7 +263,91 @@ Button keys from `stream/devices` are never treated as occurrences. **[Code][Tes
 - Debounce times: discovery 2 s after the last message, delta finalisation 0.02 s,
   telegram finalisation 0.15 s.
 - Reconciliation after a command: 5 s and 20 s; covers with a movement estimate:
-  remaining travel incl. 5 s grace, then +10 s and +20 s.
+  remaining travel incl. 5 s grace, then +10 s and +20 s. Only after ACK `200`;
+  after ACK `201` see section 7.1.
+
+### 7.1 ACK 201 and explicit device health (phase 11)
+
+States of a command, from intent to confirmation:
+
+| State | Source | Shown in Home Assistant |
+|-------|--------|-------------------------|
+| desired / estimated | ACK `200` (`SENT`): the gateway transmitted the telegram | estimate applied by light, switch and cover entities (unchanged), travel estimate for covers, then the 5/20 s checks |
+| accepted / deferred | ACK `201` (`DEFERRED`, SoftSmartAck): the gateway queued the telegram | last reported state kept; no estimate, no travel estimate; value listed in diagnostics under `deferred_commands` |
+| delivered | outbound telegram `stream/telegram/<DEV>/to` with the same value | existing bridge-native path: value applied optimistically, then the 5/20 s checks |
+| device-confirmed | live device report (`stream/telegram/.../from`, `stream/device`, live `stream/devices`) for the field and channel | reported value; deferred marker cleared if the value matches |
+
+- **No query for a deferred command (A1).** `_handle_deferred_command`
+  schedules no status check for the command's fields. A status query would be
+  deferred as well and could not confirm a telegram that has not been sent.
+  Per command, at most the two existing checks follow, and only once the
+  gateway transmits (outbound telegram). **[Code][Test]**
+- **Cover travel.** A movement estimate started before publish is cleared on
+  `201`; fields of earlier accepted commands whose timers that start had
+  stopped get their two checks again (no additional field, no extra slot).
+  A deferred Stop schedules no final-position check. **[Code][Test]**
+- **Markers.** `EnOceanDevice.deferred_commands[channel][key] = value` for
+  confirmable keys (`switch`, `dimValue`, `position`, `angle`,
+  `temperatureSetpoint`, `heaterMode`) not yet reported during the ACK wait,
+  and for `stop`. Cleared by a matching live report (numeric keys compared
+  numerically), a matching outbound telegram, a newer `200` command for the
+  same key and channel, or device removal. Retained values never clear a
+  marker. A report with another value keeps it. Markers are diagnostic only
+  and never become an assumed state. **[Code][Test]**
+- **Residual risk [unverified].** OPUS answers carry no request identifier.
+  Whether the gateway discards a queued telegram when a newer command for the
+  same key is transmitted, and how long it keeps one, is not documented and
+  was not observed on hardware. An outbound telegram arriving while another
+  local command awaits its ACK is still discarded (section 5), so its marker
+  stays until a device report matches.
+- **Device health.** Profile-specific warnings and errors
+  (`actuatorNotResponding`, `missingTemperature`, `circuitInUse`,
+  `actuatorLowBattery`, `actuatorDeactivated`, `heaterMode: error`) are shown
+  on their own entities only. They never change `coordinator.available` or any
+  entity's availability, and they publish nothing. A rejected or timed-out
+  command sets `last_command_error` for that device only. No silence-based
+  offline rule exists (no documented heartbeat contract). **[Code][Test]**
+
+### 7.2 Late answers without a request identifier (phase 12)
+
+OPUS answers (`putAnswer/…`, `getAnswer/…`) carry `header.httpStatus` and,
+per the reference, `gateway` and `timestamp`. They contain no request ID and do
+not echo the request. The integration reads only `httpStatus` and the body;
+the header `timestamp` is not interpreted. **[Ref][Code]**
+
+Attribution rules (current behaviour, unchanged by phase 12):
+
+| Late answer of request A arrives … | Result |
+|------------------------------------|--------|
+| while no request owns A's answer topic | Request manager: dropped. `putAnswer/devices/<DEV>/state` only: the device-level listener still applies it to `last_command_error` (a negative answer sets it and cancels the device's pending status checks; a success clears it). No state change, no publish. **[Code][Test]** |
+| while request B on the same topic waits for its SUBACK or the send slot (not yet published) | dropped (`sent` is still false). **[Code][Test]** |
+| after B on the same topic was published | **taken as B's answer**. B's own answer then has no owner (dropped) or is taken by the next request C if C was already published. The shift ends at the first answer that arrives while no request owns the topic. **[Code][Test]** |
+| with `retain = true` | ignored by the request manager and by the device-level listener (A4). **[Code][Test]** |
+| on another answer topic (other device, uptime) | no effect on B; the global send queue is shared, attribution is not. **[Code][Test]** |
+
+- The same applies after a caller cancellation, `async_cancel_pending`
+  (reconnect, health failure) or a device removal: local generations
+  invalidate the local request, they cannot label an old wire answer. **[Code][Test]**
+- An answer to another MQTT client (MyOPUS app, a second integration) on the
+  same topic is indistinguishable and is taken by a waiting request. **[Code][Test]**
+- No delay, cooldown, drain or retry follows a timeout (A3); every scenario
+  publishes exactly the requests the callers issued (A1); gateway availability
+  is never changed by a late or misattributed command answer (A2). A late
+  uptime answer can complete the next health probe; it proves only that the
+  gateway answered, never any device state. **[Code][Test]**
+- **Late-answer diagnostics (option M6).** `MQTTRequestManager` remembers, per
+  answer topic, each published request that ended without an answer (timeout,
+  caller cancellation, `async_cancel_pending`, `async_cancel_device`; not a
+  failed publish, not after unload) for `LATE_ANSWER_DIAGNOSTIC_WINDOW` = 120 s.
+  A non-retained answer that no request takes (routed without owner, before
+  the next publish, or a second answer while a request still listens) settles
+  the oldest entry. An answer taken while an entry is open increments
+  `possibly_late_answers` of the request's owner and is logged at debug level.
+  Diagnostics list both counters per device and for the gateway
+  (`late_answers`). Answers on temporary subscriptions that arrive after the
+  request ended are not observable and expire with the window. The counters
+  change no result, state, timing, request count or availability. **[Code][Test]**
+- Consequences, limits and the evaluated mitigations: `phases/phase-12.md`.
 
 ## 8. Entity inventory and identities (frozen by A5)
 
@@ -207,15 +359,40 @@ Device identifier: `(opus_greennet, "<EAG>_<DEV>")`; gateway: `(opus_greennet, "
 | switch | `entity_type == "switch"`, per channel | as light | enabled |
 | cover | `entity_type == "cover"`, per channel | as light | enabled |
 | climate | `entity_type == "climate"` | `<EAG>_<DEV>` | enabled |
-| event | `entity_type == "event"` (F6-02-xx, F6-03-xx) | `<EAG>_<DEV>` | enabled |
+| event | `entity_type == "event"` (F6-02-xx, F6-03-xx); device class `button` (phase 13) | `<EAG>_<DEV>` | enabled |
 | lock | D2-06-40 | `<EAG>_<DEV>_autolock` (read-only) | enabled |
-| sensor | HeatArea: `humidity`; D1-4B-05: `feed_temperature`; D1-4B-07: `energy_consumption`; SMS: `illuminance`, `supply_voltage`, `battery_level`; handle: `handle_state`; D2-06-40: `unlock_request` | `<EAG>_<DEV>_<suffix>` | enabled |
+| sensor | HeatArea: `humidity`; D1-4B-05: `feed_temperature`; D1-4B-07: `energy_consumption`; SMS: `illuminance`, `battery_level`; handle: `handle_state` | `<EAG>_<DEV>_<suffix>` | enabled |
+| sensor | SMS (A5-07-01/03): `supply_voltage` (diagnostic, phase 6 metadata review) | `<EAG>_<DEV>_supply_voltage` | enabled; `EntityCategory.DIAGNOSTIC`; existing entries keep enablement and customisations |
+| sensor | D2-06-40: `unlock_request` (diagnostic, phase 6) | `<EAG>_<DEV>_unlock_request` | **disabled for new registry entries**; existing entries unchanged |
+| sensor | A5-04-01/02/03 and OPUS motion detector (F6-02-01 + A5-04-01): `temperature`, `humidity`, `battery_level` (upstream v0.6.0/v0.7.0b0) | `<EAG>_<DEV>_<suffix>` | enabled |
 | sensor | **every** discovered device: `signal_strength` | `<EAG>_<DEV>_signal_strength` | **disabled** |
-| binary_sensor | SMS: `motion`; handle: `handle_open`, `handle_tilt`, `handle_closed`; D2-06-40: `mechanics_fault`; RWM: `smoke_alarm`, `battery_low`; descriptions: `liquid_detected` (F6-05-01), `window_open`, `actuator_not_responding`, `missing_temperature` (HeatArea), `actuator_low_battery`, `actuator_deactivated` (D1-4B-05), `circuit_in_use` (D1-4B-06) | `<EAG>_<DEV>_<key>` | enabled |
+| binary_sensor | SMS: `motion`; handle: `handle_open`, `handle_tilt`, `handle_closed`; RWM: `smoke_alarm`, `battery_low`; descriptions: `liquid_detected` (F6-05-01), `window_open`, `actuator_not_responding`, `missing_temperature` (HeatArea), `actuator_low_battery`, `actuator_deactivated` (D1-4B-05), `circuit_in_use` (D1-4B-06) | `<EAG>_<DEV>_<key>` | enabled |
+| binary_sensor | D5-00-01: `contact` (description, opening); OPUS motion detector: `motion` (upstream v0.6.0/v0.7.0b0) | `<EAG>_<DEV>_<key>` | enabled |
+| binary_sensor | D2-06-40: `mechanics_fault` (diagnostic, phase 6) | `<EAG>_<DEV>_mechanics_fault` | **disabled for new registry entries**; existing entries unchanged |
 
 Registry migrations (existing, unchanged): legacy multi-channel
 `<EAG>_<DEV>` → `<EAG>_<DEV>_ch0` (light, switch); fork suffixes
 `_illumination` → `_illuminance` and `_window_handle_lock` → `_autolock`.
+
+Repair issue (phase 9): when the fork-suffix migration removes a duplicate
+beta entry, `duplicate_beta_entity_<removed entity ID>` is created once
+(persistent, fixable via the repairs confirm flow, severity warning, data
+`config_entry_id`). It is deleted on confirmation or when the config entry is
+removed. The aggregate multi-channel cleanup raises no issue. No other code
+path creates issues; outages never do. **[Code][Test]**
+
+Display precision (phase 6 metadata review): every `battery_level` sensor
+(SMS, A5-04-01/02/03, OPUS motion detector) sets
+`suggested_display_precision = 0`, so the frontend shows whole percent. The
+state value, history and statistics are not rounded; a `display_precision`
+chosen by the user in the entity settings takes precedence. No other sensor
+sets a display precision. **[Code][Test]**
+
+Icons (phase 9): `icons.json` adds state icons for `sensor.handle_state`,
+`sensor.unlock_request`, `binary_sensor.handle_closed` and
+`binary_sensor.mechanics_fault`, keyed by the unchanged raw states. Unique IDs,
+translation keys, device classes, categories and defaults are unchanged.
+Icons are frontend metadata only. **[Code][Test]**
 
 ## 9. Services (public, unchanged)
 
@@ -239,3 +416,14 @@ optional `config_entry_id`.
 - Whether the gateway publishes `stream/device/<DEV>/dbm` for rockers (relevance
   of finding F1) is **[unverified]**.
 - Whether the Mosquitto bridge status is published as retained is **[unverified]**.
+- Whether the gateway answers every request exactly once, in request order,
+  and how late an answer can arrive after the 10 s timeout, is **[unverified]**;
+  so is whether the header `timestamp` is present, monotonic and usable for
+  ordering on every firmware (section 7.2).
+- Which devices or profiles receive ACK `201`, and how the gateway handles a
+  queued telegram that a newer command supersedes, is **[unverified]** on
+  hardware (section 7.1).
+- Whether every firmware publishes a retained `stream/devices/<DEV>/friendlyId`
+  leaf for each device (the discovery filter) is **[unverified]** on hardware;
+  the evidence is a field report of a numeric `friendlyId` topic (CHANGELOG)
+  and the flattened device model of the reference.

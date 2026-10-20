@@ -80,6 +80,10 @@ async def test_diagnostics_redact_identifiers_inside_titles_and_raw_errors() -> 
             "model": "GreenNet",
         },
         gateway_uptime="12 days",
+        late_answer_diagnostics=lambda owner: {
+            "unanswered_requests": 0,
+            "possibly_late_answers": 0,
+        },
     )
     entry = SimpleNamespace(
         entry_id="entry-id",
@@ -120,6 +124,10 @@ async def test_friendly_names_do_not_rename_diagnostic_schema_fields(friendly_na
         devices={device.device_id: device},
         gateway_info={"AABB1122": {"power": 12.5}},
         gateway_uptime="12 days",
+        late_answer_diagnostics=lambda owner: {
+            "unanswered_requests": 0,
+            "possibly_late_answers": 0,
+        },
     )
     entry = SimpleNamespace(
         entry_id="entry-id",

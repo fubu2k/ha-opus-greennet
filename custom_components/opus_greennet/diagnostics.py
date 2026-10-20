@@ -170,6 +170,14 @@ async def async_get_config_entry_diagnostics(
                 "last_update_source": device.last_update_source,
                 "dbm": device.dbm,
                 "last_command_error": device.last_command_error,
+                # Values accepted with ACK 201 and not yet reported back.
+                "deferred_commands": {
+                    channel_id: dict(values)
+                    for channel_id, values in device.deferred_commands.items()
+                },
+                # Requests that ended without an answer, and answers that may
+                # belong to such an earlier request (no wire request ID).
+                "late_answers": coordinator.late_answer_diagnostics(device.device_id),
                 "channels": {
                     channel_id: asdict(channel)
                     for channel_id, channel in device.channels.items()
@@ -189,6 +197,7 @@ async def async_get_config_entry_diagnostics(
                 "available": coordinator.available,
                 "info": coordinator.gateway_info,
                 "uptime": coordinator.gateway_uptime,
+                "late_answers": coordinator.late_answer_diagnostics(coordinator.eag_id),
             },
             "devices": devices,
         },
