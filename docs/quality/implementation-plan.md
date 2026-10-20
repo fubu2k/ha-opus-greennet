@@ -292,6 +292,17 @@ decision: until further notice all work happens on
 back into it, not into `main`. A later merge into `main` first needs a revert
 of the revert commit (`phases/phase-15.md` section 11).
 
+Status update 2026-10-20 (phase 16 = REST plan R2): base
+`feature/rest-api-integration` `4014b1c` (R0 merged by PR #16). Branch
+`feat/opus-r2-rest-only-decoupling`, report `phases/phase-16.md`. REST-only
+decoupling: new transport-neutral `domain.py` (re-exported unchanged by
+`coordinator.py` and `mqtt_transport.py`), `transport.OpusCoordinator` as a
+`typing.Protocol`, MQTT imported on demand in `__init__.py` and
+`config_flow.py`, `manifest.json` `dependencies: ["mqtt"]` changed to
+`after_dependencies: ["mqtt"]` after evidence for open question O-1. No
+behaviour, timing, wire or traffic change on MQTT or REST (A1–A5 for MQTT
+under decision D3). Not merged; merge approval remains separate.
+
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
 phase 8 -> phase 9 -> resumed phase 6 -> phases 10, 11, 12 -> phase 13.

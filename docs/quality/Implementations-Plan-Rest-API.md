@@ -498,6 +498,15 @@ Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
 
 ### R2 – REST-only-Entkopplung
 
+**Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r2-rest-only-decoupling`
+(Basis `feature/rest-api-integration` `4014b1c`), Bericht `phases/phase-16.md`;
+nicht gemergt. K1–K6 aufgelöst: `domain.py` (E2), `OpusCoordinator` als
+`Protocol` (E3), MQTT-Importe nur bei Bedarf in `__init__`/`config_flow` (E4),
+Fixture `hass_without_mqtt` (K5). O-1 geklärt: `after_dependencies: ["mqtt"]`
+mit Belegen (Hassfest am Referenzcommit grün, MQTT-Discovery und MQTT-Einträge
+unverändert, REST-Eintrag ohne MQTT-Integration). Keine Verhaltens-, Timing-,
+Wire- oder Verkehrsänderung auf MQTT oder REST. K7 bleibt offen (R8).
+
 - `domain.py` (E2), Re-Exporte in `coordinator.py`/`mqtt_transport.py`.
 - `OpusCoordinator` als `Protocol` (E3).
 - Lazy-Imports MQTT (`__init__`, `config_flow`); `manifest.json` nach Prüfung
@@ -603,7 +612,7 @@ bleiben unverändert (Ziel 5).
 
 | Nr. | Offen | Klärung |
 |-----|-------|---------|
-| O-1 | Startet Home Assistant die Integration ohne eingerichtete MQTT-Integration mit `after_dependencies`, und akzeptiert Hassfest den `mqtt`-Discovery-Schlüssel dann? | R2, Hassfest am Referenzcommit |
+| O-1 | Startet Home Assistant die Integration ohne eingerichtete MQTT-Integration mit `after_dependencies`, und akzeptiert Hassfest den `mqtt`-Discovery-Schlüssel dann? | **Geklärt in R2** (`phases/phase-16.md` Abschnitt 5): ja; `manifest.json` umgestellt |
 | O-2 | Wirkung und Unterstützung der Stream-Parameter | Hardwarevergleich, separate Freigabe |
 | O-3 | Ursache der Endlagenverzögerung: durch Upstream-Mitteilung als Aktor-Nachlauf erklärt (Abschnitt 3.3); Bestätigung an der eigenen Installation offen | R1 |
 | O-4 | Soll die Positionsschätzung (A-5) sichtbar bleiben, und wie wird die 5-s-Karenz bei Nachlauf > 5 s behandelt? | Entscheidung nach R6 |

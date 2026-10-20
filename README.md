@@ -204,7 +204,8 @@ rediscovery preserve a previously received alarm state.
    - **REST API**: the gateway reachable from Home Assistant on its REST port
      (`8080` by default) and its API credentials (see
      [REST API Setup](#rest-api-setup)). No broker, MQTT integration or bridge
-     is needed.
+     is needed; Home Assistant does not load the MQTT integration for a REST
+     entry.
 
 ## MQTT Bridge Setup (Required)
 
