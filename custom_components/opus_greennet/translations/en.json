@@ -6,8 +6,8 @@
         "title": "Opus GreenNet Bridge",
         "description": "Choose how Home Assistant reaches the gateway. Gateways that are already configured keep their connection.",
         "menu_options": {
-          "mqtt_bridge": "Through the MQTT broker (EAG identifier)",
-          "rest_api": "Directly through the gateway's REST API"
+          "rest_api": "Directly through the gateway's REST API",
+          "mqtt_bridge": "Through the MQTT broker (EAG identifier)"
         }
       },
       "mqtt_bridge": {

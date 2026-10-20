@@ -589,7 +589,12 @@ Rückläufer eines ersetzten Readers. MQTT-Pfad unverändert.
 
 ### R7 – Standard für neue Einträge (Entscheidung)
 
-- Optional: REST als erste Menüoption; MQTT-Hinweis „Fallback“.
+**Teilweise vorgezogen 2026-10-20 als R4.2** (Entscheidung des Maintainers):
+REST steht im Einrichtungsmenü an erster, MQTT an zweiter Stelle; Branch
+`feat/opus-r4-2-rest-first-menu`, Bericht `phases/phase-19.md`. Offen für R7:
+MQTT-Hinweis „Fallback“ in den Menütexten.
+
+- Optional: REST als erste Menüoption (**erledigt**, R4.2); MQTT-Hinweis „Fallback“.
 - Bestehende MQTT-Einträge werden nie automatisch umgestellt (A5 gilt für
   MQTT). Auswirkungen auf bestehende REST-Einträge und Entity-IDs werden im
   Bericht offengelegt (D3).

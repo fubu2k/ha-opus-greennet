@@ -6,8 +6,8 @@
         "title": "Opus GreenNet Bridge",
         "description": "Wähle, wie Home Assistant das Gateway erreicht. Bereits eingerichtete Gateways behalten ihre Verbindung.",
         "menu_options": {
-          "mqtt_bridge": "Über den MQTT-Broker (EAG-Kennung)",
-          "rest_api": "Direkt über die REST-API des Gateways"
+          "rest_api": "Direkt über die REST-API des Gateways",
+          "mqtt_bridge": "Über den MQTT-Broker (EAG-Kennung)"
         }
       },
       "mqtt_bridge": {
