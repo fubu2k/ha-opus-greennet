@@ -34,12 +34,12 @@ Rule -> implementation -> tests -> documentation for every rule in
 | `brands` | done | `brand/icon.png`, `icon@2x.png`, `logo.png`, `logo@2x.png` (local brand images, HA 2026.3+) | QS `test_brands` | [Brand images](https://developers.home-assistant.io/docs/core/integration/brand_images/) |
 | `common-modules` | done | `coordinator.py` (runtime coordinator), `entity.py` (`OpusGreenNetEntity`) | QS `test_common_modules` | README Project Structure |
 | `config-flow` | done | `config_flow.py`, `manifest.json` `config_flow: true`, `data_description` in `strings.json` | QS `test_config_flow_validator`; TR `test_config_flow_errors_and_aborts_are_translated` | README Configuration |
-| `config-flow-test-coverage` | done | `config_flow.py` at 100 % (CI gate) | `test_config_flow.py` (user, reauth and reconfigure steps, every error and a recovering submit, unique ID asserted); `script/check_coverage.py` | `phases/phase-07.md` |
+| `config-flow-test-coverage` | done | `config_flow.py` at 100 % (CI gate) | `test_config_flow.py` (user, reauth and reconfigure steps, every error and a recovering submit, unique ID asserted); `script/check_coverage.py` | `phases/rest-03.md` (CI gates) |
 | `dependency-transparency` | done | `manifest.json` `requirements: []` | QS `test_no_requirements_and_injected_websession` | – |
 | `docs-actions` | done | `services.yaml`, service strings | TR `test_services_yaml_matches_service_strings` | README Services |
 | `docs-conditions` | exempt | No conditions provided | – | – |
 | `docs-high-level-description` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README introduction, Features |
-| `docs-installation-instructions` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Prerequisites, Upgrading from an MQTT version, Installation |
+| `docs-installation-instructions` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Prerequisites, Upgrading (1.0 migration), Installation |
 | `docs-removal-instructions` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Removing the integration |
 | `docs-triggers` | exempt | No triggers provided (no `device_trigger.py`, no trigger platform) | – | – |
 | `entity-event-setup` | done | `entity.py` `async_added_to_hass` with `async_on_remove(async_dispatcher_connect(...))`, inherited by all entity classes | `test_event_lifecycle.py`, `test_binary_sensor_discovery.py::test_rediscovery_waits_for_live_binary_removal`, `test_ha_lifecycle.py::test_setup_creates_and_unloads_entry` | – |
@@ -62,8 +62,8 @@ Rule -> implementation -> tests -> documentation for every rule in
 | `integration-owner` | done | `manifest.json` `codeowners` | QS `test_integration_owner` | – |
 | `log-when-unavailable` | done | `_set_gateway_available` logs once at info on each change | `test_coordinator_edge_cases.py::test_unavailability_is_logged_once_and_recovery_once` | – |
 | `parallel-updates` | done | `PARALLEL_UPDATES = 0` in every platform; the coordinator serialises radio requests | QS `test_parallel_updates_in_every_platform`; `test_coordinator_commands.py::test_global_send_queue_keeps_one_request_in_flight` | – |
-| `reauthentication-flow` | done | `config_flow.py` `async_step_reauth` / `reauth_confirm`; `ConfigEntryAuthFailed` in setup; `entry.async_start_reauth` on HTTP 401 at runtime | `test_config_flow.py::test_legacy_mqtt_entry_asks_for_the_gateway_address`, `::test_reauth_rejects_a_different_gateway`; `test_coordinator_stream.py::test_stream_auth_failure_starts_reauth_once` | README Upgrading from an MQTT version |
-| `test-coverage` | done | CI: `fail_under = 97`, `script/check_coverage.py` (> 95 % per module) | `tests/test_coverage_gate.py` | `phases/phase-07.md` |
+| `reauthentication-flow` | done | `config_flow.py` `async_step_reauth` / `reauth_confirm`; `ConfigEntryAuthFailed` in setup; `entry.async_start_reauth` on HTTP 401 at runtime | `test_config_flow.py` (an entry created before 1.0 asks for the gateway address), `::test_reauth_rejects_a_different_gateway`; `test_coordinator_stream.py::test_stream_auth_failure_starts_reauth_once` | README Upgrading (1.0 migration) |
+| `test-coverage` | done | CI: `fail_under = 97`, `script/check_coverage.py` (> 95 % per module) | `tests/test_coverage_gate.py` | `phases/rest-03.md` (CI gates) |
 
 ## Gold
 
@@ -97,4 +97,4 @@ Rule -> implementation -> tests -> documentation for every rule in
 |------|--------|----------------|-------|---------------|
 | `async-dependency` | exempt | No Python requirements; aiohttp ships with Home Assistant | QS `test_no_requirements_and_injected_websession` | – |
 | `inject-websession` | done | `OpusGatewayClient` receives `async_get_clientsession(hass)` in `__init__.py` and `config_flow.py` | QS `test_no_requirements_and_injected_websession` | – |
-| `strict-typing` | done | `[tool.mypy] strict = true` for all modules; CI step `python -m mypy`; typed `OpusGreenNetConfigEntry` | QS `test_strict_typing_requires_typed_config_entry_everywhere`, `test_strict_typing_gate_is_configured_and_enforced_in_ci` | `phases/phase-05.md` |
+| `strict-typing` | done | `[tool.mypy] strict = true` for all modules; CI step `python -m mypy`; typed `OpusGreenNetConfigEntry` | QS `test_strict_typing_requires_typed_config_entry_everywhere`, `test_strict_typing_gate_is_configured_and_enforced_in_ci` | `phases/rest-03.md` (CI gates) |
