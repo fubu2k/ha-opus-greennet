@@ -202,6 +202,11 @@ async def async_get_config_entry_diagnostics(
                 "available": coordinator.available,
                 "info": coordinator.gateway_info,
                 "uptime": coordinator.gateway_uptime,
+                # REST only: seconds from opening the event stream to its
+                # first device list at setup (phase R5 measurement).
+                "first_device_list_seconds": getattr(
+                    coordinator, "first_device_list_seconds", None
+                ),
                 "late_answers": coordinator.late_answer_diagnostics(coordinator.eag_id),
             },
             "devices": devices,

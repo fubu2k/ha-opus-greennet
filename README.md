@@ -457,7 +457,9 @@ zone does not by itself prove that it is currently heating.
 Entries on the REST transport keep one HTTP event stream to the gateway open
 (`GET /devices/stream`). Every stream starts with the complete device list,
 which resynchronises all state, and then delivers each telegram as the gateway
-handles it. If the stream ends, it is reopened after a short pause; if the
+handles it. At startup this first list is also the setup snapshot, so the
+device list is downloaded once per start, not twice; if it does not arrive
+within 30 seconds, Home Assistant retries the setup later. If the stream ends, it is reopened after a short pause; if the
 gateway cannot be reached, entities become unavailable. The pause starts at 1
 second, doubles after every attempt up to 60 seconds and is lengthened by a
 random share of up to 25 %. A stream that closes within 10 seconds of
@@ -472,7 +474,9 @@ stream after a gateway restart. It never confirms or changes the state of a
 device. Every 30 minutes the gateway's device list is read again to refresh
 values that the stream does not carry (battery level, signal strength, cover
 movement times) and to add newly paired devices. This list comes from the
-gateway's device model; it sends no radio telegram and queries no device.
+gateway's device model; it sends no radio telegram and queries no device. A
+telegram that arrives while the list is being read keeps its newer signal
+strength and last-seen time.
 
 Commands are HTTP requests; the gateway's response is the acknowledgement and
 belongs to exactly that request, so the late-answer ambiguity of the MQTT
@@ -1076,6 +1080,7 @@ tests/
 ├── test_rest_requests.py        # REST health probe, reauth and request priorities
 ├── test_rest_stream.py          # REST event stream lifecycle and reconnects
 ├── test_rest_stream_backoff.py  # REST stream backoff with jitter, short-lived streams, connection generation
+├── test_rest_stream_first.py    # REST stream-first setup, first device list deadline, fresh list metadata
 ├── test_rest_telegrams.py       # REST telegrams, foreign commands and own echoes
 ├── test_rest_edge_cases.py      # REST coordinator edge cases
 ├── test_rest_lifecycle.py       # End-to-end REST lifecycle through Home Assistant

@@ -344,7 +344,17 @@ are added over REST only: the manual setup shows the REST form directly and an
 MQTT-discovered gateway opens the same REST form (EURID suggested as
 password). Existing MQTT entries are not touched and can still be switched in
 the reconfigure flow (A5). No runtime, request or traffic change of either
-transport (A1–A4). Not yet merged; CI pending.
+transport (A1–A4). Merged into `feature/rest-api-integration` via PR #24
+(`bcb6276`); CI run `39449339335` green on the branch.
+
+Status update 2026-10-20 (phase 21 = REST plan R5): base
+`feature/rest-api-integration` `bcb6276`. Branch
+`feat/opus-r5-stream-first-start`, report `phases/phase-21.md`. Stream-first
+setup: the stream's first device list replaces `GET /devices` at setup and
+reload (B-8, one device list fewer per start), 30 s deadline, measured time
+in diagnostics; the 30 min list keeps newer telegram metadata (B-5). REST
+behaviour changes disclosed under D3; MQTT path untouched (A1–A5). Not yet
+merged; CI pending.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:

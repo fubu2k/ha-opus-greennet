@@ -56,12 +56,14 @@ async def test_setup_reads_identity_uptime_and_devices(
     assert coordinator.available
     assert coordinator.gateway_uptime == "3600"
     assert coordinator.gateway_info["version"] == "OPUS-GW test"
+    # Stream first (phase R5): the stream's device list replaces GET /devices.
     assert [request[:2] for request in gateway.requests[:4]] == [
         ("GET", "/system/info"),  # config flow
         ("GET", "/system/info"),
         ("GET", "/system/uptime"),
-        ("GET", "/devices"),
+        ("GET", "/devices/stream"),
     ]
+    assert gateway.requests_to("GET", "/devices") == []
     entity_id = await wait_for_entity(hass, "switch", f"AABB0011_{SWITCH}")
     assert hass.states.get(entity_id).state == "on"
 

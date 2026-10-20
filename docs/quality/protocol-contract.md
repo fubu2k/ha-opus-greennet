@@ -497,8 +497,8 @@ without a readable gateway document reports its HTTP status instead of
 |-----------------|---------|-------|
 | `GET /system/info` | Config flow, setup | Gateway (EURID, version, base ID, HomeKit setup code; the latter two redacted in diagnostics) |
 | `GET /system/uptime` | Setup, health check every 60 s (`GATEWAY_HEALTH_INTERVAL`, same as MQTT) | Gateway |
-| `GET /devices` | Setup; device list refresh every 30 min (`DEVICE_LIST_REFRESH_INTERVAL`) | Gateway device model, no radio telegram **[HW-upstream]** |
-| `GET /devices/stream` | Long-lived event stream; reopened after it ends or after 15 min without data | Gateway |
+| `GET /devices` | Device list refresh every 30 min (`DEVICE_LIST_REFRESH_INTERVAL`); no longer at setup (phase 21/R5) | Gateway device model, no radio telegram **[HW-upstream]** |
+| `GET /devices/stream` | Setup (its first document is the setup snapshot, phase 21/R5); long-lived, reopened after it ends or after 15 min without data | Gateway |
 | `GET /devices/{id}` | A telegram from a device missing in the device list; at most once per hour per device | Gateway device model |
 | `PUT /devices/{id}/state` | User commands; status queries 5/20 s after unconfirmed commands (covers 10/20 s after the travel estimate) | Potentially radio |
 | `GET`/`PUT /devices/{id}/configuration`, `GET …/parameters` | Explicit service actions only | Radio (ReCom) |
@@ -525,6 +525,18 @@ never repeated and are dropped when superseded or queued before an outage.
   generation; a reader replaced by a restart (failed probe, falling uptime)
   applies no further document, changes no availability and closes its HTTP
   response at once (`contextlib.aclosing`). **[Code][Test]**
+- Stream first (phase 21/R5, plan E7): setup reads `GET /system/info` and
+  `GET /system/uptime`, opens the stream and waits for its first device list
+  (`FIRST_DEVICE_LIST_TIMEOUT` 30 s); that list is the only setup snapshot
+  and the same reader continues. No list in time, or a first attempt that
+  fails or ends before the list, fails setup (`ConfigEntryNotReady`; HTTP
+  401/403 → reauthentication). The measured time is logged at debug level and
+  shown in diagnostics (`gateway.first_device_list_seconds`).
+  **[Code][Test]**
+- The 30 min list never replaces the signal strength or last-seen time of a
+  telegram received after its request started (finding B-5). Stream
+  snapshots are ordered with the telegrams on the same connection and always
+  apply. **[Code][Test]**
 - Battery level is not streamed; it comes from the device list. Status replies
   that do not change state are not streamed. **[HW-upstream]**
 - There are no retained messages on REST. Section 6 (A4) therefore does not

@@ -443,6 +443,12 @@ Snapshots, eine Geräteliste weniger je Start. Alternative „beides behalten“
 bleibt möglich, falls Hardware zeigt, dass der erste Stream-Snapshot verzögert
 kommt; Entscheidung in R5 nach Messung.
 
+**Umgesetzt in R5 (Phase 21):** Ablauf wie oben, Frist 30 s. `GET
+/system/uptime` bleibt beim Setup (Ausgangswert der Neustarterkennung). Die
+Messung auf Hardware erfolgt über `gateway.first_device_list_seconds` in der
+Diagnose; liegt sie nahe an 30 s, wird die Frist angepasst oder die
+Alternative gewählt.
+
 ## 8. Phasenplan
 
 Arbeitszweig (Entscheidung 2026-10-20): Bis auf Weiteres wird nur auf
@@ -565,6 +571,14 @@ Rückläufer eines ersetzten Readers. MQTT-Pfad unverändert.
 
 ### R5 – Start und Resynchronisierung
 
+**Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r5-stream-first-start`
+(Basis `feature/rest-api-integration` `bcb6276`), Bericht `phases/phase-21.md`;
+noch nicht gemergt, CI ausstehend. Stream-first nach 7.2 (B-8 behoben: kein
+`GET /devices` mehr beim Start), Frist 30 s für die erste Liste
+(`FIRST_DEVICE_LIST_TIMEOUT`), gemessene Dauer in Log und Diagnose; B-5
+behoben (Telegramm nach Anfragebeginn behält `dbm`/`lastSeen`). Die
+Hardware-Messung der Frist steht aus (Wert aus der Diagnose ablesen).
+
 - Stream-first nach Abschnitt 7.2 (E7); Frist für das erste Dokument messen.
 - B-5: Metadaten der 30-min-Liste nur übernehmen, wenn kein neueres Telegramm
   seit Anfragebeginn kam.
@@ -599,7 +613,8 @@ Neue Gateways werden nur noch über REST eingerichtet. Der Einrichtungsdialog
 zeigt direkt Host, Port, Benutzer und Passwort (kein Menü), auch ein über MQTT
 entdecktes Gateway führt in dieses REST-Formular. MQTT bleibt für bestehende
 Einträge und als Wahl im Neu-konfigurieren-Menü. Branch
-`feat/opus-r4-3-rest-only-setup`, Bericht `phases/phase-20.md`. Damit ist der
+`feat/opus-r4-3-rest-only-setup`, Bericht `phases/phase-20.md`; gemergt über
+PR #24 (`bcb6276`), CI-Lauf `39449339335` grün. Damit ist der
 Menüteil von R7 erledigt; ein „Fallback“-Hinweis entfällt.
 
 - Optional: REST als erste Menüoption (**erledigt**, R4.2; ersetzt durch R4.3: REST als einzige Einrichtung); MQTT-Hinweis „Fallback“ (entfällt).
