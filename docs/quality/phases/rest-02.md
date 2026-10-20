@@ -1,7 +1,7 @@
 # REST phase 02 – domain model (in-place update, run duration, position origin, regressions)
 
-- **Status:** implemented on branch `feat/rest-only-r6`, not yet merged. CI
-  pending (section 5). No version change, no release.
+- **Status:** implemented on branch `feat/rest-only-r6`, PR #36, not yet merged.
+  CI green (section 5). No version change, no release.
 - **Source:** port of the earlier fork phase R6 (R6a + R6b) onto the REST-only
   base; maintainer decision for the visible part: **1a + 2a** (section 6).
 - **Base:** `feat/rest-only-r3-r5` (REST phase 01), PR base
@@ -59,7 +59,7 @@ The key name `lastVerticalMovementTime` comes from an upstream note and is
 
 | Run | Head | Result |
 |-----|------|--------|
-| pending | – | – |
+| [39493773301](https://github.com/fubu2k/ha-opus-greennet/actions/runs/39493773301) | `63a7bfc` | passed: HA latest stable, moving hassfest |
 
 ## 6. Decision O-4 (maintainer, 2026-10-20): 1a + 2a
 
