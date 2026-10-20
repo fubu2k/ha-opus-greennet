@@ -438,8 +438,11 @@ optional `config_entry_id`.
 Ported from upstream `kegelmeier/ha-opus-greennet`, branch
 `feat/rest-transport` (`20b34c9`, contract of that branch). Upstream observed
 the REST API on a real gateway; those observations are marked **[HW-upstream]**
-(OPUS-GW v1.21.31, API 2.6.3.0, 65 devices). This repository has not observed
-the REST transport on hardware.
+(OPUS-GW v1.21.31, API 2.6.3.0, 65 devices). Practical tests the maintainer
+ran on the own installation after phase 14 are marked **[Praxis]**
+(reported, not independently verified, section 12.9). Information passed on in
+writing from the upstream project with measurements of its installation is
+marked **[Upstream-Mitteilung]**.
 
 ### 12.1 Selection and identity (A5)
 
@@ -564,10 +567,65 @@ No row adds a radio request. The 30 min device list read is a new periodic
 gateway request on REST entries only; it is a read of the gateway model, not a
 device poll (implementation plan section 3, phase 14 amendment). **[Code][Test]**
 
-### 12.9 Not verified in this repository
+The maintainer approved this read on 2026-10-20 (decision D2,
+`Implementations-Plan-Rest-API.md` section 0). Since decision D3 (same
+section, 0.1) the guardrails A1–A5 bind only the MQTT transport; REST traffic
+is defined by best practices and Home Assistant requirements, and each change
+is disclosed with before/after traffic in its phase report. The MQTT column of
+this table stays bound by A1.
 
-- REST behaviour on hardware (all **[HW-upstream]** statements come from the
-  upstream branch, not from this repository).
+### 12.9 Practical baseline and limits of verification
+
+Practical baseline **[Praxis]** (REST transport on the maintainer's own
+installation after phase 14; reported, not independently verified; the
+installed commit was not recorded because `manifest.json` reports `0.7.0b2` on
+every commit): connection after the migration of an entry; reload re-reads the
+device list and reconnects the stream; cover opening/closing indicators;
+state and position match reality; position commands and retargeting during
+travel; Stop with a position report after about 110 ms and immediate update;
+local rocker telegrams of cover actuators followed by position updates;
+F6-02-01 rocker: 6 press and 6 release telegrams, exactly one event entity
+update each, gateway to HA 7–19 ms, receipt to state write 0.9–1.5 ms. The
+sample proves no general exactly-once guarantee.
+
+Delayed end position after full cover travel:
+
+| Run | Time after command | Observation |
+|-----|-------------------:|-------------|
+| A (raw 0 = open, HA 100) | 0.48 s | position report `unknown`: last position kept, nothing confirmed **[Code]** |
+| A | 32.98 s | position 0.0, `gateway_to_ha_ms = 8` **[Praxis]** |
+| B (raw 100 = closed, HA 0) | 0.46 s / 33.10 s | `unknown`, then 100.0, `gateway_to_ha_ms = 19` **[Praxis]** |
+
+- `gateway_to_ha_ms` is HA time minus the gateway's telegram timestamp at
+  dispatch. It includes any clock offset between gateway and HA and measures
+  neither actuator to gateway nor the entity write **[Code]**. With
+  synchronised clocks the delay arises before the gateway receives the report.
+- Explanation **[Upstream-Mitteilung]**: on travel into the fully open or
+  closed end position a D2-05 actuator keeps the motor switched on for a few
+  seconds beyond the configured travel time; the motor's limit switch stops
+  the shutter physically, but the actuator sends its final position only when
+  it switches off. Intermediate positions and Stop have no overrun (consistent
+  with the 110 ms Stop report). Upstream measured full runs 3.5–5.7 s longer
+  than the configured travel time (for example 20.68 s configured, 26.37 s last
+  run); Apple HomeKit on the same gateway received each end position at the
+  same moment. The delay is actuator behaviour, not caused by the REST
+  transport. Confirmation on the own installation: REST plan phase R1.
+- Effect on the travel estimate **[Code]**: the estimate ends at configured
+  travel time plus `COVER_MOVEMENT_GRACE_SECONDS` (5.0 s) or at the first valid
+  position report, whichever comes first. If the overrun exceeds the grace,
+  `_finish_cover_movement` sets the target as an assumed position shortly
+  before the real report replaces it. Unchanged; any change of the grace or of
+  the visibility of assumed positions needs a separate decision (REST plan R6,
+  O-4). No extra status query is sent. On MQTT none may be added (A1); on
+  REST a change follows plan section 0.1 (D3) and is disclosed with its traffic.
+- `lastVerticalMovementTime` of the device list is not read by the code; only
+  `verticalMovementTime` and `rotationTime` are used **[Code]**.
+
+Not verified in this repository:
+
+- REST behaviour on hardware beyond the practical baseline above (all
+  **[HW-upstream]** statements come from the upstream branch).
+- The actuator overrun on the own installation (REST plan R1).
 - Whether the gateway ever sends `content = "device"` documents.
 - Whether `GET /devices` can trigger radio traffic on any firmware; upstream
   observed none.

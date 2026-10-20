@@ -162,7 +162,8 @@ check .`, `ruff format --check .`, `python -m mypy`, `pytest -v --cov …`,
 
 ## 8. Hardware observations, unknowns and residual risks
 
-- This repository has not run the REST transport on hardware. Upstream
+- At the time of this phase this repository had not run the REST transport
+  on hardware (for the maintainer's later practical tests see section 9.1). Upstream
   observed it on OPUS-GW v1.21.31 (API 2.6.3.0, 65 devices), including the
   echo timing and the absence of streamed battery levels
   (`protocol-contract.md` section 12, **[HW-upstream]**).
@@ -182,3 +183,32 @@ check .`, `ruff format --check .`, `python -m mypy`, `pytest -v --cov …`,
   dimmer with and without transition and a cover with stop.
 - Open decisions: port the D2-01 ramping mode to MQTT (changes MQTT wire
   values); consolidate `protocol.py` with the MQTT helpers (plan section 19).
+
+### 9.1 Addendum 2026-10-20 (phase 15 = REST plan R0)
+
+Added after this phase; the sections above stay as recorded.
+
+- **Decision D2 (approved):** the maintainer approved the section 3 amendment
+  on 2026-10-20: REST entries read `GET /devices` every 30 minutes
+  (`DEVICE_LIST_REFRESH_INTERVAL`), because the event stream does not carry
+  battery level, signal strength and movement times. The review item above is
+  closed by this decision.
+- **Decision D3:** since 2026-10-20 the guardrails A1–A5 bind only the MQTT
+  transport; REST is developed further according to best practices and Home
+  Assistant requirements (`Implementations-Plan-Rest-API.md` section 0.1).
+- **Practical tests [Praxis]:** after this phase the maintainer ran the REST
+  transport on the own installation and reported (not independently verified):
+  connection after migration, reload re-reads the device list and reconnects
+  the stream, cover opening/closing indicators, positions matching reality,
+  retargeting during travel, Stop with a position report after about 110 ms,
+  local rocker telegrams of cover actuators followed by position updates, and
+  for an F6-02-01 rocker 6 press and 6 release telegrams with exactly one event
+  entity update each (gateway to HA 7–19 ms). This sample does not prove a
+  general exactly-once guarantee. Details: `Implementations-Plan-Rest-API.md`
+  section 3.1, protocol contract 12.9.
+- **Delayed end position after full travel:** observed about 33 s after the
+  command (raw `unknown` at about 0.5 s). Upstream reported this as expected
+  D2-05 actuator overrun (3.5–5.7 s beyond the configured travel time, final
+  report only when the motor switches off); not caused by the REST transport.
+  Confirmation on the own installation is REST plan phase R1.
+- **Follow-up plan:** `Implementations-Plan-Rest-API.md` (phases R0–R8).
