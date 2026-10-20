@@ -1,7 +1,7 @@
 # REST phase 04 – quality documents for the REST-only series
 
-- **Status:** implemented on branch `docs/rest-only-quality`, not yet merged.
-  CI pending (section 4). No code change, no version change, no release.
+- **Status:** implemented on branch `docs/rest-only-quality`, PR #38, not yet
+  merged. CI green (section 4). No code change, no version change, no release.
 - **Base:** `feature/rest-only` `1b850f5` (REST phases 01–03 merged, CI run
   39494498982 green).
 
@@ -40,7 +40,7 @@ identity changed.
 
 | Run | Head | Result |
 |-----|------|--------|
-| pending | – | – |
+| [39495545562](https://github.com/fubu2k/ha-opus-greennet/actions/runs/39495545562) | `247f437` | passed: HA 2026.10.2 (fixed reference), Hassfest at 2026.10.2, HA latest stable, moving hassfest |
 
 ## 5. Next step
 
