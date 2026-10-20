@@ -21,11 +21,16 @@ from homeassistant.exceptions import HomeAssistantError
 from custom_components.opus_greennet.api import (
     REQUEST_TIMEOUT,
     OpusTimeoutError,
-    PriorityLock,
     decode_response,
 )
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
-from custom_components.opus_greennet.rest_coordinator import OpusGreenNetRestCoordinator
+from custom_components.opus_greennet.rest_coordinator import (
+    PRIORITY_BACKGROUND,
+    PRIORITY_COMMAND,
+    PRIORITY_QUERY,
+    OpusGreenNetRestCoordinator,
+    PriorityLock,
+)
 from tests.fake_gateway import FakeGateway, device_object, telegram
 from tests.ha_helpers import setup_rest_bridge, wait_until
 
@@ -415,3 +420,55 @@ async def test_priority_lock_skips_already_cancelled_waiters() -> None:
     lock._waiters.append((0, -1, stale))
     lock.release()
     assert lock.locked() is False
+
+
+# ── Priority lock (moved from api.py in phase R3) ─────────────────────────
+
+
+async def test_priority_lock_orders_waiters_by_priority_then_fifo() -> None:
+    lock = PriorityLock()
+    order: list[str] = []
+    await lock.acquire()
+
+    async def waiter(name: str, priority: int) -> None:
+        await lock.acquire(priority)
+        order.append(name)
+        lock.release()
+
+    tasks = [
+        asyncio.create_task(waiter("background", PRIORITY_BACKGROUND)),
+        asyncio.create_task(waiter("query", PRIORITY_QUERY)),
+        asyncio.create_task(waiter("command-1", PRIORITY_COMMAND)),
+        asyncio.create_task(waiter("command-2", PRIORITY_COMMAND)),
+    ]
+    await asyncio.sleep(0)
+    assert lock.queue_depth == 4
+    lock.release()
+    await asyncio.gather(*tasks)
+    assert order == ["command-1", "command-2", "query", "background"]
+    assert not lock.locked()
+
+
+async def test_priority_lock_cancelled_waiter_leaves_queue() -> None:
+    lock = PriorityLock()
+    await lock.acquire()
+    task = asyncio.create_task(lock.acquire())
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert lock.queue_depth == 0
+    lock.release()
+    assert not lock.locked()
+
+
+async def test_priority_lock_cancel_after_handover_releases() -> None:
+    lock = PriorityLock()
+    await lock.acquire()
+    task = asyncio.create_task(lock.acquire())
+    await asyncio.sleep(0)
+    lock.release()  # hands ownership to the waiter
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not lock.locked()

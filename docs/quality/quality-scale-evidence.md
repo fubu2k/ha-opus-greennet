@@ -123,7 +123,7 @@ Rule -> implementation -> tests -> documentation for every rule in
 | Rule | Status | Implementation | Tests | Documentation |
 |------|--------|----------------|-------|---------------|
 | `async-dependency` | exempt | No Python requirements; REST uses aiohttp shipped with Home Assistant through `api.py` | QS `test_no_requirements_for_dependency_rules` | – |
-| `inject-websession` | done | `async_get_clientsession(hass)` in `__init__.py` and `config_flow.py`; `api.py` never creates a session | QS `test_no_requirements_for_dependency_rules`; `test_rest_api.py` | – |
+| `inject-websession` | done | `async_get_clientsession(hass)` in `__init__.py` and `config_flow.py`; `api.py` never creates a session | QS `test_no_requirements_for_dependency_rules`; `test_rest_api.py`; `test_rest_client_hardening.py::test_integration_never_creates_its_own_client_session`, `::test_client_never_closes_the_injected_session` | `phases/phase-17.md` |
 | `strict-typing` | done | `[tool.mypy] strict = true` for all modules; CI step `python -m mypy`; typed `OpusGreenNetConfigEntry` | QS `test_strict_typing_requires_typed_config_entry_everywhere`, `test_strict_typing_gate_is_configured_and_enforced_in_ci` | `phases/phase-05.md` |
 
 ## Exemption justifications (phase 13)

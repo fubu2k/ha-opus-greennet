@@ -25,13 +25,16 @@ TO_REDACT = {
     "address",
     "apikey",
     "authorization",
-    # REST system information (phase 14): base ID and HomeKit setup code.
+    # REST system information (phase 14): base ID and HomeKit setup code,
+    # also as the setup payload of the HomeKit QR code (X-HM://...), which
+    # encodes the same code and allows pairing the gateway.
     "baseid",
     "deviceid",
     "eagid",
     "eurid",
     "friendlyid",
     "homekitpin",
+    "homekitqr",
     "host",
     "hostname",
     "ip",
@@ -202,6 +205,11 @@ async def async_get_config_entry_diagnostics(
                 "available": coordinator.available,
                 "info": coordinator.gateway_info,
                 "uptime": coordinator.gateway_uptime,
+                # REST only: seconds from opening the event stream to its
+                # first device list at setup (phase R5 measurement).
+                "first_device_list_seconds": getattr(
+                    coordinator, "first_device_list_seconds", None
+                ),
                 "late_answers": coordinator.late_answer_diagnostics(coordinator.eag_id),
             },
             "devices": devices,

@@ -9,12 +9,13 @@ depend on the transport.
 
 Lifecycle:
 
-* Setup reads the gateway identity, its uptime and the complete device list,
-  so every entity can be created with current state before the platforms
-  start.
-* A background task keeps ``GET /devices/stream`` open. Each new stream
-  begins with the complete device list (a full resynchronisation) and then
-  delivers every telegram the moment the gateway handles it.
+* Setup reads the gateway identity and its uptime, then opens the event
+  stream and waits for its first document, the complete device list (stream
+  first, phase R5). Every entity is created with current state before the
+  platforms start, from one snapshot instead of two.
+* The same background task keeps ``GET /devices/stream`` open. Each new
+  stream begins with the complete device list (a full resynchronisation) and
+  then delivers every telegram the moment the gateway handles it.
 * A health probe reads the uptime every minute (the same interval as the
   MQTT transport). It detects an unreachable gateway even while the stream is
   silent, and a gateway restart (falling uptime) whose old stream connection
@@ -30,10 +31,15 @@ Lifecycle:
 from __future__ import annotations
 
 import asyncio
+import heapq
+import itertools
 import logging
+import random
 from collections.abc import Callable, Coroutine, Sequence
+from contextlib import aclosing
 from datetime import datetime, timedelta
 from time import monotonic, time
+from typing import Final
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -42,9 +48,6 @@ from homeassistant.helpers.event import async_call_later, async_track_time_inter
 
 from . import protocol
 from .api import (
-    PRIORITY_BACKGROUND,
-    PRIORITY_COMMAND,
-    PRIORITY_QUERY,
     RECOM_TIMEOUT,
     OpusApiError,
     OpusAuthError,
@@ -52,7 +55,6 @@ from .api import (
     OpusGatewayClient,
     OpusResponseError,
     OpusTimeoutError,
-    PriorityLock,
     gateway_uptime_value,
     response_status,
 )
@@ -69,7 +71,7 @@ from .const import (
     RAMPING_MODE_FADE,
     RAMPING_MODE_SWITCH,
 )
-from .coordinator import (
+from .domain import (
     ACK_STATUS_DEFERRED,
     GATEWAY_HEALTH_INTERVAL,
     OUTBOUND_STATE_RECONCILIATION_DELAYS,
@@ -80,9 +82,9 @@ from .coordinator import (
     SUPERSEDED,
     CommandDelivery,
     CoverMovement,
+    request_error,
 )
 from .enocean_device import EnOceanDevice
-from .mqtt_transport import request_error
 from .wire import JsonObject, WireFunction, WireMapping, as_object, object_items
 
 _LOGGER = logging.getLogger(__name__)
@@ -93,9 +95,28 @@ _LOGGER = logging.getLogger(__name__)
 # a read of the gateway's device model and causes no radio telegram (protocol
 # contract section 12.2).
 DEVICE_LIST_REFRESH_INTERVAL = timedelta(minutes=30)
-# Pause before the next stream attempt after consecutive failures (seconds).
-# A stream that ended after it had connected is reopened immediately.
-STREAM_RETRY_DELAYS = (1.0, 2.0, 5.0, 10.0, 30.0, 60.0)
+# Reconnecting the event stream (phase R4, finding B-2). Every new stream
+# starts with the complete device list, so each attempt is a full download
+# from the gateway (no radio telegram). The pause before the next attempt
+# grows exponentially from STREAM_BACKOFF_INITIAL to STREAM_BACKOFF_MAX
+# seconds and is lengthened by a random share of up to STREAM_BACKOFF_JITTER,
+# so it is never shorter than the nominal value. A pause is taken after every
+# stream, also after one that connected: a stream that ended within
+# STREAM_MIN_HEALTHY_SECONDS of its first document counts as a failure, so a
+# gateway that closes every connection right after the device list cannot
+# cause a tight reconnect loop. Only a stream that stayed open longer resets
+# the backoff.
+STREAM_BACKOFF_INITIAL = 1.0
+STREAM_BACKOFF_MAX = 60.0
+STREAM_BACKOFF_JITTER = 0.25
+STREAM_MIN_HEALTHY_SECONDS = 10.0
+# Setup opens the event stream and waits for its first device list instead of
+# reading GET /devices first (phase R5, plan section 7.2, findings B-8/E7).
+# The list is the first document the gateway writes; it is as large as the
+# answer of GET /devices, which has a 10 s request timeout. 30 s leaves room
+# for large installations on a slow gateway; without the list by then, setup
+# fails and Home Assistant retries it with its own backoff.
+FIRST_DEVICE_LIST_TIMEOUT = 30.0
 # A telegram from a device missing in the device list triggers one lookup of
 # that device; failed lookups are retried after this many seconds.
 UNKNOWN_DEVICE_RETRY_SECONDS = 3600.0
@@ -104,6 +125,84 @@ UNKNOWN_DEVICE_RETRY_SECONDS = 3600.0
 # acknowledgement; within this time an echo with the same content is not
 # mistaken for a command from another controller.
 OWN_COMMAND_ECHO_SECONDS = 2.0
+
+# Radio queue priorities: lower values are dispatched first. User-initiated
+# control commands must never wait behind status queries, and delayed
+# (background) reconciliation queries must never compete with either of them.
+# The values match the MQTT transport (``mqtt_transport``); moved here from
+# ``api.py`` in phase R3 because scheduling is coordinator policy, not HTTP.
+PRIORITY_COMMAND: Final = 0
+PRIORITY_QUERY: Final = 10
+PRIORITY_BACKGROUND: Final = 20
+
+
+def stream_retry_delay(failures: int, random_share: float | None = None) -> float:
+    """Return the pause in seconds before the next event stream attempt.
+
+    ``failures`` counts the stream attempts since the last healthy stream.
+    The nominal pause doubles with every failure up to ``STREAM_BACKOFF_MAX``;
+    a random share (0 to 1, drawn when ``random_share`` is None) adds up to
+    ``STREAM_BACKOFF_JITTER`` of it, so several Home Assistant instances that
+    lost the same gateway do not reconnect in lockstep.
+    """
+    nominal = min(
+        STREAM_BACKOFF_MAX,
+        STREAM_BACKOFF_INITIAL * 2.0 ** min(max(failures, 0), 32),
+    )
+    share = random.random() if random_share is None else random_share
+    share = min(max(share, 0.0), 1.0)
+    return nominal * (1.0 + STREAM_BACKOFF_JITTER * share)
+
+
+class PriorityLock:
+    """An asyncio lock whose waiters are woken by priority, then FIFO.
+
+    It serialises the requests that may reach a radio device (state PUTs and
+    ReCom), so exactly one of them is in flight per gateway.
+    """
+
+    def __init__(self) -> None:
+        self._locked = False
+        self._waiters: list[tuple[int, int, asyncio.Future[None]]] = []
+        self._counter = itertools.count()
+
+    @property
+    def queue_depth(self) -> int:
+        """Return the number of waiters."""
+        return len(self._waiters)
+
+    def locked(self) -> bool:
+        """Return whether the lock is currently held."""
+        return self._locked
+
+    async def acquire(self, priority: int = PRIORITY_COMMAND) -> None:
+        """Acquire the lock, queueing by priority while it is held."""
+        if not self._locked and not self._waiters:
+            self._locked = True
+            return
+        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        entry = (priority, next(self._counter), future)
+        heapq.heappush(self._waiters, entry)
+        try:
+            await future
+        except BaseException:
+            if future.done() and not future.cancelled():
+                # Ownership was handed over just before cancellation.
+                self.release()
+            else:
+                self._waiters.remove(entry)
+                heapq.heapify(self._waiters)
+            raise
+
+    def release(self) -> None:
+        """Hand the lock to the highest-priority waiter, if any."""
+        while self._waiters:
+            _, _, future = heapq.heappop(self._waiters)
+            if not future.done():
+                # Ownership transfers directly; the lock stays held.
+                future.set_result(None)
+                return
+        self._locked = False
 
 
 class GatewayMismatchError(OpusApiError):
@@ -134,6 +233,20 @@ class OpusGreenNetRestCoordinator:
         self._gateway_available = False
         self._stream_connected = False
         self._stream_task: asyncio.Task[None] | None = None
+        # Incremented for every new stream reader. A replaced reader may still
+        # hold documents it parsed before its cancellation takes effect; it
+        # drops them instead of applying stale state (phase R4).
+        self._stream_generation = 0
+        # Resolved by the stream with its first device list during setup, or
+        # failed with the error of the first stream attempt (phase R5).
+        self._first_device_list: asyncio.Future[None] | None = None
+        # Seconds from opening the stream to its first device list at setup
+        # (diagnostics; measurement asked for by REST plan R5).
+        self.first_device_list_seconds: float | None = None
+        # Monotonic time of the last received telegram per device; a device
+        # list requested before it never replaces its signal strength and
+        # last-seen time (finding B-5).
+        self._telegram_metadata_at: dict[str, float] = {}
         self._probe_task: asyncio.Task[None] | None = None
         self._refresh_task: asyncio.Task[None] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
@@ -169,19 +282,42 @@ class OpusGreenNetRestCoordinator:
         return not self._unloaded and self._gateway_available
 
     async def async_setup(self) -> None:
-        """Read identity, uptime and devices, then start the background work.
+        """Read identity and uptime, then take the devices from the stream.
 
-        Raises an ``OpusApiError`` when the gateway cannot be used yet.
+        The event stream starts with the complete device list; that list is the
+        only snapshot at setup (stream first, phase R5). The same reader keeps
+        the stream open afterwards. Raises an ``OpusApiError`` when the gateway
+        cannot be used yet: the error of the first stream attempt, or
+        ``OpusTimeoutError`` when no device list arrives within
+        ``FIRST_DEVICE_LIST_TIMEOUT``.
         """
         info = await self.client.async_get("/system/info")
         self._apply_system_info(info)
         self.gateway_uptime = gateway_uptime_value(
             await self.client.async_get("/system/uptime")
         )
-        self._apply_device_list(
-            await self.client.async_get("/devices"), authoritative=True
+        first = self.hass.loop.create_future()
+        self._first_device_list = first
+        opened_at = monotonic()
+        self._start_stream()
+        try:
+            async with asyncio.timeout(FIRST_DEVICE_LIST_TIMEOUT):
+                await asyncio.shield(first)
+        except TimeoutError as err:
+            raise OpusTimeoutError(
+                "The event stream sent no device list within "
+                f"{FIRST_DEVICE_LIST_TIMEOUT:.0f} s"
+            ) from err
+        finally:
+            self._first_device_list = None
+            if not first.done():
+                first.cancel()
+        self.first_device_list_seconds = round(monotonic() - opened_at, 3)
+        _LOGGER.debug(
+            "OPUS gateway %s sent its first device list after %.3f s",
+            self.eag_id,
+            self.first_device_list_seconds,
         )
-        self._set_gateway_available(True)
         self._timers.append(
             async_track_time_interval(
                 self.hass, self._async_health_tick, GATEWAY_HEALTH_INTERVAL
@@ -192,7 +328,16 @@ class OpusGreenNetRestCoordinator:
                 self.hass, self._async_refresh_tick, DEVICE_LIST_REFRESH_INTERVAL
             )
         )
-        self._start_stream()
+        # The stream's device list carries no ``configuration`` block on real
+        # gateways (OPUS-IQ-DOT 1.21.30; phase 21 hardware diagnostics: 0 of
+        # 10 covers had a movement time after a stream-first start). Cover
+        # movement and rotation times come only from GET /devices, so the
+        # metadata refresh runs once right away. It is not authoritative: live
+        # state stays with the stream, and newer telegram metadata is kept
+        # (B-5). No radio telegram is sent.
+        self._refresh_task = self._create_task(
+            self._async_refresh_device_list(), "device list refresh"
+        )
 
     async def async_unload(self) -> None:
         """Stop all background work and mark the gateway unavailable."""
@@ -275,7 +420,10 @@ class OpusGreenNetRestCoordinator:
     def _start_stream(self) -> None:
         if self._unloaded or self._auth_failed:
             return
-        self._stream_task = self._create_task(self._async_run_stream(), "stream")
+        self._stream_generation += 1
+        self._stream_task = self._create_task(
+            self._async_run_stream(self._stream_generation), "stream"
+        )
 
     @callback
     def _restart_stream(self) -> None:
@@ -285,38 +433,95 @@ class OpusGreenNetRestCoordinator:
         self._stream_connected = False
         self._start_stream()
 
-    async def _async_run_stream(self) -> None:
-        """Keep the event stream open until unload."""
+    def _is_current_stream(self, generation: int) -> bool:
+        """Return whether ``generation`` is the reader that may apply state."""
+        return not self._unloaded and generation == self._stream_generation
+
+    async def _async_run_stream(self, generation: int) -> None:
+        """Keep the event stream open until unload or replacement.
+
+        Only the reader of the current ``generation`` applies documents and
+        changes availability. A pause from ``stream_retry_delay`` follows every
+        stream; ``failures`` is reset only by a stream that stayed open for at
+        least ``STREAM_MIN_HEALTHY_SECONDS``. Rejected credentials end the
+        reader without another attempt.
+        """
         failures = 0
-        while not self._unloaded:
-            connected = False
+        while self._is_current_stream(generation):
+            connected_at: float | None = None
             try:
-                async for document in self.client.async_stream():
-                    if not connected:
-                        connected = True
-                        failures = 0
-                        self._stream_connected = True
-                        _LOGGER.debug("OPUS event stream connected for %s", self.eag_id)
-                    self._handle_document(document)
-                    if not self._gateway_available:
-                        self._set_gateway_available(True)
+                # ``aclosing`` releases the HTTP response as soon as a replaced
+                # reader leaves the loop, not only when the generator is
+                # garbage collected.
+                async with aclosing(self.client.async_stream()) as stream:
+                    async for document in stream:
+                        if not self._is_current_stream(generation):
+                            return
+                        if connected_at is None:
+                            connected_at = monotonic()
+                            self._stream_connected = True
+                            _LOGGER.debug(
+                                "OPUS event stream connected for %s", self.eag_id
+                            )
+                        self._handle_document(document)
+                        if not self._gateway_available:
+                            self._set_gateway_available(True)
+                        if _is_device_list(document):
+                            self._resolve_first_device_list(None)
                 _LOGGER.debug("OPUS event stream for %s ended", self.eag_id)
-            except OpusAuthError:
-                self._stream_connected = False
-                self._handle_auth_failure()
+                self._resolve_first_device_list(
+                    OpusConnectionError("The event stream ended before its device list")
+                )
+            except OpusAuthError as err:
+                if self._is_current_stream(generation):
+                    self._stream_connected = False
+                    if not self._resolve_first_device_list(err):
+                        self._handle_auth_failure()
                 return
             except OpusApiError as err:
                 _LOGGER.debug("OPUS event stream for %s failed: %s", self.eag_id, err)
-            except Exception:
+                self._resolve_first_device_list(err)
+            except Exception as err:
                 _LOGGER.exception("Unexpected error in the OPUS event stream")
+                self._resolve_first_device_list(
+                    OpusResponseError(f"Unexpected error in the event stream: {err}")
+                )
+            if not self._is_current_stream(generation):
+                return
             self._stream_connected = False
-            if connected:
-                # Reconnect immediately; the next stream resynchronises state.
-                continue
-            self._set_gateway_available(False)
-            delay = STREAM_RETRY_DELAYS[min(failures, len(STREAM_RETRY_DELAYS) - 1)]
+            if connected_at is None:
+                # No document arrived: the gateway cannot be used right now.
+                self._set_gateway_available(False)
+            elif monotonic() - connected_at >= STREAM_MIN_HEALTHY_SECONDS:
+                failures = 0
+            else:
+                # The gateway answers but closed the stream right away. The
+                # entities stay available (the device list just arrived); the
+                # attempt still counts towards the backoff (finding B-2).
+                _LOGGER.debug(
+                    "OPUS event stream for %s closed after less than %s s",
+                    self.eag_id,
+                    STREAM_MIN_HEALTHY_SECONDS,
+                )
+            delay = stream_retry_delay(failures)
             failures += 1
             await asyncio.sleep(delay)
+
+    @callback
+    def _resolve_first_device_list(self, error: OpusApiError | None) -> bool:
+        """Finish a waiting setup; return whether one was waiting.
+
+        Only the setup's first stream attempt reports here. Later attempts,
+        after setup finished, keep the normal reconnect behaviour.
+        """
+        first = self._first_device_list
+        if first is None or first.done():
+            return False
+        if error is None:
+            first.set_result(None)
+        else:
+            first.set_exception(error)
+        return True
 
     @callback
     def _handle_document(self, document: JsonObject) -> None:
@@ -385,35 +590,58 @@ class OpusGreenNetRestCoordinator:
         """Refresh metadata and discover newly paired devices."""
         if not self.available:
             return
+        requested_at = monotonic()
         try:
             document = await self.client.async_get("/devices")
         except OpusApiError as err:
             _LOGGER.debug("Could not refresh the OPUS device list: %s", err)
             return
-        self._apply_device_list(document, authoritative=False)
+        self._apply_device_list(
+            document, authoritative=False, requested_at=requested_at
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # Devices
     # ──────────────────────────────────────────────────────────────────────
 
     @callback
-    def _apply_device_list(self, document: WireMapping, *, authoritative: bool) -> None:
+    def _apply_device_list(
+        self,
+        document: WireMapping,
+        *,
+        authoritative: bool,
+        requested_at: float | None = None,
+    ) -> None:
         """Apply a complete device list.
 
-        ``authoritative`` lists (setup and the start of every stream) carry
-        the current state. A periodic refresh only updates metadata, because
-        the stream may already have delivered newer state.
+        ``authoritative`` lists (the start of every stream) carry the current
+        state. A periodic refresh only updates metadata, because the stream
+        may already have delivered newer state; ``requested_at`` is when that
+        refresh was requested (finding B-5).
         """
         devices = object_items(document.get("devices"))
         for entry in devices:
             data = as_object(entry.get("device", entry))
             if data is not None:
-                self._apply_device_object(data, authoritative=authoritative)
+                self._apply_device_object(
+                    data, authoritative=authoritative, requested_at=requested_at
+                )
         _LOGGER.debug("Applied OPUS device list with %d devices", len(devices))
 
     @callback
-    def _apply_device_object(self, data: JsonObject, *, authoritative: bool) -> None:
-        """Create or refresh one device from its gateway object."""
+    def _apply_device_object(
+        self,
+        data: JsonObject,
+        *,
+        authoritative: bool,
+        requested_at: float | None = None,
+    ) -> None:
+        """Create or refresh one device from its gateway object.
+
+        A device list requested at ``requested_at`` keeps the signal strength
+        and last-seen time of a telegram received after that moment: the
+        telegram is newer than the list (finding B-5).
+        """
         device_id = data.get("deviceId")
         if not isinstance(device_id, str) or not device_id:
             return
@@ -450,9 +678,15 @@ class OpusGreenNetRestCoordinator:
             # Deferred (ACK 201) markers survive a device list: a snapshot is
             # not a report that the queued telegram was delivered (phase 11).
             device.deferred_commands = existing.deferred_commands
-            if dbm is None:
+            telegram_at = self._telegram_metadata_at.get(device_id)
+            newer_telegram = (
+                requested_at is not None
+                and telegram_at is not None
+                and telegram_at >= requested_at
+            )
+            if dbm is None or newer_telegram:
                 device.dbm = existing.dbm
-            if not device.last_seen:
+            if not device.last_seen or newer_telegram:
                 device.last_seen = existing.last_seen
         functions = (
             protocol.device_state_functions(data)
@@ -485,6 +719,7 @@ class OpusGreenNetRestCoordinator:
             if did == device_id:
                 self._clear_cover_movement(did, channel_id, notify=False)
         self.devices.pop(device_id, None)
+        self._telegram_metadata_at.pop(device_id, None)
         self._cancel_reconciliation_queries(device_id)
         self._sent_commands.pop(device_id, None)
         for key in list(self._feedback_revisions):
@@ -619,6 +854,7 @@ class OpusGreenNetRestCoordinator:
             # and how strong it was; sent telegrams report dbm 0.
             update["timestamp"] = telegram.get("timestamp")
             update["telegramInfo"] = telegram.get("telegramInfo")
+            self._telegram_metadata_at[device_id] = received_at
         device.update_from_telegram(update)
         if not is_outbound and protocol.has_operational_state(functions):
             device.last_command_error = None
@@ -1419,3 +1655,9 @@ class OpusGreenNetRestCoordinator:
             lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
             priority=PRIORITY_QUERY,
         )
+
+
+def _is_device_list(document: JsonObject) -> bool:
+    """Return whether a stream document is the complete device list."""
+    header = as_object(document.get("header")) or {}
+    return header.get("content") == "devices"

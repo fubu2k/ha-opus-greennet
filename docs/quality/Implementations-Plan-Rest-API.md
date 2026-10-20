@@ -12,7 +12,7 @@ des Maintainers (Plan `implementation-plan.md`, Abschnitte 4 und 5).
 | Hauptzweig | `main` = `39b4c66`; **enthält den REST-Stand nicht** (nicht gemergt) |
 | Herkunft des REST-Codes | upstream `kegelmeier/ha-opus-greennet`, Branch `feat/rest-transport` (`20b34c9`), integriert in Phase 14 (`phases/phase-14.md`) |
 | CI-Nachweis des geprüften Stands | Workflow „Tests“, Lauf `39384621424` auf `e04245f` (Code identisch mit `2010d2f`), grün |
-| Verbindliche Regeln | Guardrails A1–A5 aus `implementation-plan.md` Abschnitt 2 gelten unverändert |
+| Verbindliche Regeln | Guardrails A1–A5 aus `implementation-plan.md` Abschnitt 2 gelten ab Entscheidung D3 (Abschnitt 0.1) **nur für den MQTT-Transport**; REST wird nach Best Practices und Home-Assistant-Vorgaben entwickelt |
 | Ablageort | `docs/quality/` (das Repository hat kein Verzeichnis `/Quality`; die Qualitätsdokumente liegen dort) |
 
 Kennzeichnung der Aussagen:
@@ -33,11 +33,53 @@ nicht nachgemessen),
 |----|-------|--------------|-------|
 | D1 | 2026-10-20 | REST wird als **zusätzlicher** Transport neben MQTT integriert; MQTT bleibt unverändert, bestehende Einträge bleiben auf MQTT. | Umgesetzt in Phase 14. |
 | D2 | 2026-10-20 | **Die Geräteliste wird bei REST alle 30 Minuten vom Gateway gelesen.** Dieser neue Hintergrundverkehr wird für die REST-API benötigt (Batteriestand, Signalstärke und Fahrzeiten kommen nicht über den Stream). | Die in `implementation-plan.md` Abschnitt 3 als „requires maintainer review“ eingetragene Ergänzung ist damit **genehmigt**. Dokumentationsnachzug in Phase R0. |
+| D3 | 2026-10-20 | **Die Guardrails A1–A5 gelten nur für den MQTT-Transport.** Der REST-Transport wird in allen weiteren Phasen (ab R1) nach Best Practices und den Vorgaben von Home Assistant neu entwickelt. | Gilt für alle folgenden Phasen; Regeln in Abschnitt 0.1. Die bisherigen, aus A1–A5 abgeleiteten Einschränkungen für REST in diesem Plan sind ersetzt. |
 
-Zu D2 bleibt verbindlich: `GET /devices` liest das Gerätemodell des Gateways
-und löst nach der Upstream-Beobachtung kein Funktelegramm aus **[HW-upstream]**.
-Intervall 30 min ist fest; eine Verkürzung, ein zusätzlicher Abfragepfad oder
-eine Ableitung von Geräteabfragen daraus bleibt nach A1 unzulässig.
+Zu D2: `GET /devices` liest das Gerätemodell des Gateways und löst nach der
+Upstream-Beobachtung kein Funktelegramm aus **[HW-upstream]**. Das Intervall
+von 30 min ist der aktuelle Stand. Die ursprüngliche Festlegung „fest, nach A1
+nicht verkürzbar“ ist durch D3 aufgehoben; eine Änderung folgt Abschnitt 0.1.
+
+### 0.1 Geltungsbereich der Guardrails ab D3 (verbindlich für alle weiteren Phasen)
+
+**MQTT-Transport – Guardrails A1–A5 unverändert verbindlich.** Gilt für jeden
+Eintrag ohne `transport: rest` und für allen Code, den der MQTT-Pfad ausführt:
+
+- Keine Verhaltens-, Timing-, Wire- oder Verkehrsänderung. Keine neuen
+  Abfragen, keine Retries, keine Cooldowns.
+- Unique IDs, Entity-IDs, Gerätezuordnungen, Registry-Einstellungen und der
+  Transport bestehender Einträge bleiben unverändert. Kein automatischer
+  Transportwechsel.
+- Retained-Schutz (Phase 10) unverändert.
+- Ein Re-Export ist keine Verhaltensänderung. Jede darüber hinausgehende
+  Änderung am MQTT-Pfad braucht die Freigabe des Maintainers.
+
+**REST-Transport – Neuentwicklung nach Best Practices und Home-Assistant-Vorgaben.**
+A1–A5 sind für REST kein Bestandsschutz mehr. Maßstab sind:
+
+- die Home Assistant Integration Quality Scale (Ziel: alle anwendbaren Regeln
+  erfüllt) und die Home-Assistant-Entwicklerdokumentation (u. a. Config Flow,
+  Entity-Modell, Verfügbarkeit, `inject-websession`, Fehlerbehandlung,
+  Diagnose, Reauth/Reconfigure, strikte Typisierung),
+- anerkannte Praxis für HTTP-Clients und Streams (getrennte Fehlerklassen,
+  Timeouts, begrenzter Backoff mit Jitter, sauberer Lebenszyklus),
+- Tests zuerst; Coverage-Gates, ruff, strict mypy und Hassfest werden nicht
+  abgesenkt.
+
+Verhalten, Timing, Abfragen, Entity-Modell und Code-Struktur des
+REST-Transports dürfen geändert werden, wenn die Phase das begründet. Jede
+Änderung wird im Phasenbericht offengelegt (Abschnitt 20 von
+`implementation-plan.md`): Funk- und Gateway-Verkehr vorher/nachher sowie
+Auswirkungen auf bestehende REST-Einträge und Entity-IDs.
+
+**Gemeinsamer Code.** Module, die auch der MQTT-Pfad nutzt
+(`enocean_device.py`, `entity.py`, die Plattformen, `const.py`, `wire.py`,
+`domain.py` sobald vorhanden), stehen für den MQTT-Pfad weiter unter A1–A5.
+Eine REST-Änderung an diesen Modulen muss transportgebunden sein (eigener
+Wert, eigener Codepfad oder `isinstance`-Prüfung) und ist durch die
+unveränderten MQTT-Tests zu belegen. Beispiel: `COVER_MOVEMENT_GRACE_SECONDS`
+liegt in `const.py` und gilt für beide Koordinatoren; eine andere Karenz für
+REST braucht eine eigene REST-Konstante.
 
 ## 1. Zielbild und Prioritäten (aus dem Auftrag)
 
@@ -276,9 +318,11 @@ Konsequenzen für den Plan [Entwurf]:
   dokumentiert (README „Known limitations“/Cover, Vertrag 12.9) → R0/R1.
 - R1 wird von einer Ursachenanalyse zu einer **Bestätigungsmessung** an der
   eigenen Installation verkleinert.
-- Die Karenz von 5 s bleibt unverändert (A1/A3: keine Timing-Änderung ohne
-  eigene Phase und Entscheidung); ob sie bei Nachlauf > 5 s angepasst oder die
-  Herkunft nur sichtbar gemacht wird, entscheidet R6 (O-4).
+- Die Karenz von 5 s bleibt vorerst unverändert. Sie ist eine gemeinsame
+  Konstante beider Transporte (`const.py`) und gilt für MQTT weiter unter
+  A1–A5; eine andere Karenz für REST braucht eine eigene REST-Konstante
+  (Abschnitt 0.1). Ob REST die Karenz bei Nachlauf > 5 s anpasst oder die
+  Herkunft nur sichtbar macht, entscheidet R6 (O-4).
 
 ## 4. REST-Ressourcen
 
@@ -350,14 +394,14 @@ auf unbekannt. Zustandsverantwortung: genau ein Speicher je Eintrag
 
 | Anforderung | Ist [Code] | Soll / Phase |
 |-------------|-----------|--------------|
-| Ein Reader je Gateway, an den Eintrag gebunden | ein `_stream_task` über `hass.async_create_background_task`, beim Unload abgebrochen und abgewartet | bleibt; Verbindungsgeneration gegen Rückläufer eines ersetzten Streams (R4) |
+| Ein Reader je Gateway, an den Eintrag gebunden | ein `_stream_task` über `hass.async_create_background_task`, beim Unload abgebrochen und abgewartet | bleibt; Verbindungsgeneration gegen Rückläufer eines ersetzten Streams (R4, **umgesetzt** Phase 18) |
 | Nachrichten ≠ Chunks, UTF-8-Grenzen | `JsonDocumentSplitter` mit inkrementellem UTF-8-Decoder, Zustand über Chunks | bleibt |
 | Leere/fehlerhafte/unbekannte Nachrichten | Nicht-Objekte übersprungen, unbekannte Typen ignoriert, Fremdzeichen → Fehler → Neuverbindung | bleibt |
-| Übergroße Nachrichten | Grenze 8 MB nur für über Chunks wachsende Reste (B-3) | auch vollständige Dokumente prüfen (R4) |
-| EOF/Abbruch | Neuverbindung | Mindestpause und Backoff auch nach kurzlebigen Verbindungen (B-2, R4) |
+| Übergroße Nachrichten | Grenze 8 MB nur für über Chunks wachsende Reste (B-3) | auch vollständige Dokumente prüfen (R4, **umgesetzt** Phase 18) |
+| EOF/Abbruch | Neuverbindung | Mindestpause und Backoff auch nach kurzlebigen Verbindungen (B-2, R4, **umgesetzt** Phase 18: Stream < 10 s = Fehlschlag) |
 | Auth vs. Netz | 401/403 → `OpusAuthError` → Reauth, keine Neuversuche; sonst Backoff | bleibt |
-| Backoff mit Jitter | fest 1, 2, 5, 10, 30, 60 s, ohne Jitter | begrenzt exponentiell mit Jitter (R4) |
-| Cancellation, Response-Freigabe | `async with session.get(...)`; Unload bricht Tasks ab und wartet | bleibt; Test „kein offener Reader nach Reload“ (R4) |
+| Backoff mit Jitter | fest 1, 2, 5, 10, 30, 60 s, ohne Jitter | begrenzt exponentiell mit Jitter (R4, **umgesetzt** Phase 18: nominal 1–60 s, +0–25 %) |
+| Cancellation, Response-Freigabe | `async with session.get(...)`; Unload bricht Tasks ab und wartet | bleibt; Test „kein offener Reader nach Reload“ (R4, **umgesetzt** Phase 18, zusätzlich `aclosing`) |
 | Gateway-Neustart | fallende Uptime → Stream ersetzen | bleibt |
 | Stiller Stream | nach 900 s ohne Daten neu öffnen (`STREAM_IDLE_TIMEOUT`); kein Heartbeat dokumentiert; Stille ≠ Fehler (keine Nichtverfügbarkeit) | bleibt; Verfügbarkeit nur über Verbindungsfehler und Uptime-Probe |
 
@@ -391,21 +435,43 @@ auf unbekannt. Zustandsverantwortung: genau ein Speicher je Eintrag
 6. `GET /devices` nur noch alle 30 min (D2); Metadaten aus dieser Liste
    überschreiben neuere Telegramm-Metadaten nicht (B-5).
 7. `GET /system/uptime` bleibt die 60-s-Gesundheitsprüfung, ändert nie
-   Gerätezustände (A2).
+   Gerätezustände (Gateway-Gesundheit ist kein Gerätezustand; HA-Regel
+   `entity-unavailable`).
 
 Begründung: eine Quelle der Wahrheit beim Start, kein Rennen zwischen zwei
 Snapshots, eine Geräteliste weniger je Start. Alternative „beides behalten“
 bleibt möglich, falls Hardware zeigt, dass der erste Stream-Snapshot verzögert
 kommt; Entscheidung in R5 nach Messung.
 
+**Umgesetzt in R5 (Phase 21):** Ablauf wie oben, Frist 30 s. `GET
+/system/uptime` bleibt beim Setup (Ausgangswert der Neustarterkennung). Die
+Messung auf Hardware erfolgt über `gateway.first_device_list_seconds` in der
+Diagnose; liegt sie nahe an 30 s, wird die Frist angepasst oder die
+Alternative gewählt. **Ergebnis:** 0,076 s (Frist bleibt); wegen R5-H1 folgt
+nach dem Setup einmal `GET /devices` nur für Konfiguration und Batterie.
+
 ## 8. Phasenplan
+
+Arbeitszweig (Entscheidung 2026-10-20): Bis auf Weiteres wird nur auf
+`feature/rest-api-integration` gearbeitet. Jeder Phasen-Branch startet von
+dort und wird per PR mit Base `feature/rest-api-integration` zurückgeführt,
+nie nach `main`. Ein späterer Merge nach `main` braucht zuerst den Revert des
+Revert-Commits `32685d1` (PR #15).
 
 Jede Phase: eigener Branch (`feat/`/`fix/`), Tests zuerst, CI grün,
 Phasenbericht `phases/phase-NN.md` nach Abschnitt 20 von
 `implementation-plan.md`, keine Version, kein CHANGELOG ohne Freigabe.
-Hardwaretests nur mit separater Freigabe.
+Hardwaretests nur mit separater Freigabe. Für jede Phase gilt Abschnitt 0.1
+(D3): A1–A5 für den MQTT-Pfad und gemeinsamen Code, Best Practices und
+Home-Assistant-Vorgaben für den REST-Transport.
 
 ### R0 – Dokumentationsnachzug (nur Doku)
+
+**Status 2026-10-20:** umgesetzt auf Branch `docs/opus-r0-rest-documentation`
+(Basis `1847f88`), Bericht `phases/phase-15.md`. **Gemergt** in
+`feature/rest-api-integration` über PR #16 (Merge-Commit `4014b1c`,
+2026-10-20); nicht in `main`. Erledigt damit
+A-1 und A-6 aus Abschnitt 2.5.
 
 - D2 eintragen: `implementation-plan.md` Abschnitt 3 (Ergänzung „genehmigt
   2026-10-20“) und 15a, `phases/phase-14.md` Abschnitt 9,
@@ -435,10 +501,22 @@ Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
   (Telegramm statt Fallback, H5); Uhren von Gateway und HA (NTP) prüfen (H3).
 - Ergebnis dokumentieren (Phasenbericht, README-Hinweis zur Endlage bei
   Vollfahrten, Vertrag 12.9).
-- **Verboten:** zusätzliches Polling, kürzere Prüfintervalle, Zielwert als
-  Ist-Position per Zeitgeber, Änderung der 5-s-Karenz in dieser Phase.
+- Reine Messphase ohne Codeänderung. Für eine unverfälschte Messung keine
+  zusätzlichen Abfragen während der Messfahrten. Folgerungen für den Code
+  (z. B. Karenz, Herkunft der Position) gehen nach R6.
 
 ### R2 – REST-only-Entkopplung
+
+**Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r2-rest-only-decoupling`
+(Basis `feature/rest-api-integration` `4014b1c`), Bericht `phases/phase-16.md`;
+**gemergt** in `feature/rest-api-integration` über PR #17
+(Merge-Commit `b9c3fb0`, 2026-10-20); nicht in `main`. K1–K6 aufgelöst:
+`domain.py` (E2), `OpusCoordinator` als
+`Protocol` (E3), MQTT-Importe nur bei Bedarf in `__init__`/`config_flow` (E4),
+Fixture `hass_without_mqtt` (K5). O-1 geklärt: `after_dependencies: ["mqtt"]`
+mit Belegen (Hassfest am Referenzcommit grün, MQTT-Discovery und MQTT-Einträge
+unverändert, REST-Eintrag ohne MQTT-Integration). Keine Verhaltens-, Timing-,
+Wire- oder Verkehrsänderung auf MQTT oder REST. K7 bleibt offen (R8).
 
 - `domain.py` (E2), Re-Exporte in `coordinator.py`/`mqtt_transport.py`.
 - `OpusCoordinator` als `Protocol` (E3).
@@ -448,9 +526,20 @@ Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
 - Tests: Fixture ohne `"mqtt"` in `hass.config.components`; REST-Eintrag lädt,
   steuert, entlädt; Import von `rest_coordinator` lädt kein
   `homeassistant.components.mqtt` (Prüfung über `sys.modules`).
-- A1–A5: keine Verhaltens- oder Verkehrsänderung; MQTT-Tests unverändert grün.
+- MQTT (A1–A5): keine Verhaltens- oder Verkehrsänderung; MQTT-Tests
+  unverändert grün; Re-Exporte sind keine Verhaltensänderung.
+- REST (D3): Struktur nach Home-Assistant-Vorgaben; Verhaltensänderungen am
+  REST-Pfad sind zulässig, wenn begründet und im Bericht offengelegt.
 
 ### R3 – REST-Client-Härtung und Bibliotheksgrenze
+
+**Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r3-rest-client-hardening`
+(Basis `feature/rest-api-integration` `b9c3fb0`), Bericht `phases/phase-17.md`;
+gemergt über PR #18 (`1c30105`), CI-Lauf `39423057097` grün. B-1 behoben (HTTP-Status und JSON-Status getrennt, Fehlerklasse
+mit `http_status` und `gateway_status`), B-6 behoben (`PriorityLock` und
+Prioritäten im REST-Koordinator; `api.py` importiert nur Standardbibliothek,
+aiohttp und `wire.py`). Keine Wiederholungen, Nebenläufigkeit und Timeouts
+unverändert (Begründung im Bericht, Abschnitt 2). MQTT-Pfad unverändert.
 
 - HTTP-Status zusätzlich zum JSON-Status auswerten (B-1); Fehlerklasse mit
   beiden Werten.
@@ -458,9 +547,19 @@ Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
   Integrationskonstanten.
 - Tests: kein HA-Import in `api.py`/`wire.py` (AST), kein `ClientSession(`,
   Fehlermeldungen ohne Zugangsdaten, keine Wiederholung bei Timeout eines PUT.
-- A3: unverändert eine Anfrage gleichzeitig, keine Retries.
+- REST (D3): Nebenläufigkeit, Timeouts und Wiederholungen nach Best Practice
+  festlegen und im Bericht begründen (Idempotenz des Befehls, Risiko einer
+  Doppelausführung am Aktor, Funkverkehr vorher/nachher).
 
 ### R4 – Stream-Lebenszyklus
+
+**Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r4-stream-lifecycle`
+(Basis `feature/rest-api-integration` `e5b609e`), Bericht `phases/phase-18.md`;
+gemergt über PR #21 (`ae3e084`), CI-Lauf `39431240243` grün. B-2 behoben (begrenzter exponentieller
+Backoff 1–60 s mit 0–25 % Jitter nach oben, Pause nach jedem Stream-Ende,
+Stream < 10 s zählt als Fehlschlag), B-3 behoben (Größenprüfung auch für
+vollständige Dokumente), Verbindungsgeneration und `aclosing` gegen
+Rückläufer eines ersetzten Readers. MQTT-Pfad unverändert.
 
 - Begrenzter exponentieller Backoff mit Jitter; kurzlebige Verbindungen
   (z. B. < 10 s) zählen als Fehlschlag (B-2).
@@ -468,16 +567,34 @@ Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
   Dokumente (B-3).
 - Tests: Schließen direkt nach dem Snapshot erzeugt keine enge Schleife;
   Reload hinterlässt keinen zweiten Reader; Auth-Fehler ohne Neuversuch.
-- A1: Neuverbindungen werden seltener, nie häufiger.
+- REST (D3): Backoff und Neuverbindung nach Best Practice; Gateway-Verkehr
+  vorher/nachher im Bericht.
 
 ### R5 – Start und Resynchronisierung
+
+**Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r5-stream-first-start`
+(Basis `feature/rest-api-integration` `bcb6276`), Bericht `phases/phase-21.md`;
+gemergt über PR #25 (`2d3cf9c`), CI-Lauf `39458477903` grün. Stream-first nach 7.2 (B-8 behoben: kein
+`GET /devices` mehr beim Start), Frist 30 s für die erste Liste
+(`FIRST_DEVICE_LIST_TIMEOUT`), gemessene Dauer in Log und Diagnose; B-5
+behoben (Telegramm nach Anfragebeginn behält `dbm`/`lastSeen`).
+
+**Hardware-Prüfung 2026-10-20 (Phase 21, Abschnitt 7):** erste Liste nach
+0,076 s, Frist 30 s bestätigt. Befund R5-H1: Die Stream-Liste enthält auf
+OPUS-IQ-DOT 1.21.30 **keinen `configuration`-Block**, Rollläden hatten nach
+dem Start keine Fahrzeiten (0 von 10). Korrektur auf Branch
+`fix/opus-r5-movement-times`: einmal `GET /devices` direkt nach dem Setup
+(nicht autoritativ, wie die 30-min-Liste). Das Ziel „eine Geräteliste weniger
+je Start“ ist auf dieser Firmware nicht erreichbar und entfällt; Zustand und
+Verfügbarkeit kommen weiter nur aus dem Stream.
 
 - Stream-first nach Abschnitt 7.2 (E7); Frist für das erste Dokument messen.
 - B-5: Metadaten der 30-min-Liste nur übernehmen, wenn kein neueres Telegramm
   seit Anfragebeginn kam.
 - Tests: Rennen Anfrage/Telegramm, Neuverbindung mit Snapshot, kein
   Tasterereignis aus Snapshots, Setup-Fehler ohne erstes Dokument.
-- Messbar: eine Geräteliste weniger je Start und Reload.
+- Messbar: eine Geräteliste weniger je Start und Reload (**entfällt** nach
+  Hardware-Befund R5-H1: die Stream-Liste trägt keine Konfiguration).
 
 ### R6 – Fachmodell
 
@@ -496,8 +613,24 @@ Ausgangspunkt ist Abschnitt 3.3 (Upstream-Mitteilung, H1 gestützt).
 
 ### R7 – Standard für neue Einträge (Entscheidung)
 
-- Optional: REST als erste Menüoption; MQTT-Hinweis „Fallback“.
-- Bestehende Einträge werden nie automatisch umgestellt (A5).
+**Teilweise vorgezogen 2026-10-20 als R4.2** (Entscheidung des Maintainers):
+REST steht im Einrichtungsmenü an erster, MQTT an zweiter Stelle; Branch
+`feat/opus-r4-2-rest-first-menu`, Bericht `phases/phase-19.md`. Offen für R7:
+MQTT-Hinweis „Fallback“ in den Menütexten.
+
+**Weiter vorgezogen 2026-10-20 als R4.3** (Entscheidung des Maintainers):
+Neue Gateways werden nur noch über REST eingerichtet. Der Einrichtungsdialog
+zeigt direkt Host, Port, Benutzer und Passwort (kein Menü), auch ein über MQTT
+entdecktes Gateway führt in dieses REST-Formular. MQTT bleibt für bestehende
+Einträge und als Wahl im Neu-konfigurieren-Menü. Branch
+`feat/opus-r4-3-rest-only-setup`, Bericht `phases/phase-20.md`; gemergt über
+PR #24 (`bcb6276`), CI-Lauf `39449339335` grün. Damit ist der
+Menüteil von R7 erledigt; ein „Fallback“-Hinweis entfällt.
+
+- Optional: REST als erste Menüoption (**erledigt**, R4.2; ersetzt durch R4.3: REST als einzige Einrichtung); MQTT-Hinweis „Fallback“ (entfällt).
+- Bestehende MQTT-Einträge werden nie automatisch umgestellt (A5 gilt für
+  MQTT). Auswirkungen auf bestehende REST-Einträge und Entity-IDs werden im
+  Bericht offengelegt (D3).
 
 ### R8 – Abschlussaudit
 
@@ -537,7 +670,7 @@ bleiben unverändert (Ziel 5).
 
 | Nr. | Offen | Klärung |
 |-----|-------|---------|
-| O-1 | Startet Home Assistant die Integration ohne eingerichtete MQTT-Integration mit `after_dependencies`, und akzeptiert Hassfest den `mqtt`-Discovery-Schlüssel dann? | R2, Hassfest am Referenzcommit |
+| O-1 | Startet Home Assistant die Integration ohne eingerichtete MQTT-Integration mit `after_dependencies`, und akzeptiert Hassfest den `mqtt`-Discovery-Schlüssel dann? | **Geklärt in R2** (`phases/phase-16.md` Abschnitt 5): ja; `manifest.json` umgestellt |
 | O-2 | Wirkung und Unterstützung der Stream-Parameter | Hardwarevergleich, separate Freigabe |
 | O-3 | Ursache der Endlagenverzögerung: durch Upstream-Mitteilung als Aktor-Nachlauf erklärt (Abschnitt 3.3); Bestätigung an der eigenen Installation offen | R1 |
 | O-4 | Soll die Positionsschätzung (A-5) sichtbar bleiben, und wie wird die 5-s-Karenz bei Nachlauf > 5 s behandelt? | Entscheidung nach R6 |

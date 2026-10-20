@@ -7,9 +7,7 @@ import json
 import logging
 import re
 from collections.abc import Callable, Coroutine, Sequence
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from enum import StrEnum
+from datetime import datetime
 from time import monotonic
 
 from homeassistant.components import mqtt
@@ -23,7 +21,6 @@ from .const import (
     BUTTON_KEYS,
     COVER_MOVEMENT_GRACE_SECONDS,
     COVER_RECONCILIATION_DELAYS,
-    DOMAIN,
     INDEXED_STATE_CONTAINERS,
     KEY_CHANNEL,
     KEY_QUERY,
@@ -51,6 +48,22 @@ from .const import (
     TOPIC_SUB_PUT_ANSWER_STATE,
     TOPIC_SUB_TELEGRAM_FROM_ALL,
 )
+
+# Transport-neutral names (phase R2, plan E2), defined in ``domain.py``.
+# Existing imports of these names from this module keep working unchanged.
+from .domain import (
+    ACK_STATUS_DEFERRED,
+    GATEWAY_HEALTH_INTERVAL,
+    OUTBOUND_STATE_RECONCILIATION_DELAYS,
+    SIGNAL_AVAILABILITY_UPDATE,
+    SIGNAL_DEVICE_DISCOVERED,
+    SIGNAL_DEVICE_REMOVED,
+    SIGNAL_DEVICE_STATE_UPDATE,
+    SUPERSEDED,
+    CommandDelivery,
+    CoverMovement,
+    request_error,
+)
 from .enocean_device import EnOceanDevice
 from .mqtt_transport import (
     PRIORITY_BACKGROUND,
@@ -64,7 +77,6 @@ from .mqtt_transport import (
     async_wait_for_subscriptions,
     decode_response,
     gateway_uptime_value,
-    request_error,
     response_status,
 )
 from .wire import (
@@ -107,28 +119,14 @@ def _index_sort_key(key: str) -> tuple[int, int, str]:
     return (0, int(key), "") if key.isdigit() else (1, 0, key)
 
 
-# Dispatcher signals
-SIGNAL_DEVICE_REMOVED = f"{DOMAIN}_device_removed"
-SIGNAL_DEVICE_DISCOVERED = f"{DOMAIN}_device_discovered"
-SIGNAL_DEVICE_STATE_UPDATE = f"{DOMAIN}_device_state_update"
-SIGNAL_AVAILABILITY_UPDATE = f"{DOMAIN}_availability_update"
-
 FAST_PATH_PROPERTIES = frozenset({"batteryLevel", "dbm"})
 DEVICE_STREAM_FINALIZE_DELAY = 0.02
 TELEGRAM_FINALIZE_DELAY = 0.15
 RAW_MQTT_DEBUG_PAYLOAD_LIMIT = 500
-OUTBOUND_STATE_RECONCILIATION_DELAYS = (5, 20)
-# Gateway acknowledgement "SoftSmartAck" (vendor reference 3.3): the gateway
-# accepted the telegram for deferred delivery and transmits it later. It is
-# neither a radio transmission nor device feedback.
-ACK_STATUS_DEFERRED = 201
 # Command keys whose deferred value is compared numerically with feedback.
 NUMERIC_COMMAND_KEYS = frozenset(
     {"dimValue", "position", "angle", "temperatureSetpoint"}
 )
-# Internal reason for a background status check dropped before publish.
-SUPERSEDED = "superseded"
-GATEWAY_HEALTH_INTERVAL = timedelta(seconds=60)
 # Each broker/bridge reconnect re-requests the full device snapshot so
 # entities catch up without live telegrams. A flapping connection must not
 # re-trigger that multi-thousand-message snapshot every few seconds: within
@@ -156,36 +154,6 @@ DEVICE_STREAM_TOPIC_PATTERN = re.compile(r"EnOcean/([^/]+)/stream/device/([^/]+)
 PUT_ANSWER_STATE_TOPIC_PATTERN = re.compile(
     r"EnOcean/([^/]+)/putAnswer/devices/([^/]+)/state"
 )
-
-
-class CommandDelivery(StrEnum):
-    """What a positive gateway acknowledgement says about one command.
-
-    Neither value confirms physical execution: only a device report (a radio
-    telegram or a device-model update) for the commanded field does that.
-    """
-
-    # httpStatus 200: the gateway transmitted the telegram.
-    SENT = "sent"
-    # httpStatus 201 (SoftSmartAck): queued by the gateway for later delivery.
-    DEFERRED = "deferred"
-
-
-@dataclass
-class CoverMovement:
-    """One channel's replaceable travel estimate and cancellation handle."""
-
-    start_position: float | None
-    target: int
-    started_at: float
-    travel: float
-    cancel: Callable[[], None] | None = None
-    accepted: bool = True
-    elapsed: bool = False
-
-    @property
-    def ends_at(self) -> float:
-        return self.started_at + self.travel + COVER_MOVEMENT_GRACE_SECONDS
 
 
 class OpusGreenNetCoordinator:

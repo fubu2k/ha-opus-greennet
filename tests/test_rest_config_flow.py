@@ -7,6 +7,8 @@ their own tests in ``test_config_flow_recovery.py`` and ``test_discovery.py``.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -71,6 +73,41 @@ async def _start_reconfigure(hass: HomeAssistant, entry: ConfigEntry, step: str)
 # ── User step ────────────────────────────────────────────────────────────────
 
 
+async def test_user_step_is_the_rest_form(hass: HomeAssistant) -> None:
+    """Phase R4.3: no transport menu; the REST form opens directly."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert [str(key) for key in result["data_schema"].schema] == [
+        "host",
+        "port",
+        "username",
+        "password",
+    ]
+    assert not hass.config_entries.async_entries(DOMAIN)
+
+
+def test_translations_offer_no_manual_mqtt_step() -> None:
+    """The user step is a form in every translation; no MQTT step is left."""
+    base = Path(__file__).parent.parent / "custom_components" / "opus_greennet"
+    for path in (
+        base / "strings.json",
+        base / "translations" / "en.json",
+        base / "translations" / "de.json",
+    ):
+        config = json.loads(path.read_text(encoding="utf-8"))["config"]
+        user = config["step"]["user"]
+        assert "menu_options" not in user, path.name
+        assert list(user["data"]) == ["host", "port", "username", "password"]
+        assert "mqtt_bridge" not in config["step"], path.name
+        assert "rest_api" not in config["step"], path.name
+        assert list(config["step"]["discovery_confirm"]["data"]) == list(
+            user["data"]
+        ), path.name
+
+
 async def test_user_flow_creates_rest_entry_from_gateway_identity(
     hass: HomeAssistant, gateway: FakeGateway
 ) -> None:
@@ -94,8 +131,7 @@ async def test_user_flow_creates_rest_entry_from_gateway_identity(
 
 
 async def test_user_flow_form_defaults(hass: HomeAssistant) -> None:
-    result = await start_user_flow(hass, "rest_api")
-    assert result["step_id"] == "rest_api"
+    result = await start_user_flow(hass)
     schema = result["data_schema"].schema
     defaults = {str(key): key.default() for key in schema if callable(key.default)}
     assert defaults == {"port": 8080, "username": "admin"}
@@ -118,7 +154,7 @@ async def test_user_flow_recovers_from_unreachable_gateway(
 ) -> None:
     config = gateway.config
     await gateway.stop()
-    result = await start_user_flow(hass, "rest_api")
+    result = await start_user_flow(hass)
     result = await hass.config_entries.flow.async_configure(result["flow_id"], config)
     assert result["errors"] == {"base": "cannot_connect_gateway"}
     await gateway.start()

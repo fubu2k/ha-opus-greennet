@@ -1,9 +1,11 @@
 """MQTT discovery of OPUS gateways (quality-scale rule ``discovery``).
 
 A device-model publication only identifies a candidate gateway. These tests
-assert that discovery shares the unique ID with manual setup, never publishes
-before the user confirms, keeps the existing fresh gateway check and creates
-exactly one entry per gateway, including duplicate and racing announcements.
+assert that discovery shares the unique ID with manual setup, never publishes,
+and creates exactly one entry per gateway, including duplicate and racing
+announcements. Since phase R4.3 a discovered gateway is set up over its REST
+API: the confirm step asks for the address (the password suggests the EURID)
+and accepts it only if it answers as the announced gateway.
 """
 
 from __future__ import annotations
@@ -27,7 +29,8 @@ from custom_components.opus_greennet.discovery import (
     eag_id_from_discovery,
     normalize_eag_id,
 )
-from tests.ha_helpers import configure_bridge
+from tests.fake_gateway import FakeGateway
+from tests.ha_helpers import configure_bridge, configure_rest_bridge
 
 MANIFEST = json.loads(
     (
@@ -150,37 +153,76 @@ async def test_home_assistant_loads_the_manifest_filter(hass: HomeAssistant) -> 
 # ── Config flow ──────────────────────────────────────────────────────────────
 
 
-async def test_discovery_confirms_then_probes_and_creates_one_entry(
-    hass: HomeAssistant, mqtt_transport
+async def _confirm(hass: HomeAssistant, flow_id: str, gateway: FakeGateway, **kw):
+    """Submit the REST address of the discovered gateway."""
+    return await hass.config_entries.flow.async_configure(
+        flow_id, {**gateway.config, **kw}
+    )
+
+
+async def test_discovery_asks_for_the_rest_address_and_creates_one_entry(
+    hass: HomeAssistant, mqtt_transport, gateway: FakeGateway
 ) -> None:
     result = await _discover(hass)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "discovery_confirm"
     assert result["description_placeholders"] == {"eag_id": "AABB0011"}
     assert result["errors"] == {}
+    schema = result["data_schema"].schema
+    assert [str(key) for key in schema] == ["host", "port", "username", "password"]
+    defaults = {str(key): key.default() for key in schema if callable(key.default)}
+    assert defaults == {"port": 8080, "username": "admin"}
+    suggested = {
+        str(key): (key.description or {}).get("suggested_value") for key in schema
+    }
+    # The vendor default password is the announced EURID.
+    assert suggested["password"] == "AABB0011"
     (flow,) = _flows(hass)
     assert flow["context"]["unique_id"] == "AABB0011"
     assert flow["context"]["title_placeholders"] == {"eag_id": "AABB0011"}
-    assert flow["context"]["confirm_only"] is True
     # A retained announcement is a candidate only: nothing is published.
     assert mqtt_transport.published == []
 
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    result = await _confirm(hass, result["flow_id"], gateway)
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Opus GreenNet (AABB0011)"
-    assert result["data"] == {"eag_id": "AABB0011"}
+    assert result["data"] == {
+        "eag_id": "AABB0011",
+        "transport": "rest",
+        "host": gateway.host,
+        "port": gateway.port,
+        "username": "admin",
+        "password": gateway.password,
+    }
     entry = result["result"]
     assert entry.unique_id == "AABB0011"
     assert entry.source == config_entries.SOURCE_MQTT
     assert entry.discovery_keys == {
         "mqtt": (DiscoveryKey(domain="mqtt", key=TOPIC, version=1),)
     }
-    # The fresh gateway check comes first; no device command or status query.
-    topics = [topic for topic, _ in mqtt_transport.published]
-    assert topics[0] == "EnOcean/AABB0011/get/config/system/uptime"
-    assert not [topic for topic in topics if "/put/" in topic]
+    # Validation reads only the gateway identity; nothing goes over MQTT.
+    assert [path for _, path, _ in gateway.requests][0] == "/system/info"
+    assert mqtt_transport.published == []
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
     assert _flows(hass) == []
+    await hass.async_block_till_done()
+
+
+async def test_discovery_rejects_an_address_of_another_gateway(
+    hass: HomeAssistant, mqtt_transport, gateway: FakeGateway
+) -> None:
+    discovered = await _discover(
+        hass, _info(topic="EnOcean/CCDD0022/stream/devices/DEV1/friendlyId")
+    )
+    result = await _confirm(hass, discovered["flow_id"], gateway)
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "wrong_gateway"}
+    assert hass.config_entries.async_entries(DOMAIN) == []
+    gateway.eurid = "CCDD0022"
+    result = await _confirm(hass, discovered["flow_id"], gateway)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == "CCDD0022"
+    await hass.async_block_till_done()
 
 
 async def test_invalid_announcement_is_ignored_without_publish(
@@ -215,8 +257,10 @@ async def test_configured_gateway_aborts_without_side_effects(
             assert result["reason"] == "already_configured"
     reload.assert_not_called()
     # Device announcements neither publish nor rewrite the entry's discovery keys.
+    # An MQTT entry keeps its transport (A5): no REST form is offered for it.
     assert mqtt_transport.published == []
     assert entry.discovery_keys == {}
+    assert entry.data == {"eag_id": "AABB0011"}
     assert hass.config_entries.async_entries(DOMAIN) == [entry]
 
 
@@ -270,102 +314,97 @@ async def test_multiple_gateways_are_offered_separately(
 
 
 async def test_manual_setup_during_pending_discovery_creates_no_duplicate(
-    hass: HomeAssistant, mqtt_transport
+    hass: HomeAssistant, mqtt_transport, gateway: FakeGateway
 ) -> None:
     discovered = await _discover(hass)
-    result = await configure_bridge(hass, "aabb0011")
+    result = await configure_rest_bridge(hass, gateway)
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_in_progress"
-    assert mqtt_transport.published == []
     assert hass.config_entries.async_entries(DOMAIN) == []
-    # A different gateway can still be set up manually at the same time.
-    other = await configure_bridge(hass, "ccdd0022")
-    assert other["type"] is FlowResultType.CREATE_ENTRY
-    result = await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
+    result = await _confirm(hass, discovered["flow_id"], gateway)
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert sorted(
-        entry.unique_id for entry in hass.config_entries.async_entries(DOMAIN)
-    ) == ["AABB0011", "CCDD0022"]
+    assert [e.unique_id for e in hass.config_entries.async_entries(DOMAIN)] == [
+        "AABB0011"
+    ]
+    assert mqtt_transport.published == []
+    await hass.async_block_till_done()
 
 
-async def test_entry_added_while_confirm_is_open_aborts_without_probe(
-    hass: HomeAssistant, mqtt_transport
+async def test_entry_added_while_confirm_is_open_aborts_without_request(
+    hass: HomeAssistant, mqtt_transport, gateway: FakeGateway
 ) -> None:
     discovered = await _discover(hass)
     await hass.config_entries.async_add(_entry("AABB0011", disabled=True))
-    result = await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
+    result = await _confirm(hass, discovered["flow_id"], gateway)
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
+    assert gateway.requests == []
     assert mqtt_transport.published == []
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
 
-async def test_confirm_recovers_from_disconnected_broker(
-    hass: HomeAssistant, mqtt_transport
+async def test_confirm_recovers_from_wrong_password(
+    hass: HomeAssistant, mqtt_transport, gateway: FakeGateway
 ) -> None:
     discovered = await _discover(hass)
-    mqtt_transport.connected = False
-    result = await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
+    result = await _confirm(hass, discovered["flow_id"], gateway, password="wrong")
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "discovery_confirm"
-    assert result["errors"] == {"base": "cannot_connect"}
-    assert mqtt_transport.published == []
-    mqtt_transport.connected = True
-    result = await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
+    assert result["errors"] == {"base": "invalid_auth"}
+    result = await _confirm(hass, discovered["flow_id"], gateway)
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"].unique_id == "AABB0011"
+    await hass.async_block_till_done()
 
 
-async def test_confirm_recovers_from_unresponsive_gateway(
-    hass: HomeAssistant, mqtt_transport
+async def test_confirm_recovers_from_unreachable_gateway(
+    hass: HomeAssistant, mqtt_transport, gateway: FakeGateway
 ) -> None:
-    """A retained announcement of a gateway that is offline creates no entry."""
+    """An announced gateway whose address cannot be reached creates no entry."""
     discovered = await _discover(hass)
-    mqtt_transport.reply = False
-    with patch(
-        "custom_components.opus_greennet.mqtt_transport.SETUP_REQUEST_TIMEOUT", 0.01
-    ):
-        result = await hass.config_entries.flow.async_configure(
-            discovered["flow_id"], {}
-        )
+    config = gateway.config
+    await gateway.stop()
+    result = await hass.config_entries.flow.async_configure(
+        discovered["flow_id"], config
+    )
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "gateway_unavailable"}
-    # Exactly the one probe; no retry and no device request.
-    assert [topic for topic, _ in mqtt_transport.published] == [
-        "EnOcean/AABB0011/get/config/system/uptime"
-    ]
+    assert result["errors"] == {"base": "cannot_connect_gateway"}
     assert hass.config_entries.async_entries(DOMAIN) == []
-    mqtt_transport.reply = True
-    result = await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
+    await gateway.start()
+    result = await hass.config_entries.flow.async_configure(
+        discovered["flow_id"], config
+    )
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
 
 
 async def test_confirm_recovers_from_unexpected_exception(
-    hass: HomeAssistant, mqtt_transport, caplog: pytest.LogCaptureFixture
+    hass: HomeAssistant,
+    mqtt_transport,
+    gateway: FakeGateway,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     discovered = await _discover(hass)
     with patch(
-        "custom_components.opus_greennet.config_flow.async_probe_gateway",
+        "custom_components.opus_greennet.config_flow.async_read_gateway_id",
         new=AsyncMock(side_effect=RuntimeError("boom")),
     ):
-        result = await hass.config_entries.flow.async_configure(
-            discovered["flow_id"], {}
-        )
+        result = await _confirm(hass, discovered["flow_id"], gateway)
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "unknown"}
     assert "Unexpected exception" in caplog.text
-    result = await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
+    result = await _confirm(hass, discovered["flow_id"], gateway)
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
 
 
 async def test_discovered_entry_blocks_a_second_manual_entry(
-    hass: HomeAssistant, mqtt_transport
+    hass: HomeAssistant, mqtt_transport, gateway: FakeGateway
 ) -> None:
     discovered = await _discover(hass)
-    await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
+    await _confirm(hass, discovered["flow_id"], gateway)
     await hass.async_block_till_done()
-    mqtt_transport.published.clear()
-    result = await configure_bridge(hass, " aabb0011 ")
+    result = await configure_rest_bridge(hass, gateway)
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
     assert mqtt_transport.published == []

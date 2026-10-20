@@ -23,7 +23,7 @@ A custom Home Assistant integration for the Opus GreenNet Bridge, enabling contr
 
 - **Two transports**: reach the gateway through your MQTT broker (Mosquitto bridge, unchanged default for existing entries) or directly through its REST API without any broker. Each gateway entry uses one transport; switching keeps all devices, entities and IDs (see [Switching the transport](#switching-the-transport))
 - **Auto-discovery**: Automatically discovers EnOcean devices connected to your Opus GreenNet Bridge
-- **Gateway discovery**: Offers bridged OPUS gateways found on your MQTT broker for one-click setup, after the same fresh check as manual setup
+- **Gateway discovery**: Offers bridged OPUS gateways found on your MQTT broker for setup; the offer asks for the gateway's REST address (password prefilled with the EURID)
 - **Immediate telemetry**: Flat battery-level and signal-strength updates bypass the multipart state debounce
 - **Real-time updates**: Receives state changes via MQTT push notifications, including device deltas, local-control telegrams, and bridge-originated command telegrams
 - **Connection recovery**: Checks that the gateway responds, marks entities unavailable during outages, and refreshes discovery and state after reconnection
@@ -204,7 +204,8 @@ rediscovery preserve a previously received alarm state.
    - **REST API**: the gateway reachable from Home Assistant on its REST port
      (`8080` by default) and its API credentials (see
      [REST API Setup](#rest-api-setup)). No broker, MQTT integration or bridge
-     is needed.
+     is needed; Home Assistant does not load the MQTT integration for a REST
+     entry.
 
 ## MQTT Bridge Setup (Required)
 
@@ -344,20 +345,8 @@ After installing, add the integration:
 
 [![Add Integration][config-flow-badge]][config-flow]
 
-…or go to **Settings → Devices & Services → Add Integration → “Opus GreenNet Bridge”**
-and choose how Home Assistant reaches the gateway.
-
-**Through the MQTT broker (EAG identifier)**
-
-1. Enter your **EAG Identifier** (Bridge ID; fictional example: `A1B2C3D4`)
-2. Click **Submit**
-
-Setup waits for a response from that specific gateway. A connected Home Assistant
-MQTT broker alone is insufficient. If setup fails, check the identifier, gateway
-power, bridge credentials, and the directional topic rules above. Existing
-entries automatically retry when the gateway is unavailable during startup.
-
-**Directly through the gateway's REST API**
+…or go to **Settings → Devices & Services → Add Integration → “Opus GreenNet Bridge”**.
+The dialog asks directly for the gateway's REST API connection:
 
 | Field | Description |
 |-------|-------------|
@@ -374,6 +363,12 @@ Existing entries automatically retry when the gateway is unavailable during
 startup. Rejected credentials, or a different gateway answering at the stored
 address, start a **re-authentication** that asks for address and credentials
 and accepts them only if the gateway answers with the same EURID.
+
+New gateways are always added over the REST API. Gateways that were set up
+through the MQTT broker with an earlier version keep that connection and keep
+working unchanged; they can be moved to REST (and back) under
+[Switching the transport](#switching-the-transport). The MQTT broker is only
+needed for such entries.
 
 ### Switching the transport
 
@@ -401,15 +396,17 @@ block from the Mosquitto configuration (see
 Once the MQTT bridge forwards `EnOcean/<EAG-ID>/stream/#` (see
 [MQTT Bridge Setup](#mqtt-bridge-setup-required)), Home Assistant offers each
 gateway under **Settings → Devices & services → Discovered** as
-**Opus GreenNet Bridge** with its EAG identifier. Select **Add** and confirm.
+**Opus GreenNet Bridge** with its EAG identifier. Select **Add** and enter the
+gateway's IP address; port `8080`, user `admin` and the password (the EURID)
+are prefilled. The gateway is then connected over its REST API.
 
 - Discovery listens only to `EnOcean/+/stream/devices/+/friendlyId`, the
   retained device-model name that the gateway publishes for each paired device.
   It does not subscribe to the large retained snapshot.
 - Receiving the message publishes nothing and queries no device. A retained
   message only names a candidate; it is not taken as proof that the gateway is
-  online. Confirming runs the same single uptime check as manual setup, and the
-  entry is created only if that specific gateway answers.
+  online. The entry is created only if the entered address answers as that
+  specific gateway (same EURID).
 - Every device announces the same gateway, so each gateway is offered once.
   Configured, disabled and ignored gateways are not offered again. To have an
   ignored gateway offered again, stop ignoring it on the integration page.
@@ -460,10 +457,18 @@ zone does not by itself prove that it is currently heating.
 Entries on the REST transport keep one HTTP event stream to the gateway open
 (`GET /devices/stream`). Every stream starts with the complete device list,
 which resynchronises all state, and then delivers each telegram as the gateway
-handles it. If the stream ends, it is reopened immediately; if the gateway
-cannot be reached, entities become unavailable and the connection is retried
-with increasing pauses (1 to 60 seconds). A stream without any data for 15
-minutes is reopened.
+handles it. At startup this first list is the setup snapshot; if it does not
+arrive within 30 seconds, Home Assistant retries the setup later. Because the
+streamed list does not contain the cover movement times, the device list is
+read once more right after startup for these settings; it never changes live
+state. If the stream ends, it is reopened after a short pause; if the
+gateway cannot be reached, entities become unavailable. The pause starts at 1
+second, doubles after every attempt up to 60 seconds and is lengthened by a
+random share of up to 25 %. A stream that closes within 10 seconds of
+connecting counts as a failed attempt, so a gateway that closes every
+connection at once cannot cause a reconnect loop; a stream that stayed open
+longer starts the pauses again at 1 second. Rejected credentials are not
+retried. A stream without any data for 15 minutes is reopened.
 
 The health check reads the gateway uptime about every 60 seconds, as with MQTT.
 It marks entities unavailable when the gateway stops answering, and reopens the
@@ -471,7 +476,9 @@ stream after a gateway restart. It never confirms or changes the state of a
 device. Every 30 minutes the gateway's device list is read again to refresh
 values that the stream does not carry (battery level, signal strength, cover
 movement times) and to add newly paired devices. This list comes from the
-gateway's device model; it sends no radio telegram and queries no device.
+gateway's device model; it sends no radio telegram and queries no device. A
+telegram that arrives while the list is being read keeps its newer signal
+strength and last-seen time.
 
 Commands are HTTP requests; the gateway's response is the acknowledgement and
 belongs to exactly that request, so the late-answer ambiguity of the MQTT
@@ -502,6 +509,15 @@ commands are unchanged (no ramping mode, no transition feature).
   is sent in the meantime. Check the device before repeating such a command.
 - Cover positions during movement are estimates based on the reported travel
   time. The final position comes from the device report or status query.
+- After a full run into the fully open or closed position, the cover actuator
+  reports its final position only when it switches off its motor. D2-05
+  actuators keep the motor on for a few seconds beyond the configured travel
+  time to make sure the end position is reached (the upstream project measured
+  3.5 to 5.7 seconds), so the final position can appear several seconds after
+  the shutter has physically stopped. Apple Home and the OPUS app show the same
+  delay; it is actuator behaviour on both transports. Stop and intermediate
+  positions report without this delay. The integration sends no extra query to
+  shorten it.
 - The HOPPE AutoLock entity is read-only; lock and unlock actions are rejected.
 - Gateway discovery depends on the bridged, retained `friendlyId` device-model
   topics. A gateway without paired devices, a bridge that does not forward
@@ -517,8 +533,10 @@ commands are unchanged (no ramping mode, no transition feature).
 - With the REST transport, battery level and signal strength are refreshed from
   the device list every 30 minutes; the event stream does not carry them.
 - The REST transport was ported from the upstream project, where it was
-  observed on a real gateway (OPUS-GW v1.21.31). This repository verifies it
-  against a simulated gateway only.
+  observed on a real gateway (OPUS-GW v1.21.31). This repository's automated
+  tests run it against a simulated gateway; the maintainer has additionally
+  tried it on one installation (switching, covers with Stop and retargeting,
+  rockers). That is a practical check, not a complete hardware verification.
 - Quiet or batteryless devices are never removed automatically, because the
   gateway cannot confirm that a device is gone (see
   [Removing or replacing a device](#removing-or-replacing-a-device)).
@@ -800,6 +818,10 @@ GET  /devices/{Device-Identifier}/parameters     # ReCom: supported parameters
 
 Only `PUT …/state` and the ReCom requests can reach a radio device; they run
 one at a time, user commands first, and are never repeated automatically.
+An answer counts as success only if both the HTTP status line (2xx) and the
+document's `header.httpStatus` (`200` or `201`) report success; otherwise the
+action fails with both values in its error text. No request is retried after
+a timeout or an error.
 
 ## Telegram Payload Format
 
@@ -1025,11 +1047,12 @@ custom_components/opus_greennet/
 ├── config_flow.py        # UI configuration (MQTT or REST), reauth, reconfigure, MQTT discovery
 ├── discovery.py          # Validation of discovered gateway candidates
 ├── const.py              # Constants, EEP mappings, and MQTT topics
-├── transport.py          # Transport selection and the common coordinator type
+├── transport.py          # Transport selection and the common coordinator protocol
+├── domain.py             # Transport-neutral command results, signals and timing
 ├── coordinator.py        # MQTT transport: communication, discovery, and commands
 ├── mqtt_transport.py     # Confirmed subscriptions, requests, and gateway probing
 ├── rest_coordinator.py   # REST transport: event stream, health probe, and commands
-├── api.py                # REST client: requests, errors, stream splitter, priority lock
+├── api.py                # REST client: requests, errors, stream splitter (no HA imports)
 ├── protocol.py           # Pure helpers for REST gateway documents
 ├── enocean_device.py     # Device and channel data model
 ├── entity.py             # Shared entity and device-registry behavior
@@ -1058,6 +1081,8 @@ tests/
 ├── test_rest_devices.py         # REST device lists, resynchronisation and refresh
 ├── test_rest_requests.py        # REST health probe, reauth and request priorities
 ├── test_rest_stream.py          # REST event stream lifecycle and reconnects
+├── test_rest_stream_backoff.py  # REST stream backoff with jitter, short-lived streams, connection generation
+├── test_rest_stream_first.py    # REST stream-first setup, first device list deadline, fresh list metadata
 ├── test_rest_telegrams.py       # REST telegrams, foreign commands and own echoes
 ├── test_rest_edge_cases.py      # REST coordinator edge cases
 ├── test_rest_lifecycle.py       # End-to-end REST lifecycle through Home Assistant
@@ -1067,6 +1092,9 @@ tests/
 ├── test_rest_cover_stop.py      # REST cover stop and follow-up queries
 ├── test_rest_config_flow.py     # REST user, reauth and reconfigure flows with recovery
 ├── test_transport_selection.py  # Transport selection, switching, ACK 201 and dimmer ramping
+├── test_rest_only_decoupling.py # REST-only entries without the MQTT integration, import boundaries
+├── test_rest_client_hardening.py # REST client: HTTP vs. gateway status, no retries, no credentials in errors, library boundary
+├── test_rest_client_coordinator.py # REST client hardening as seen by the coordinator (commands, health check, queue)
 ├── test_enocean_device.py       # Device model tests
 ├── test_coordinator_helpers.py  # Pure helper and command tests
 ├── test_coordinator_mqtt.py     # MQTT finalization tests
