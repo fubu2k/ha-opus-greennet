@@ -1,7 +1,7 @@
 # REST phase 01 – stream life cycle, start-up and REST client (port of R3–R5)
 
-- **Status:** implemented on branch `feat/rest-only-r3-r5`, not yet merged.
-  CI pending (section 5). No version change, no release.
+- **Status:** implemented on branch `feat/rest-only-r3-r5`, PR #35, not yet
+  merged. CI green (section 5). No version change, no release.
 - **Series:** first phase of the REST-only series in `fubu2k/ha-opus-greennet`.
   The base is the REST-only beta v1.0.0b1; the gateway is reached only through
   its EnOcean over IP REST API.
@@ -58,7 +58,8 @@ start-up (R5), each as in the earlier fork phases.
 
 | Run | Head | Result |
 |-----|------|--------|
-| pending | – | – |
+| [39493014243](https://github.com/fubu2k/ha-opus-greennet/actions/runs/39493014243) | `c07630b` (v1.0.0b1, unchanged base) | passed: Home Assistant latest stable, HACS validate |
+| [39493018041](https://github.com/fubu2k/ha-opus-greennet/actions/runs/39493018041) | `8aa9ee0` | passed: Home Assistant latest stable, HACS validate |
 
 ## 6. Next step
 
