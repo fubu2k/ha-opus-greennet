@@ -178,7 +178,10 @@ async def test_switching_an_mqtt_entry_to_rest_and_back_keeps_entities(
     await hass.async_block_till_done()
     assert entry.data == {"eag_id": "AABB0011"}
     assert type(entry.runtime_data.coordinator) is OpusGreenNetCoordinator
-    await wait_until(lambda: gateway.stream_count == 0)
+    # The unloaded REST coordinator sends nothing more.
+    requests = len(gateway.requests)
+    await hass.async_block_till_done()
+    assert len(gateway.requests) == requests
     assert registry.async_get(entity_id).name == "My desk"
     assert {
         device.id

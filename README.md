@@ -1061,6 +1061,10 @@ tests/
 ├── test_rest_telegrams.py       # REST telegrams, foreign commands and own echoes
 ├── test_rest_edge_cases.py      # REST coordinator edge cases
 ├── test_rest_lifecycle.py       # End-to-end REST lifecycle through Home Assistant
+├── test_rest_protocol.py        # Pure REST document helpers
+├── test_rest_reconciliation_feedback.py # REST feedback matching and status checks
+├── test_rest_cover_movement.py  # REST cover travel estimates and echoes
+├── test_rest_cover_stop.py      # REST cover stop and follow-up queries
 ├── test_rest_config_flow.py     # REST user, reauth and reconfigure flows with recovery
 ├── test_transport_selection.py  # Transport selection, switching, ACK 201 and dimmer ramping
 ├── test_enocean_device.py       # Device model tests
