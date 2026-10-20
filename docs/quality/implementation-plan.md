@@ -251,7 +251,8 @@ transport next to the unchanged MQTT transport, on branch
 `feature/rest-api-integration`, report `phases/phase-14.md` (section 15a).
 Quality scale: `reauthentication-flow`, `reconfiguration-flow` and
 `inject-websession` change from exempt to done (48 done, 6 exempt, 0 todo).
-Not merged; merge and release approval remain separate.
+CI green on the branch (run `39384621424`). Not merged; merge and release
+approval remain separate.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:

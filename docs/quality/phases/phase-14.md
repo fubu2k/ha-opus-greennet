@@ -1,7 +1,8 @@
 # Phase 14 - Optional REST transport
 
 - **Status:** implemented on branch `feature/rest-api-integration` (branch
-  name chosen by the maintainer). Not merged; no pull request opened, no
+  name chosen by the maintainer), CI green (run `39384621424`, section 6).
+  Not merged; no pull request opened, no
   version change, no CHANGELOG entry, no release. Merge and release approval
   remain separate (plan sections 4 and 5).
 - **Base SHA:** `39b4c66` (`main`, 2026-10-20, "docs: record phase 13 merge,
@@ -108,7 +109,7 @@ version, CHANGELOG, release, pull request or merge.
 | `quality_scale.yaml` | three rules exempt -> done, comments for both transports |
 | `.github/workflows/tests.yml` | REST suites added to the repeated race runs (both jobs) |
 | `tests/fake_gateway.py` | new (upstream): in-process gateway serving the REST API over real HTTP |
-| `tests/test_rest_api.py`, `test_rest_commands.py`, `test_rest_devices.py`, `test_rest_requests.py`, `test_rest_stream.py`, `test_rest_telegrams.py`, `test_rest_edge_cases.py`, `test_rest_lifecycle.py` | upstream REST suites, renamed modules and helpers |
+| `tests/test_rest_api.py`, `test_rest_commands.py`, `test_rest_devices.py`, `test_rest_requests.py`, `test_rest_stream.py`, `test_rest_telegrams.py`, `test_rest_edge_cases.py`, `test_rest_lifecycle.py`, `test_rest_protocol.py`, `test_rest_reconciliation_feedback.py`, `test_rest_cover_movement.py`, `test_rest_cover_stop.py` | upstream REST suites, renamed modules and helpers; one stop case adapted to ACK 201 semantics |
 | `tests/test_rest_config_flow.py` | REST user, reauth and reconfigure flows; every error followed by a recovering submit |
 | `tests/test_transport_selection.py` | selection, switching both ways with registry settings, setup errors, ACK 201 on REST, dimmer ramping, diagnostics |
 | `tests/conftest.py`, `tests/ha_helpers.py` | resolver without zeroconf, `gateway` and `rest_coordinator` fixtures, menu-aware flow helpers |
@@ -132,7 +133,23 @@ MQTT requests, not radio transmissions.
 
 ## 6. Commands and results
 
-To be completed with the CI run of the final branch head (section 9).
+The authoring environment has no package index, so tests ran only in GitHub
+Actions (workflow `Tests`, manual dispatch on the branch). Ruff ran locally as
+well. The job logs are not reachable from the authoring environment; failures
+were read through a temporary diagnostic workflow that reported pytest
+failures and coverage as annotations (`rest-debug.yml`, added and removed on
+this branch).
+
+| Run | Head | Result |
+|-----|------|--------|
+| `39382451298` | `ca99927` | hassfest (reference and master), Ruff and strict mypy green; tests failed (one test, below) |
+| `39383150809` (diagnostic) | `c83e5dd` | 1,882 tests, 1 failure: the switch test waited for the fake gateway to close the server side of the old stream; coverage gate failed for `protocol.py` (93.0 %) and `rest_coordinator.py` (94.1 %) |
+| `39383911384` (diagnostic) | `189ac5a` | after porting the upstream protocol, feedback and cover suites: 2,081 tests, 1 failure: an upstream stop test expected status checks after ACK 201; adapted to the phase 11 semantics. Coverage: total 98.2 %, `rest_coordinator.py` 98.6 %, `config_flow.py`, `transport.py`, `light.py` 100 % |
+| `39384621424` | `e04245f` | **green**: fixed reference (Home Assistant 2026.10.2) and latest stable job (Ruff, mypy, all tests, per-module coverage gate, three repetitions of the lifecycle and race suites including the REST suites), hassfest at the reference commit and hassfest master |
+
+Commands executed by the jobs: those of plan section 17 (`pip check`, `ruff
+check .`, `ruff format --check .`, `python -m mypy`, `pytest -v --cov …`,
+`python script/check_coverage.py coverage.json`, the repetition loop).
 
 ## 7. Registry and identity compatibility
 
