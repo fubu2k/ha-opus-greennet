@@ -336,6 +336,11 @@ versions for this repository in HACS before selecting the beta version.
 
 ### Manual Installation
 
+> **Home Assistant 2026.10.1 or newer is required, also for manual installs.**
+> HACS checks this for you; a manual copy does not. On an older version, setup
+> fails with `ImportError: cannot import name 'ATTR_BRIGHTNESS' from
+> 'homeassistant.components.light.const'`. Update Home Assistant first.
+
 1. Copy the `custom_components/opus_greennet` folder to your Home Assistant's `custom_components` directory
 2. Restart Home Assistant
 
@@ -1083,6 +1088,7 @@ tests/
 ├── test_rest_stream.py          # REST event stream lifecycle and reconnects
 ├── test_rest_stream_backoff.py  # REST stream backoff with jitter, short-lived streams, connection generation
 ├── test_rest_stream_first.py    # REST stream-first setup, first device list deadline, fresh list metadata
+├── test_rest_soft_smart_ack.py  # REST ACK 201 (SoftSmartAck): no estimate, no travel estimate, no status checks
 ├── test_rest_telegrams.py       # REST telegrams, foreign commands and own echoes
 ├── test_rest_edge_cases.py      # REST coordinator edge cases
 ├── test_rest_lifecycle.py       # End-to-end REST lifecycle through Home Assistant
