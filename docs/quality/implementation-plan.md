@@ -325,7 +325,8 @@ stream lifecycle: bounded exponential backoff with jitter after every stream
 end, short-lived streams (< 10 s) count as failures (B-2), size check for
 complete documents (B-3), connection generation and `aclosing` for replaced
 readers. REST behaviour changes disclosed under decision D3. MQTT path
-untouched (A1–A5). Not yet merged; CI pending.
+untouched (A1–A5). Merged into `feature/rest-api-integration` via PR #21
+(`ae3e084`); CI run `39431240243` green on the merged head.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:

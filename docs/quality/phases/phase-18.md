@@ -1,8 +1,10 @@
 # Phase 18 – REST plan R4: event stream lifecycle
 
-- **Status:** implemented on branch `feat/opus-r4-stream-lifecycle`, not yet
-  merged. CI pending (section 5). No version change, no CHANGELOG entry, no
-  release; `main` untouched (branch policy of 2026-10-20).
+- **Status:** completed. Branch `feat/opus-r4-stream-lifecycle` (`5e21cf8`)
+  merged by the maintainer into `feature/rest-api-integration` via PR #21
+  (merge commit `ae3e084`, 2026-10-20). CI on the merged head green
+  (section 5). No version change, no CHANGELOG entry, no release; `main`
+  untouched (branch policy of 2026-10-20).
 - **Plan:** `Implementations-Plan-Rest-API.md` phase R4 (section 8), findings
   B-2 and B-3 (section 2.6), stream lifecycle table (section 6), acceptance
   row "Gateway schließt Verbindungen sofort" (section 9). Guardrails per
@@ -162,11 +164,15 @@ Note for CI review: tests outside `test_rest_stream.py` that close the stream
 
 | Run | Head | Result |
 |-----|------|--------|
-| pending | `feat/opus-r4-stream-lifecycle` | – |
+| `39431240243` (workflow_dispatch) | `feature/rest-api-integration` `ae3e084` (merge of PR #21; code identical to `5e21cf8`) | **success**: `validate`, `Hassfest at Home Assistant 2026.10.2 (fixed reference)`, `Home Assistant 2026.10.2 (fixed reference)`, `Home Assistant (latest stable)` |
 
-The workflow starts on pull requests only for base `main`; for this branch
-CI runs after the merge into `feature/rest-api-integration` or via
-`workflow_dispatch`, as in phase 17.
+No CI run ran on the branch before the merge (the workflow starts on pull
+requests only for base `main`); the run above on the merged head is the test
+evidence of this phase, including the Home Assistant tests that could not run
+locally (`tests/test_rest_stream.py` integration tests, the whole MQTT suite,
+coverage gates and the three repetitions of the lifecycle and race suites).
+Exact test counts and coverage percentages are in the job logs and the
+`reference-baseline-*` artifact; they are not quoted here.
 
 ## 6. Registry and identity compatibility
 
@@ -205,10 +211,10 @@ string changed.
 
 ## 9. Review status and next step
 
-- Ready for review on `feat/opus-r4-stream-lifecycle`; PR base must be
-  `feature/rest-api-integration`, never `main`.
-- After the merge: record the CI run in section 5 and the merge commit in
-  `Implementations-Plan-Rest-API.md` and `implementation-plan.md`.
+- Merged via PR #21 (`ae3e084`) into `feature/rest-api-integration`, not into
+  `main`; CI run `39431240243` green on the merged head (section 5). This
+  record was added on branch `docs/opus-r4-record-ci`; it changes no code,
+  test or workflow.
 - Next REST phase: R5 (start and resynchronisation) or R1 (measurement), each
   with its own approval.
 - No release permission is implied.
