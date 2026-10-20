@@ -229,8 +229,10 @@ The per-entity inventory of section 10 is recorded in the phase 13 report
 F13-1 closed: rocker event entities use `EventDeviceClass.BUTTON` (registry
 and frontend metadata only; no ID, event type, enablement or traffic change).
 F13-2 decided: `codeowners`, documentation and issue tracker stay with
-`kegelmeier` (planned hand-over of the code). No workflow, manifest, version or
-CHANGELOG change. CI on the branch pending; not merged.
+`kegelmeier` (planned hand-over of the code). No workflow, manifest or version
+change. Completed: merged via PR #13 (`2e46bfd`), CI green on the pull request
+(run `39376442882`) and on `main` (run `39376460361`), CHANGELOG
+"Unreleased". This closes the quality series.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
@@ -542,7 +544,7 @@ investigation from implementation approval.
 Acceptance: deterministic tests, stated residual risks, no extra requests/retries.
 Changing production timeout behaviour requires a separate design decision.
 
-## 15. Phase 13 – Final rule audit and report (implemented, awaiting CI and review)
+## 15. Phase 13 – Final rule audit and report (completed)
 
 Suggested branch: `docs/opus-q13-quality-acceptance`.
 

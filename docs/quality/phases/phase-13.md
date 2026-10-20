@@ -1,10 +1,10 @@
 # Phase 13 - Final rule audit and report
 
-- **Status:** implemented on branch `fix/opus-q13-event-device-class`
+- **Status:** completed. Branch `fix/opus-q13-event-device-class`
   (maintainer decision 2026-10-20: one branch for the audit documentation and
-  the F13-1 fix, to be merged into `main` of the fork). CI on the branch
-  pending; awaiting maintainer review. Not merged. No version change, no
-  CHANGELOG entry, no release. The audit was first prepared as commit
+  the F13-1 fix) merged via PR #13 (merge `2e46bfd`); CI green on the pull
+  request and on `main` (section 9). CHANGELOG entry under "Unreleased"
+  (approved by the maintainer). No version change, no release. The audit was first prepared as commit
   `011b6e4` on a local branch `docs/opus-q13-quality-acceptance` (plan
   section 15 suggestion); that branch was never pushed and is superseded.
 - **Base SHA:** `96510dd52931fac560cef4904ca5fcabda05348a` (`main`,
@@ -40,7 +40,7 @@ Platinum-equivalent self-assessment only with complete applicable evidence.
 | Per-entity inventory (plan section 10) | recorded in section 4; RSSI and overlapping handle projections reviewed, no change proposed |
 | Finding F13-1 | **closed** in this branch: rocker events use `EventDeviceClass.BUTTON` (section 5) |
 | Decision F13-2 | ownership and URLs stay with `kegelmeier` (section 5) |
-| Self-assessment | **Platinum-equivalent self-assessment reached**, subject to green CI on this branch; not an official rating |
+| Self-assessment | **Platinum-equivalent self-assessment reached** (CI green, section 9); not an official rating |
 
 ## 2. Authorised changes and guardrails A1-A5
 
@@ -200,14 +200,19 @@ The phase 8 traffic baseline remains the reference.
 | `ruff check .`, `ruff format --check .` | passed (99 files) | local, ruff 0.16.9 (CI pins 0.16.3) |
 | Strict mypy, pytest (including `tests/test_event_device_class.py`) with coverage gates, three race repetitions, hassfest | **not executed locally**: the authoring environment cannot reach the Python package index | – |
 | Last full CI on identical code | passed: run `39315310796` on `main` head `e57cbd2` (fixed reference 2026.10.2, latest stable, reference hassfest, hassfest master), recorded in phase 12 section 13.4 | CI |
-| CI on this branch | **pending**; record the run ID here after the pull request runs | – |
+| pip check, Ruff, strict mypy, full pytest incl. `tests/test_event_device_class.py`, total and per-module coverage gates, three race repetitions, traffic baseline | passed | CI, job "Home Assistant 2026.10.2 (fixed reference)" `118475537221`, run `39376442882` (pull request #13, head `81feaf1`), 2026-10-20 07:43–07:52 +0200 |
+| Same gates against the latest stable release | passed | CI, job "Home Assistant (latest stable)" `118475536781`, same run |
+| Hassfest built from core `8d7fd8b` and icon validation | passed | CI, job "Hassfest at Home Assistant 2026.10.2 (fixed reference)" `118475536938`, same run |
+| Hassfest `@master` (moving) | passed | CI, job "validate" `118475536930`, same run |
+| All four jobs on `main` after the merge (head `2e46bfd`, identical code) | passed | CI, run `39376460361` (push), 2026-10-20 07:43–07:53 +0200; jobs `118475592867` (reference), `118475592839` (latest stable), `118475592609` (reference Hassfest), `118475592816` (validate) |
 
 Tests that can react: `tests/test_quality_scale.py` (schema, statuses,
 evidence rows, README headings), the new `tests/test_event_device_class.py`,
 and the event and translation suites (`test_event_entity.py`,
 `test_event_lifecycle.py`, `test_translations.py`), which the device class
 does not affect by design (name stays the device name). No test result is
-claimed until CI on the branch is green.
+claimed from the local environment; the CI runs above are the results of
+record.
 
 ## 10. Registry and identity compatibility
 
@@ -229,8 +234,9 @@ name and its custom icon (tested). No other entity changed.
 
 ## 12. Review status and next step
 
-Awaiting CI on `fix/opus-q13-event-device-class` and maintainer review;
-record the CI run ID in section 9. After a green run the branch can be merged
-into `main` of the fork; that closes the quality series. Versioning, CHANGELOG
-(the event device class is a user-visible icon change worth an "Unreleased"
-line) and release remain separate decisions.
+Completed: merged via PR #13 (`2e46bfd`), CI green on the pull request and
+on `main`, CHANGELOG "Unreleased" updated with maintainer approval. This
+closes the quality series (phases 1-13). The Platinum-equivalent
+self-assessment is reached; it is not an official rating. Versioning and
+release remain separate decisions. Remaining gaps are hardware observations
+only (section 11).

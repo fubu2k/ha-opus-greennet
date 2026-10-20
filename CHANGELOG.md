@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - The supply voltage of SMS presence detectors (A5-07-01/03) is classified as a diagnostic entity and appears under **Diagnostic** on the device page. It stays enabled; existing entries keep their enabled/disabled setting, entity ID, name and icon, so automations continue to work.
 - Battery levels of all OPUS devices that report one (SMS presence detectors, A5-04-01/02/03 temperature/humidity sensors and the OPUS motion detector) are displayed in whole percent, for example `88 %` instead of `87.5 %`. Only the display is rounded: entity state, history and long-term statistics keep the reported value, and a display precision you set in the entity settings takes precedence.
 - Neither change sends a request to a device or changes MQTT traffic, entity inventory or unique IDs.
+- Rocker switch event entities (F6-02-xx, F6-03-xx) use the `button` event device class, so the frontend shows a button icon by default. Entity IDs, names, event types and automations are unchanged; existing entries keep their enabled/disabled setting and any icon you chose. No request is sent to a device.
 
 ### Added
 - Integration diagnostics list `late_answers` for every device and for the gateway: `unanswered_requests` counts requests from the last two minutes that ended without a gateway reply (timeout or cancellation), and `possibly_late_answers` counts replies that arrived while such a request was still open. OPUS replies carry no request ID, so such a reply may belong to the earlier request. The counters only make this visible: they never delay, repeat, drop or change a request, and they change no entity state or availability.
@@ -17,6 +18,7 @@ All notable changes to this project will be documented in this file.
 
 ### Development and quality assurance
 - New regression suites `tests/test_late_responses.py` (18 cases) and `tests/test_late_answer_diagnostics.py` (19 cases) reproduce how late replies are attributed and pin that no cooldown, retry or extra request follows a timeout. Both run three additional times in CI. Report: `docs/quality/phases/phase-12.md`.
+- Final quality-scale audit (phase 13): all 54 rules re-verified against the code (45 done, 9 exempt, 0 todo) with explicit exemption justifications, a per-entity inventory and the documented limits of the evidence. This is a Platinum-equivalent self-assessment, not an official Home Assistant rating. Report: `docs/quality/phases/phase-13.md`.
 
 ## [0.7.0b2] - 2026-10-19
 

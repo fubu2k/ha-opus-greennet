@@ -31,7 +31,7 @@ Rule -> implementation -> tests -> documentation for every rule in
   constants) match, and every exemption is re-justified in the section
   "Exemption justifications". No status changed; exemption comments were made
   more explicit. The audit is static; the test result of record is the CI run
-  on the phase 13 branch (see the report).
+  on the phase 13 pull request and on `main` (runs `39376442882`, `39376460361`).
 - Finding **F13-1** (rocker event entities without a device class) is closed
   on the same branch: `event.py` sets `EventDeviceClass.BUTTON`, registry and
   frontend metadata only, tested in `tests/test_event_device_class.py`.
