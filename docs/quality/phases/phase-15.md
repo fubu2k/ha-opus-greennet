@@ -1,9 +1,13 @@
 # Phase 15 – REST plan R0: documentation follow-up
 
 - **Status:** implemented on branch `docs/opus-r0-rest-documentation`.
-  Documentation only. Not merged; no pull request opened, no version change,
-  no CHANGELOG entry, no release. Merge and release approval remain separate
-  (`implementation-plan.md` sections 4 and 5).
+  Documentation only. No version change, no CHANGELOG entry, no release.
+  Release approval remains separate (`implementation-plan.md` sections 4
+  and 5).
+- **Merge record (added 2026-10-20 after review):** merged into
+  `feature/rest-api-integration` by PR #16, merge commit `4014b1c`
+  (parents `1847f88`, `b52251b`). Not merged into `main`. Sections 9 and 10
+  keep the pre-merge wording as a historical record.
 - **Plan:** `Implementations-Plan-Rest-API.md` revision 2, phase R0 (section 8),
   decisions D1/D2 (section 0), deviations A-1 and A-6 (section 2.5), findings of
   sections 3.1–3.3. Phase report structure: `implementation-plan.md` section 20.
