@@ -72,6 +72,18 @@ async def hass(tmp_path: Path) -> AsyncIterator[HomeAssistant]:
 
 
 @pytest.fixture
+async def hass_without_mqtt(hass: HomeAssistant) -> HomeAssistant:
+    """Home Assistant without the MQTT integration (REST-only, plan K5).
+
+    The shared ``hass`` fixture marks MQTT as set up for the MQTT tests. This
+    fixture removes that mark again, so a test sees an installation in which
+    the MQTT integration was never configured.
+    """
+    hass.config.components.discard("mqtt")
+    return hass
+
+
+@pytest.fixture
 async def gateway() -> AsyncIterator[FakeGateway]:
     """Run a fake OPUS gateway serving the REST API on a local port."""
     fake = FakeGateway()
