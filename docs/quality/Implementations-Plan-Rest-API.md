@@ -548,7 +548,7 @@ unverändert (Begründung im Bericht, Abschnitt 2). MQTT-Pfad unverändert.
 
 **Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r4-stream-lifecycle`
 (Basis `feature/rest-api-integration` `e5b609e`), Bericht `phases/phase-18.md`;
-noch nicht gemergt, CI ausstehend. B-2 behoben (begrenzter exponentieller
+gemergt über PR #21 (`ae3e084`), CI-Lauf `39431240243` grün. B-2 behoben (begrenzter exponentieller
 Backoff 1–60 s mit 0–25 % Jitter nach oben, Pause nach jedem Stream-Ende,
 Stream < 10 s zählt als Fehlschlag), B-3 behoben (Größenprüfung auch für
 vollständige Dokumente), Verbindungsgeneration und `aclosing` gegen
