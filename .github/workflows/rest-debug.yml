@@ -1,0 +1,59 @@
+# TEMPORARY diagnostic workflow for phase 14 (removed before review).
+# Reports test failures as annotations because job logs are not reachable
+# from the authoring environment.
+name: Phase 14 debug
+on:
+  push:
+    branches: [feature/rest-api-integration]
+permissions:
+  contents: read
+jobs:
+  debug:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: python -m pip install -r requirements_test_reference.txt
+      - name: Tests
+        run: pytest -q -p no:cacheprovider --tb=short -o junit_family=xunit1 --junitxml=junit.xml --cov --cov-report=json:coverage.json || true
+      - name: Report
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, xml.etree.ElementTree as ET
+          from pathlib import Path
+          items = []
+          try:
+              root = ET.parse("junit.xml").getroot()
+              for case in root.iter("testcase"):
+                  for tag in ("failure", "error"):
+                      node = case.find(tag)
+                      if node is not None:
+                          text = (node.get("message") or "") + "\n" + (node.text or "")
+                          items.append(f"{case.get('classname')}::{case.get('name')}\n{text[-2500:]}")
+              suite = root if root.tag == "testsuite" else root.find("testsuite")
+              summary = {k: suite.get(k) for k in ("tests", "failures", "errors", "skipped")}
+          except Exception as err:
+              summary = {"junit": repr(err)}
+          try:
+              cov = json.loads(Path("coverage.json").read_text())
+              summary["total"] = round(cov["totals"]["percent_covered"], 2)
+              for name, data in cov["files"].items():
+                  if "opus_greennet" in name:
+                      p = data["summary"]["percent_covered"]
+                      if p <= 95 or name.endswith(("config_flow.py", "rest_coordinator.py", "transport.py", "light.py", "__init__.py")):
+                          summary[name.split("/")[-1]] = round(p, 2)
+                          if p < 100 and name.endswith(("config_flow.py", "transport.py", "__init__.py", "light.py", "rest_coordinator.py", "protocol.py", "api.py")):
+                              summary[name.split("/")[-1] + "_missing"] = data["missing_lines"][:60]
+          except Exception as err:
+              summary["coverage"] = repr(err)
+          items.insert(0, "SUMMARY " + json.dumps(summary))
+          def enc(s):
+              return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          levels = ["error"] * 10 + ["warning"] * 10 + ["notice"] * 10
+          for level, item in zip(levels, items):
+              print(f"::{level} title=phase14::{enc(item)}")
+          PY
