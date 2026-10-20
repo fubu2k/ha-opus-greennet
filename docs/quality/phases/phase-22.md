@@ -53,6 +53,7 @@ diagnostics; the 5 s grace period stays unchanged (no code change).
 | `protocol.py` | `KEY_LAST_VERTICAL_MOVEMENT_TIME`, `last_vertical_movement_times()` |
 | `diagnostics.py` | REST-only device keys `last_vertical_movement_time` and `position_origin` |
 | `tests/test_rest_domain_model.py` | **new**: field classification, same object with runtime state kept, error on a held device, missing metadata kept, no button replay, late profiles discovered once, run duration parsing (values, channel, invalid input), stored but never used as state, diagnostics without extra request; R7 sequence; R8 6× press/release with one write each and no replay after a resync; long press; R6b: origin from list, report, `unknown`, foreign command, entity estimate, elapsed movement, `device` document, forget, diagnostics |
+| `tests/test_rest_devices.py` | two existing cases pinned the old behaviour (`updated is not original`); they now assert the in-place update (`updated is original`), the rest of each case is unchanged |
 | `README.md`, `protocol-contract.md` 12.4 and 12.9, plans (R6 status, O-4 decided) | documentation |
 
 The key name `lastVerticalMovementTime` comes from the upstream note
