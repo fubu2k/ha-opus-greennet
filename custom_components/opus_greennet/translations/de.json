@@ -4,6 +4,14 @@
     "step": {
       "user": {
         "title": "Opus GreenNet Bridge",
+        "description": "Wähle, wie Home Assistant das Gateway erreicht. Bereits eingerichtete Gateways behalten ihre Verbindung.",
+        "menu_options": {
+          "mqtt_bridge": "Über den MQTT-Broker (EAG-Kennung)",
+          "rest_api": "Direkt über die REST-API des Gateways"
+        }
+      },
+      "mqtt_bridge": {
+        "title": "Opus GreenNet Bridge",
         "description": "Konfiguriere die Bridge, die mit deinem MQTT-Broker verbunden ist. Beim Einrichten wird geprüft, ob die angegebene Bridge antwortet.",
         "data": {
           "eag_id": "EAG-Kennung"
@@ -12,21 +20,87 @@
           "eag_id": "Die achtstellige Bridge-Kennung, die in den MQTT-Topics verwendet wird, z. B. A1B2C3D4 (fiktiv)."
         }
       },
+      "rest_api": {
+        "title": "Opus GreenNet Bridge (REST API)",
+        "description": "Gib die Adresse der REST-API des Gateways ein. Beim Einrichten wird nur die Kennung des Gateways gelesen; dabei wird kein EnOcean-Gerät abgefragt.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Benutzername",
+          "password": "Passwort"
+        },
+        "data_description": {
+          "host": "IP-Adresse oder Hostname des OPUS-Gateways in deinem Netzwerk.",
+          "port": "Port der REST-API des Gateways (Standard 8080).",
+          "username": "Benutzername der REST-API des Gateways (Herstellervorgabe: admin).",
+          "password": "Passwort der REST-API des Gateways. Herstellervorgabe ist die EURID des Gateways in Großbuchstaben."
+        }
+      },
       "discovery_confirm": {
         "title": "Opus GreenNet Bridge",
         "description": "Gateway {eag_id} einrichten? Es wurde in Gerätedaten auf deinem MQTT-Broker gefunden. Vor dem Anlegen des Eintrags wird geprüft, ob dieses Gateway antwortet. Dabei wird kein EnOcean-Gerät abgefragt."
+      },
+      "reauth_confirm": {
+        "title": "Gateway {eag_id} erneut anmelden",
+        "description": "Das Gateway hat die gespeicherten Zugangsdaten abgelehnt oder meldet sich mit einer anderen Kennung. Gib Adresse und Zugangsdaten von Gateway {eag_id} ein.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Benutzername",
+          "password": "Passwort"
+        },
+        "data_description": {
+          "host": "IP-Adresse oder Hostname des OPUS-Gateways in deinem Netzwerk.",
+          "port": "Port der REST-API des Gateways (Standard 8080).",
+          "username": "Benutzername der REST-API des Gateways (Herstellervorgabe: admin).",
+          "password": "Passwort der REST-API des Gateways. Herstellervorgabe ist die EURID des Gateways in Großbuchstaben."
+        }
+      },
+      "reconfigure": {
+        "title": "Opus GreenNet Bridge",
+        "description": "Wähle, wie Home Assistant dieses Gateway erreicht. Geräte, Entitäten, deren IDs und deine Einstellungen bleiben unverändert.",
+        "menu_options": {
+          "reconfigure_rest": "Direkt über die REST-API des Gateways",
+          "reconfigure_mqtt": "Über den MQTT-Broker"
+        }
+      },
+      "reconfigure_rest": {
+        "title": "REST-API von Gateway {eag_id}",
+        "description": "Gib Adresse und Zugangsdaten von Gateway {eag_id} ein. Sie werden nur übernommen, wenn sich unter dieser Adresse Gateway {eag_id} meldet.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Benutzername",
+          "password": "Passwort"
+        },
+        "data_description": {
+          "host": "IP-Adresse oder Hostname des OPUS-Gateways in deinem Netzwerk.",
+          "port": "Port der REST-API des Gateways (Standard 8080).",
+          "username": "Benutzername der REST-API des Gateways (Herstellervorgabe: admin).",
+          "password": "Passwort der REST-API des Gateways. Herstellervorgabe ist die EURID des Gateways in Großbuchstaben."
+        }
+      },
+      "reconfigure_mqtt": {
+        "title": "MQTT-Broker für Gateway {eag_id}",
+        "description": "Gateway {eag_id} wieder über den MQTT-Broker erreichen. Vor dem Umschalten prüft Home Assistant, ob das Gateway dort antwortet. Eine gespeicherte REST-Adresse und ihre Zugangsdaten werden entfernt."
       }
     },
     "error": {
       "cannot_connect": "Verbindung zum MQTT-Broker fehlgeschlagen",
       "invalid_eag_id": "Die EAG-Kennung muss genau acht hexadezimale Zeichen enthalten",
       "unknown": "Unerwarteter Fehler",
-      "gateway_unavailable": "Der MQTT-Broker ist verbunden, aber die Bridge antwortet nicht. Prüfe die Kennung und die MQTT-Bridge-Verbindung."
+      "gateway_unavailable": "Der MQTT-Broker ist verbunden, aber die Bridge antwortet nicht. Prüfe die Kennung und die MQTT-Bridge-Verbindung.",
+      "cannot_connect_gateway": "Verbindung zum Gateway fehlgeschlagen. Prüfe Host und Port.",
+      "invalid_auth": "Das Gateway hat Benutzername oder Passwort abgelehnt",
+      "unsupported_gateway": "Das Gerät unter dieser Adresse antwortet nicht wie ein OPUS-Gateway",
+      "wrong_gateway": "Unter dieser Adresse meldet sich ein anderes Gateway"
     },
     "abort": {
       "already_configured": "Diese Bridge ist bereits konfiguriert",
       "mqtt_not_configured": "Richte die MQTT-Integration ein und verbinde sie, bevor du diese Bridge hinzufügst",
-      "invalid_discovery_info": "Die MQTT-Nachricht kennzeichnet kein OPUS-Gateway"
+      "invalid_discovery_info": "Die MQTT-Nachricht kennzeichnet kein OPUS-Gateway",
+      "reauth_successful": "Die erneute Anmeldung war erfolgreich",
+      "reconfigure_successful": "Die Neukonfiguration war erfolgreich"
     }
   },
   "entity": {
@@ -178,6 +252,12 @@
     },
     "autolock_read_only": {
       "message": "Die AutoLock-Steuerung über MQTT ist bis zur Klärung durch den Hersteller deaktiviert. Es wird nur der gemeldete Schlosszustand angezeigt."
+    },
+    "invalid_auth": {
+      "message": "Das OPUS-Gateway hat die gespeicherten Zugangsdaten abgelehnt. Melde das Gateway erneut an."
+    },
+    "wrong_gateway": {
+      "message": "Unter der konfigurierten Adresse meldet sich ein anderes OPUS-Gateway. Melde das Gateway mit seiner richtigen Adresse erneut an."
     }
   },
   "issues": {
