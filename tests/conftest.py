@@ -169,3 +169,17 @@ def rest_coordinator():
     c = OpusGreenNetRestCoordinator(MagicMock(), MagicMock(), "AABB0011")
     c.async_send_command = AsyncMock()
     return c
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """TEMPORARY (phase R2 diagnosis): report failures as GitHub annotations."""
+    import os
+    import sys
+
+    if os.environ.get("GITHUB_ACTIONS") != "true" or not report.failed:
+        return
+    text = str(report.longrepr)[-1800:]
+    for old, new in (("%", "%25"), ("\r", "%0D"), ("\n", "%0A")):
+        text = text.replace(old, new)
+    sys.__stdout__.write(f"\n::error title={report.nodeid}::{text}\n")
+    sys.__stdout__.flush()
