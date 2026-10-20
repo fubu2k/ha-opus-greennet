@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-10-20
+
+Final MQTT release: @fubu2k's quality series on top of v0.7.0. It is the stable fallback for anyone who keeps the Mosquitto bridge; new features go into 1.0, which talks to the gateway directly over its REST API.
+
+### Requirement
+- **Home Assistant 2026.10.1 or newer**, also for manual installs (unchanged from v0.7.0).
+
+### Added
+- Automatic discovery: Home Assistant offers the gateway as soon as its `friendlyId` topic arrives through the MQTT bridge. Manual setup stays available.
+- Icons for HOPPE handle and lock entities and for the service actions.
+- A repair notice when the unique-ID migration had to remove a duplicate beta entity, naming the removed and the kept entity ID.
+- Diagnostics show commands the gateway queued for later delivery (`deferred_commands`) and requests without an answer or with a possibly late answer (`late_answers`).
+
+### Fixed
+- A command the gateway only queued (status 201, SoftSmartAck) no longer shows the commanded state before the device received it; covers start no movement estimate for it.
+- An older retained device value no longer overwrites a value that was already updated live during the same connection.
+- Numeric device names are kept as text.
+
+### Changed entity defaults
+- Rocker event entities use the `button` device class.
+- HOPPE unlock request and mechanics fault are diagnostic entities, disabled by default for new entities; SMS supply voltage is a diagnostic entity; battery levels are shown in whole percent. Existing entities keep their settings, IDs and names.
+
+### Validation
+- 1,568 tests on Home Assistant 2026.10.1, Ruff, strict mypy, coverage gates and the MQTT traffic baseline (no extra device requests at setup, health check or reconnect).
+- Thanks to @fubu2k for the quality series.
+
 ## [0.7.0] - 2026-10-19
 
 Stable release of the v0.7.0b1 beta: the motion-detector support from #72 and the quality phases 1–5 from #74/#75. This is the last release that connects through MQTT; the upcoming 1.0 talks to the gateway directly over its REST API.

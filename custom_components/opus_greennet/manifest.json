@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/kegelmeier/ha-opus-greennet/issues",
   "mqtt": ["EnOcean/+/stream/devices/+/friendlyId"],
   "requirements": [],
-  "version": "0.7.0"
+  "version": "0.8.0"
 }
