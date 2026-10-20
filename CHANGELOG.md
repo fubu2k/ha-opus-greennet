@@ -27,7 +27,7 @@ Builds on the REST transport of phase 14 (based on upstream `feat/rest-transport
 #### Documentation and quality assurance
 - REST API implementation plan (now in English), protocol contract (REST sections 12.2–12.4), README (REST transport, setup, gateway discovery) and phase reports 15–21.
 - Approved the 30-minute device list read for REST (decision D2) and documented the field-test baseline and the actuator overrun on full cover runs (R0).
-- New test modules `test_rest_only_decoupling.py`, `test_rest_client_hardening.py`, `test_rest_client_coordinator.py`, `test_rest_stream_backoff.py` and `test_rest_stream_first.py`; every phase passed the CI workflow (ruff, strict mypy, coverage gates, Hassfest, Home Assistant 2026.10.2 and latest stable).
+- New test modules `test_rest_only_decoupling.py`, `test_rest_client_hardening.py`, `test_rest_client_coordinator.py`, `test_rest_stream_backoff.py`, `test_rest_stream_first.py` and `test_rest_soft_smart_ack.py` (ACK 201 on the REST path, ported from upstream `feat/rest-beta-101`); every phase passed the CI workflow (ruff, strict mypy, coverage gates, Hassfest, Home Assistant 2026.10.2 and latest stable).
 
 ### Quality series (phases 12–13)
 
