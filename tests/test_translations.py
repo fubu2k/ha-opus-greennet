@@ -132,13 +132,28 @@ def test_config_flow_errors_and_aborts_are_translated() -> None:
             for kw in node.keywords:
                 if kw.arg == "reason" and isinstance(kw.value, ast.Constant):
                     aborts.add(kw.value.value)
-    # _abort_if_unique_id_configured() uses the standard reason.
-    aborts.add("already_configured")
+    # _abort_if_unique_id_configured() uses the standard reason, and
+    # async_update_reload_and_abort() the standard reauth/reconfigure ones.
+    aborts |= {"already_configured", "reauth_successful", "reconfigure_successful"}
     assert errors == set(STRINGS["config"]["error"])
     assert aborts == set(STRINGS["config"]["abort"])
-    assert set(STRINGS["config"]["step"]["user"]["data"]) == set(
-        STRINGS["config"]["step"]["user"]["data_description"]
-    )
+    steps = STRINGS["config"]["step"]
+    # Every form field is described (quality-scale rule config-flow).
+    with_fields = {name for name, step in steps.items() if "data" in step}
+    assert with_fields == {
+        "mqtt_bridge",
+        "rest_api",
+        "reauth_confirm",
+        "reconfigure_rest",
+    }
+    for name in with_fields:
+        assert set(steps[name]["data"]) == set(steps[name]["data_description"]), name
+    # The manual entry point is a menu of both transports (phase 14).
+    assert set(steps["user"]["menu_options"]) == {"mqtt_bridge", "rest_api"}
+    assert set(steps["reconfigure"]["menu_options"]) == {
+        "reconfigure_rest",
+        "reconfigure_mqtt",
+    }
 
 
 def test_services_yaml_matches_service_strings() -> None:

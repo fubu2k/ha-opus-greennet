@@ -9,19 +9,17 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.opus_greennet.const import DOMAIN
+from tests.ha_helpers import start_user_flow
 
 
 async def _start(hass: HomeAssistant) -> str:
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
+    result = await start_user_flow(hass, "mqtt_bridge")
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "mqtt_bridge"
     assert result["errors"] == {}
     return result["flow_id"]
 
@@ -139,9 +137,7 @@ async def test_aborts_when_mqtt_is_not_set_up(hass: HomeAssistant, mqtt_transpor
         "homeassistant.components.mqtt.async_wait_for_mqtt_client",
         new=AsyncMock(return_value=False),
     ):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
+        result = await start_user_flow(hass, "mqtt_bridge")
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "mqtt_not_configured"
     assert hass.config_entries.async_entries(DOMAIN) == []
