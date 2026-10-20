@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.components.event import EventEntity
+from homeassistant.components.event import EventDeviceClass, EventEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -88,6 +88,10 @@ class OpusGreenNetEvent(OpusGreenNetEntity, EventEntity):
 
     _attr_has_entity_name = True
     _attr_event_types = EVENT_TYPES
+    # Rockers are physical push buttons. Registry and frontend metadata only:
+    # unique ID, event types, name and enablement stay unchanged, and a
+    # user-chosen icon still takes precedence.
+    _attr_device_class = EventDeviceClass.BUTTON
 
     def __init__(
         self,

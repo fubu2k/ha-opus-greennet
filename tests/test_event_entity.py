@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from homeassistant.components.event import EventDeviceClass
 from homeassistant.core import HomeAssistant
 
 from custom_components.opus_greennet.const import BUTTON_KEYS
@@ -34,6 +35,24 @@ def event_entity(rocker_device):
     entity._trigger_event = MagicMock()
     entity.async_write_ha_state = MagicMock()
     return entity
+
+
+@pytest.mark.parametrize("eep", ["F6-02-01", "F6-03-01"])
+def test_rocker_event_is_a_button_with_unchanged_metadata(eep: str) -> None:
+    entity = OpusGreenNetEvent(
+        coordinator=MagicMock(),
+        eag_id="AABB0011",
+        gateway_device_id="gateway-device-id",
+        device=EnOceanDevice(
+            device_id="ROCKER1", friendly_id="Rocker", eeps=[{"eep": eep}]
+        ),
+    )
+
+    assert entity.device_class is EventDeviceClass.BUTTON
+    assert entity.unique_id == "AABB0011_ROCKER1"
+    assert entity.event_types == EVENT_TYPES
+    assert entity.entity_category is None
+    assert entity.entity_registry_enabled_default is True
 
 
 def test_event_types_cover_all_button_action_combinations():

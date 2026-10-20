@@ -208,6 +208,11 @@ versions for this repository in HACS before selecting the beta version.
 
 ### Manual Installation
 
+> **Home Assistant 2026.10.1 or newer is required, also for manual installs.**
+> HACS checks this for you; a manual copy does not. On an older version, setup
+> fails with `ImportError: cannot import name 'ATTR_BRIGHTNESS' from
+> 'homeassistant.components.light.const'`. Update Home Assistant first.
+
 1. Copy the `custom_components/opus_greennet` folder to your Home Assistant's `custom_components` directory
 2. Restart Home Assistant
 
@@ -561,7 +566,7 @@ The v0.7.0b1 quality beta requires HA 2026.10.1 or newer, including for manual i
 Its combined suite contains 1,315 tests, with strict typing and per-module coverage gates.
 Users on older HA versions should keep stable v0.6.0 or upgrade HA first.
 Version 1.0 replaces the MQTT transport with the gateway's REST API. Its suite
-contains 1,527 tests that run against an in-process gateway serving the REST API
+contains 1,529 tests that run against an in-process gateway serving the REST API
 and its event stream over real HTTP (`tests/fake_gateway.py`).
 CI resolves the latest stable Home Assistant release from PyPI on each run and
 tests that exact version, recorded in the workflow summary. It runs on pull
