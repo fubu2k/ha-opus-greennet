@@ -469,6 +469,14 @@ returns by PR with base `feature/rest-api-integration`, never into `main`. A
 later merge into `main` first needs the revert of the revert commit `32685d1`
 (PR #15).
 
+**Merge into `main` (maintainer decision 2026-10-20):** branch
+`release/rest-api-to-main` from `main` reverts `32685d1` and merges
+`feature/rest-api-integration` (R0–R5) plus the then open PRs #29 (English
+plan, changelog) and #30 (R5-H2 fix). Its tree equals
+`feature/rest-api-integration` with #29 and #30. No version bump in the PR;
+versioning and release follow `CLAUDE.md` separately. Further phases (R6 ff.)
+keep using `feature/rest-api-integration` as their base.
+
 Every phase: its own branch (`feat/`/`fix/`), tests first, CI green, phase
 report `phases/phase-NN.md` per section 20 of `implementation-plan.md`, no
 version, no CHANGELOG without approval. Hardware tests only with separate

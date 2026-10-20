@@ -359,6 +359,11 @@ into `feature/rest-api-integration` via PR #25 (`2d3cf9c`); CI run
 0.076 s; finding R5-H1 (stream list without cover configuration) fixed on
 `fix/opus-r5-movement-times` with one `GET /devices` right after setup.
 
+Status update 2026-10-20 (REST to `main`, maintainer decision): branch
+`release/rest-api-to-main` restores the REST transport on `main` (revert of
+`32685d1`) and merges `feature/rest-api-integration` with PRs #29 and #30. No
+version bump; release separately per `CLAUDE.md`.
+
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
 phase 8 -> phase 9 -> resumed phase 6 -> phases 10, 11, 12 -> phase 13.
