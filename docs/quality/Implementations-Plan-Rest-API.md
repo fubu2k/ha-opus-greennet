@@ -407,6 +407,10 @@ Hardwaretests nur mit separater Freigabe.
 
 ### R0 – Dokumentationsnachzug (nur Doku)
 
+**Status 2026-10-20:** umgesetzt auf Branch `docs/opus-r0-rest-documentation`
+(Basis `1847f88`), Bericht `phases/phase-15.md`; nicht gemergt. Erledigt damit
+A-1 und A-6 aus Abschnitt 2.5.
+
 - D2 eintragen: `implementation-plan.md` Abschnitt 3 (Ergänzung „genehmigt
   2026-10-20“) und 15a, `phases/phase-14.md` Abschnitt 9,
   `protocol-contract.md` 12.8/12.9 (Praxis-Baseline, Endlagenbeobachtung,

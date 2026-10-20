@@ -502,6 +502,15 @@ commands are unchanged (no ramping mode, no transition feature).
   is sent in the meantime. Check the device before repeating such a command.
 - Cover positions during movement are estimates based on the reported travel
   time. The final position comes from the device report or status query.
+- After a full run into the fully open or closed position, the cover actuator
+  reports its final position only when it switches off its motor. D2-05
+  actuators keep the motor on for a few seconds beyond the configured travel
+  time to make sure the end position is reached (the upstream project measured
+  3.5 to 5.7 seconds), so the final position can appear several seconds after
+  the shutter has physically stopped. Apple Home and the OPUS app show the same
+  delay; it is actuator behaviour on both transports. Stop and intermediate
+  positions report without this delay. The integration sends no extra query to
+  shorten it.
 - The HOPPE AutoLock entity is read-only; lock and unlock actions are rejected.
 - Gateway discovery depends on the bridged, retained `friendlyId` device-model
   topics. A gateway without paired devices, a bridge that does not forward
@@ -517,8 +526,10 @@ commands are unchanged (no ramping mode, no transition feature).
 - With the REST transport, battery level and signal strength are refreshed from
   the device list every 30 minutes; the event stream does not carry them.
 - The REST transport was ported from the upstream project, where it was
-  observed on a real gateway (OPUS-GW v1.21.31). This repository verifies it
-  against a simulated gateway only.
+  observed on a real gateway (OPUS-GW v1.21.31). This repository's automated
+  tests run it against a simulated gateway; the maintainer has additionally
+  tried it on one installation (switching, covers with Stop and retargeting,
+  rockers). That is a practical check, not a complete hardware verification.
 - Quiet or batteryless devices are never removed automatically, because the
   gateway cannot confirm that a device is gone (see
   [Removing or replacing a device](#removing-or-replacing-a-device)).

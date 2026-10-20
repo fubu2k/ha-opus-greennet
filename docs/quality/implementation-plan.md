@@ -86,8 +86,10 @@ a request to a battery-powered device.
 | Incoming streams/telegrams | Existing publications | Local parsing must not publish requests. |
 | Diagnostics/icons/enablement | HA representation | No device polling or configuration reads/writes. |
 
-Phase 14 amendment (optional REST transport, 2026-10-20; requires maintainer
-review before merge): for config entries with `transport: rest` the same rules
+Phase 14 amendment (optional REST transport, 2026-10-20; approved by the
+maintainer on 2026-10-20 as decision D2 of `Implementations-Plan-Rest-API.md`
+section 0, recorded in phase 15 / REST plan R0): for config entries with
+`transport: rest` the same rules
 apply to the REST endpoints (`protocol-contract.md` section 12). `GET
 /system/uptime` keeps the 60 s interval. `GET /devices` is read at setup, at
 the start of every event stream and additionally every 30 minutes, because the
@@ -95,6 +97,9 @@ gateway does not stream battery level, signal strength and movement times; it
 is a read of the gateway model without radio telegram (upstream hardware
 observation). `PUT …/state` and ReCom keep the policies above. MQTT entries are
 unaffected; no entry switches transport without an explicit user action.
+The approval covers exactly this read: the 30 min interval
+(`DEVICE_LIST_REFRESH_INTERVAL`) is fixed; a shorter interval, an additional
+read path or any device query derived from the list remains prohibited by A1.
 
 Create a profile/operation capability matrix: EEP/profile, operation, reference,
 cache-versus-radio behaviour, known power source, support and verification
@@ -253,6 +258,18 @@ Quality scale: `reauthentication-flow`, `reconfiguration-flow` and
 `inject-websession` change from exempt to done (48 done, 6 exempt, 0 todo).
 CI green on the branch (run `39384621424`). Not merged; merge and release
 approval remain separate.
+
+Status update 2026-10-20 (phase 15 = REST plan R0): base
+`feature/rest-api-integration` `1847f88` (adds
+`Implementations-Plan-Rest-API.md`). Documentation only, on branch
+`docs/opus-r0-rest-documentation`, report `phases/phase-15.md`: maintainer
+decision D2 (30 min device list read on REST entries) recorded as approved in
+section 3 and 15a, `phases/phase-14.md` and protocol contract 12.8; the
+maintainer's practical REST tests and the delayed end-position report after
+full cover travel (actuator overrun, upstream communication) recorded in
+protocol contract 12.9 and README "Known limitations". No code, timing or
+traffic change. Not merged; the next REST phase (R1, confirmation measurement
+on the own installation) needs its own approval.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
@@ -579,9 +596,14 @@ necessarily tier blockers; assess actual rule/correctness impact. Acceptance:
 no unreasoned applicable todo, no false hardware guarantee, reviewed compatibility
 and traffic evidence; release authorisation remains separate.
 
-## 15a. Phase 14 – Optional REST transport (implemented, review pending)
+## 15a. Phase 14 – Optional REST transport (implemented, not merged)
 
 Branch: `feature/rest-api-integration` (name chosen by the maintainer).
+The section 3 amendment (30 min device list read on REST entries) was approved
+on 2026-10-20 (decision D2). Merge and release approval remain separate.
+Follow-up work for the REST transport is planned in
+[`Implementations-Plan-Rest-API.md`](Implementations-Plan-Rest-API.md)
+(phases R0–R8, each with its own approval).
 
 - Scope: add the upstream REST transport (`api.py`, `protocol.py`,
   `rest_coordinator.py`) as an opt-in per config entry (`transport.py`). The
@@ -590,7 +612,7 @@ Branch: `feature/rest-api-integration` (name chosen by the maintainer).
 - A1: no new radio request; REST reuses the 60 s health interval and the two
   status checks; own-command echoes schedule no extra check. The 30 min device
   list read is a gateway-model read on REST entries only (section 3
-  amendment).
+  amendment, approved 2026-10-20, D2).
 - A2: gateway health never confirms device state; a command timeout fails only
   its action.
 - A3: one request in flight, no write retries, no cooldowns.
@@ -718,6 +740,7 @@ proven dead code with tests. Preserve icon/diagnostic policy in sections 10–11
 - Evidence: `docs/quality/quality-scale-evidence.md`.
 - Rules: `custom_components/opus_greennet/quality_scale.yaml`.
 - Protocol: `docs/quality/protocol-contract.md`.
+- REST follow-up plan: `docs/quality/Implementations-Plan-Rest-API.md`.
 - Vendor reference: `opus_mqtt_services_reference.md`.
 - CI: `.github/workflows/tests.yml`.
 - Official scale: https://developers.home-assistant.io/docs/core/integration-quality-scale/
