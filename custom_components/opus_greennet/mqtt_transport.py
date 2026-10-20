@@ -18,11 +18,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
-    DOMAIN,
     TOPIC_BASE,
     TOPIC_GET_ANSWER_SYSTEM_UPTIME,
     TOPIC_GET_SYSTEM_UPTIME,
 )
+
+# ``request_error`` is transport-neutral (phase R2, plan E2) and defined in
+# ``domain.py``; existing imports of it from this module keep working.
+from .domain import request_error
 from .wire import JsonObject, as_object, parse_json
 
 REQUEST_TIMEOUT = 10.0
@@ -57,15 +60,6 @@ PRIORITY_BACKGROUND = 20
 LATE_ANSWER_DIAGNOSTIC_WINDOW = 120.0
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def request_error(key: str, device_id: str, reason: str = "") -> HomeAssistantError:
-    """Create a translated transport error without logging sensitive payloads."""
-    return HomeAssistantError(
-        translation_domain=DOMAIN,
-        translation_key=key,
-        translation_placeholders={"device_id": device_id, "reason": reason},
-    )
 
 
 def decode_response(

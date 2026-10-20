@@ -16,10 +16,10 @@ from .const import (
     BUTTON_VALUE_RELEASED,
     CONF_EAG_ID,
 )
-from .coordinator import (
+from .diagnostics import log_entity_state_write
+from .domain import (
     SIGNAL_DEVICE_DISCOVERED,
 )
-from .diagnostics import log_entity_state_write
 from .enocean_device import EnOceanDevice
 from .entity import OpusGreenNetEntity
 from .transport import OpusCoordinator

@@ -11,6 +11,10 @@ Two transports (phase 14):
 The EAG identifier (EURID) is the unique ID in both cases, so one gateway can
 only be configured once. The reconfigure flow switches an existing entry
 between the transports without changing its devices or entities.
+
+The MQTT steps import Home Assistant's MQTT integration and the MQTT transport
+only when they run (phase R2, plan E4). Home Assistant loads this module with
+every entry, so a REST-only installation never imports MQTT.
 """
 
 from __future__ import annotations
@@ -21,13 +25,13 @@ from collections.abc import Mapping
 from typing import Any
 
 import probatio as vol
-from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.importlib import async_import_module
 from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
@@ -49,9 +53,7 @@ from .const import (
     DOMAIN,
     TRANSPORT_REST,
 )
-from .discovery import eag_id_from_discovery, normalize_eag_id
-from .mqtt_transport import async_probe_gateway
-from .wire import as_object
+from .wire import JsonObject, as_object
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,12 +72,55 @@ STEP_REST_API = "rest_api"
 STEP_RECONFIGURE_REST = "reconfigure_rest"
 STEP_RECONFIGURE_MQTT = "reconfigure_mqtt"
 
+# Imported by the MQTT steps on first use, in the executor.
+_MQTT_MODULES = (
+    "homeassistant.components.mqtt",
+    f"{__package__}.mqtt_transport",
+    f"{__package__}.discovery",
+)
+
+
+def __getattr__(name: str) -> object:
+    """Resolve ``mqtt`` on first use (PEP 562).
+
+    ``mqtt`` stays a module attribute as before; Home Assistant's MQTT
+    integration is imported only when it is actually used.
+    """
+    if name == "mqtt":
+        from homeassistant.components import mqtt
+
+        return mqtt
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+async def _async_import_mqtt(hass: HomeAssistant) -> None:
+    """Import the MQTT integration and transport for an MQTT step.
+
+    ``async_import_module`` imports in the executor once and then returns the
+    cached module, so the event loop never waits for an MQTT import.
+    """
+    for module in _MQTT_MODULES:
+        await async_import_module(hass, module)
+
+
+async def async_probe_gateway(hass: HomeAssistant, eag_id: str) -> JsonObject:
+    """Probe an MQTT-bridged gateway with the unchanged MQTT transport probe."""
+    await _async_import_mqtt(hass)
+    from .mqtt_transport import async_probe_gateway as async_probe_mqtt_gateway
+
+    return await async_probe_mqtt_gateway(hass, eag_id)
+
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect.
 
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
+    await _async_import_mqtt(hass)
+    from homeassistant.components import mqtt
+
+    from .discovery import normalize_eag_id
+
     eag_id = normalize_eag_id(data[CONF_EAG_ID])
 
     # Validate EAG ID format
@@ -172,6 +217,10 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Add a gateway that is bridged into the MQTT broker."""
         errors: dict[str, str] = {}
+        await _async_import_mqtt(self.hass)
+        from homeassistant.components import mqtt
+
+        from .discovery import normalize_eag_id
 
         # Check if MQTT integration is available
         if not await mqtt.async_wait_for_mqtt_client(self.hass):
@@ -213,6 +262,9 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         The message, retained or live, only identifies a candidate; it is not
         evidence that the gateway is reachable. This step publishes nothing.
         """
+        await _async_import_mqtt(self.hass)
+        from .discovery import eag_id_from_discovery
+
         eag_id = eag_id_from_discovery(discovery_info.topic, discovery_info.payload)
         if eag_id is None:
             return self.async_abort(reason="invalid_discovery_info")
@@ -345,6 +397,9 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         """Reach a configured gateway through the MQTT bridge again."""
         entry = self._get_reconfigure_entry()
         eag_id = entry.data[CONF_EAG_ID]
+        await _async_import_mqtt(self.hass)
+        from homeassistant.components import mqtt
+
         if not await mqtt.async_wait_for_mqtt_client(self.hass):
             return self.async_abort(reason="mqtt_not_configured")
         errors: dict[str, str] = {}

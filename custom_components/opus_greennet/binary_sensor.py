@@ -20,7 +20,7 @@ from .binary_sensor_descriptions import (
     OpusBinarySensorDescription,
 )
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL
-from .coordinator import (
+from .domain import (
     SIGNAL_DEVICE_DISCOVERED,
     SIGNAL_DEVICE_REMOVED,
 )

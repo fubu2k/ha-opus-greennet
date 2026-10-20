@@ -458,6 +458,22 @@ marked **[Upstream-Mitteilung]**.
   device identifiers `(opus_greennet, "<EAG>_<DEV>")`, entity unique IDs, entity
   IDs and registry settings stay unchanged. Upstream verified that REST creates
   exactly the 138 unique IDs of an MQTT installation. **[Code][Test][HW-upstream]**
+- REST-only operation (phase 16 = REST plan R2): `manifest.json` lists `mqtt`
+  under `after_dependencies`, not `dependencies`. Home Assistant sets up a
+  configured MQTT integration before this integration, but no longer sets up
+  MQTT for a REST entry; the `mqtt` discovery key is unchanged and is read by
+  the MQTT integration independently of dependencies. A REST entry loads,
+  controls and unloads with the MQTT integration absent. **[Code][Test]**
+- Import boundary: `rest_coordinator.py`, `transport.py`, `entity.py`,
+  `diagnostics.py` and the platforms import neither the MQTT transport
+  (`coordinator.py`, `mqtt_transport.py`, `discovery.py`) nor
+  `homeassistant.components.mqtt`; shared names live in `domain.py`.
+  `__init__.py` imports the MQTT coordinator only when an MQTT entry is set up,
+  `config_flow.py` imports MQTT only in its MQTT steps. Platforms depend on the
+  `transport.OpusCoordinator` protocol. **[Code][Test]**
+- An MQTT entry while the MQTT integration is not set up keeps its previous
+  outcome: setup is retried (`ConfigEntryNotReady`), the MQTT flow steps abort
+  with `mqtt_not_configured`. **[Code][Test]**
 
 ### 12.2 Endpoints and radio classification
 

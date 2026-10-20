@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import probatio as vol
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
@@ -29,6 +30,7 @@ from homeassistant.exceptions import (
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.importlib import async_import_module
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.typing import ConfigType
 
@@ -40,12 +42,19 @@ from .const import (
     DOMAIN,
     TRANSPORT_REST,
 )
-from .coordinator import OpusGreenNetCoordinator
 from .entity import async_delete_config_entry_issues
 from .rest_coordinator import GatewayMismatchError, OpusGreenNetRestCoordinator
 from .transport import OpusCoordinator, entry_transport
 
+if TYPE_CHECKING:
+    from .coordinator import OpusGreenNetCoordinator as OpusGreenNetCoordinator
+
 _LOGGER = logging.getLogger(__name__)
+
+# The MQTT transport imports Home Assistant's MQTT integration. It is loaded
+# only when an MQTT entry is set up, so a REST-only installation never needs
+# MQTT (phase R2, plan E4).
+_MQTT_COORDINATOR_MODULE = f"{__name__}.coordinator"
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -82,6 +91,19 @@ SERVICE_SET_CONFIG_SCHEMA = vol.Schema(
         vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
     }
 )
+
+
+def __getattr__(name: str) -> object:
+    """Resolve the MQTT coordinator class on first use (PEP 562).
+
+    ``OpusGreenNetCoordinator`` stays a package attribute as before, but the
+    MQTT transport behind it is imported only when it is actually used.
+    """
+    if name == "OpusGreenNetCoordinator":
+        from .coordinator import OpusGreenNetCoordinator
+
+        return OpusGreenNetCoordinator
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 @dataclass(slots=True)
@@ -211,6 +233,11 @@ async def _async_setup_mqtt_coordinator(
     hass: HomeAssistant, eag_id: str
 ) -> OpusGreenNetCoordinator:
     """Start the MQTT coordinator of an entry (behaviour before phase 14)."""
+    # Import the MQTT transport in the executor on first use, then take the
+    # class through the package attribute (``__getattr__`` above).
+    await async_import_module(hass, _MQTT_COORDINATOR_MODULE)
+    from . import OpusGreenNetCoordinator
+
     coordinator = OpusGreenNetCoordinator(hass, eag_id)
 
     try:
