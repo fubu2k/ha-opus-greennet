@@ -12,7 +12,9 @@ Lifecycle:
 * Setup reads the gateway identity and its uptime, then opens the event
   stream and waits for its first document, the complete device list (stream
   first, phase R5). Every entity is created with current state before the
-  platforms start, from one snapshot instead of two.
+  platforms start. The streamed list carries no ``configuration`` block, so
+  the device list is read once right after setup for cover movement and
+  rotation times (never live state; phase 21 finding R5-H1).
 * The same background task keeps ``GET /devices/stream`` open. Each new
   stream begins with the complete device list (a full resynchronisation) and
   then delivers every telegram the moment the gateway handles it.
@@ -212,6 +214,11 @@ class GatewayMismatchError(OpusApiError):
 class OpusGreenNetRestCoordinator:
     """Own the REST connection to one gateway and the state of its devices."""
 
+    # Entities take their initial write as the baseline for unchanged
+    # dispatches (``entity.OpusGreenNetEntity``): with the stream-first start
+    # no device list follows the entity creation (phase 21).
+    initial_write_is_baseline = True
+
     def __init__(
         self,
         hass: HomeAssistant,
@@ -332,12 +339,12 @@ class OpusGreenNetRestCoordinator:
         # gateways (OPUS-IQ-DOT 1.21.30; phase 21 hardware diagnostics: 0 of
         # 10 covers had a movement time after a stream-first start). Cover
         # movement and rotation times come only from GET /devices, so the
-        # metadata refresh runs once right away. It is not authoritative: live
-        # state stays with the stream, and newer telegram metadata is kept
-        # (B-5). No radio telegram is sent.
-        self._refresh_task = self._create_task(
-            self._async_refresh_device_list(), "device list refresh"
-        )
+        # metadata refresh runs once before setup returns, so entities start
+        # with their movement times. It is not authoritative: live state stays
+        # with the stream, and newer telegram metadata is kept (B-5). A failure
+        # is only logged; the 30 min refresh tries again. No radio telegram is
+        # sent.
+        await self._async_refresh_device_list()
 
     async def async_unload(self) -> None:
         """Stop all background work and mark the gateway unavailable."""
