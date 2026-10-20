@@ -79,7 +79,7 @@ async def hass_without_mqtt(hass: HomeAssistant) -> HomeAssistant:
     fixture removes that mark again, so a test sees an installation in which
     the MQTT integration was never configured.
     """
-    hass.config.components.discard("mqtt")
+    hass.config.components.remove("mqtt")
     return hass
 
 
