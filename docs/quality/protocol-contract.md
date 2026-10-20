@@ -1,9 +1,8 @@
 # OPUS EnOcean over IP REST protocol contract
 
 This document describes the gateway interface the integration relies on and the
-behaviour of the integration at that boundary. It replaces the MQTT contract of
-versions up to 0.7 (see git history for `v0.7.0b1`). Entity identities, command
-payloads and value validation are unchanged from that contract.
+behaviour of the integration at that boundary. Entity identities, command
+payloads and value validation are unchanged from the versions before 1.0.
 
 Verification legend: **[Code]** read from source, **[Test]** covered by tests,
 **[HW]** observed on a real gateway (OPUS-GW v1.21.31, API 2.6.3.0, 65 devices),
@@ -129,8 +128,8 @@ pretty-printed JSON documents back to back without delimiters
   (outcome unknown, no availability change); connection failure →
   `gateway_unavailable`; removed device or unload → `request_cancelled`.
   **[Code][Test]**
-- HTTP request/response pairs are correlated by the connection; the former MQTT
-  limitation of answers without request IDs no longer exists. **[Code]**
+- HTTP request/response pairs are correlated by the connection, so every
+  answer belongs to exactly one request. **[Code]**
 
 ## 6. Command payloads (wire values, unchanged)
 
@@ -204,14 +203,14 @@ send it. **[Code][Test]**
 Device identifier `(opus_greennet, "<EAG>_<DEV>")`, gateway
 `(opus_greennet, "<EAG>")`; entity unique IDs unchanged (`<EAG>_<DEV>`,
 `<EAG>_<DEV>_ch<n>`, `<EAG>_<DEV>_<suffix>`). Verified on a real installation:
-the REST integration creates exactly the 138 unique IDs that the MQTT version
+the integration creates exactly the 138 unique IDs that the version before 1.0
 had registered. **[HW][Test]**
 
 ## 9. Configuration entry
 
 - Data: `eag_id`, `host`, `port`, `username`, `password`. Unique ID: EAG ID.
   **[Code][Test]**
-- Entries of the former MQTT transport contain only `eag_id`. Their setup raises
+- Entries created before 1.0 contain only `eag_id`. Their setup raises
   `ConfigEntryAuthFailed` (`gateway_address_required`); the reauthentication
   flow asks for the address and keeps entry, devices and entities.
   **[Code][Test]**
