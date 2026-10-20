@@ -25,7 +25,6 @@ import pytest
 from homeassistant import config_entries, loader
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.opus_greennet as package
@@ -391,10 +390,10 @@ async def test_mqtt_entry_without_mqtt_integration_retries_setup(
     assert "mqtt" not in hass.config.components
 
 
-async def test_mqtt_flow_without_mqtt_integration_aborts(
+async def test_manual_flow_without_mqtt_integration_shows_the_rest_form(
     hass_without_mqtt: HomeAssistant,
 ) -> None:
-    result = await start_user_flow(hass_without_mqtt, "mqtt_bridge")
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "mqtt_not_configured"
+    """Phase R4.3: the manual flow is REST only and never loads MQTT."""
+    result = await start_user_flow(hass_without_mqtt)
+    assert result["errors"] == {}
     assert "mqtt" not in hass_without_mqtt.config.components

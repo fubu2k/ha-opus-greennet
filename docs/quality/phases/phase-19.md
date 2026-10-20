@@ -1,7 +1,7 @@
 # Phase 19 – REST plan R4.2: REST first in the setup menu
 
-- **Status:** implemented on branch `feat/opus-r4-2-rest-first-menu`, not yet
-  merged. CI pending (section 5). No version change, no CHANGELOG entry, no
+- **Status:** completed; merged via PR #23 (`c8573ef`). Superseded by phase 20
+  (R4.3: REST is the only setup path, no menu). CI section 5. No version change, no CHANGELOG entry, no
   release; `main` untouched (branch policy of 2026-10-20).
 - **Origin:** maintainer request of 2026-10-20 ("REST an erster Stelle, MQTT
   an zweiter, als R4.2"). It brings forward the first item of REST plan R7
@@ -79,7 +79,7 @@ tests, coverage (`config_flow.py` 100 % gate) and Hassfest run in CI.
 
 | Run | Head | Result |
 |-----|------|--------|
-| pending | – | – |
+| `39434909485` (workflow_dispatch) | `feat/opus-r4-2-rest-first-menu` `becd4d6` (merged unchanged as PR #23, `c8573ef`) | **success**: `validate`, `Hassfest at Home Assistant 2026.10.2 (fixed reference)`, `Home Assistant 2026.10.2 (fixed reference)`, `Home Assistant (latest stable)` |
 
 ## 6. Registry and identity compatibility
 

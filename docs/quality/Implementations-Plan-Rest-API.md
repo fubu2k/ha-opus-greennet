@@ -594,7 +594,15 @@ REST steht im Einrichtungsmenü an erster, MQTT an zweiter Stelle; Branch
 `feat/opus-r4-2-rest-first-menu`, Bericht `phases/phase-19.md`. Offen für R7:
 MQTT-Hinweis „Fallback“ in den Menütexten.
 
-- Optional: REST als erste Menüoption (**erledigt**, R4.2); MQTT-Hinweis „Fallback“.
+**Weiter vorgezogen 2026-10-20 als R4.3** (Entscheidung des Maintainers):
+Neue Gateways werden nur noch über REST eingerichtet. Der Einrichtungsdialog
+zeigt direkt Host, Port, Benutzer und Passwort (kein Menü), auch ein über MQTT
+entdecktes Gateway führt in dieses REST-Formular. MQTT bleibt für bestehende
+Einträge und als Wahl im Neu-konfigurieren-Menü. Branch
+`feat/opus-r4-3-rest-only-setup`, Bericht `phases/phase-20.md`. Damit ist der
+Menüteil von R7 erledigt; ein „Fallback“-Hinweis entfällt.
+
+- Optional: REST als erste Menüoption (**erledigt**, R4.2; ersetzt durch R4.3: REST als einzige Einrichtung); MQTT-Hinweis „Fallback“ (entfällt).
 - Bestehende MQTT-Einträge werden nie automatisch umgestellt (A5 gilt für
   MQTT). Auswirkungen auf bestehende REST-Einträge und Entity-IDs werden im
   Bericht offengelegt (D3).

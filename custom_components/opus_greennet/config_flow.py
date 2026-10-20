@@ -1,16 +1,17 @@
 """Config flow for Opus GreenNet Bridge integration.
 
-Two transports (phase 14):
+New gateways are added through the gateway's EnOcean over IP REST API only
+(phase R4.3): the user step asks for address and credentials, and the gateway
+reports its EAG identifier (EURID). A gateway announced on the MQTT broker
+(MQTT discovery) is offered for setup with the same REST form; the address
+must answer as the announced gateway.
 
-* MQTT: the gateway is bridged into Home Assistant's MQTT broker and is
-  identified by its EAG identifier (manual step ``mqtt_bridge`` or MQTT
-  discovery). Unchanged from earlier versions.
-* REST: Home Assistant talks to the gateway's EnOcean over IP REST API
-  directly (step ``rest_api``); the gateway reports its EAG identifier.
+Entries that already use the MQTT bridge keep it (guardrail A5). The
+reconfigure flow switches an existing entry between REST and MQTT without
+changing its devices or entities; it is the only way to choose MQTT.
 
-The EAG identifier (EURID) is the unique ID in both cases, so one gateway can
-only be configured once. The reconfigure flow switches an existing entry
-between the transports without changing its devices or entities.
+The EAG identifier is the unique ID with both transports, so one gateway can
+only be configured once.
 
 The MQTT steps import Home Assistant's MQTT integration and the MQTT transport
 only when they run (phase R2, plan E4). Home Assistant loads this module with
@@ -27,7 +28,7 @@ from typing import Any
 import probatio as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -57,18 +58,10 @@ from .wire import JsonObject, as_object
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_EAG_ID): str,
-    }
-)
-
 # The EAG identifier is the gateway's EURID: eight hexadecimal characters.
 EAG_ID_PATTERN = re.compile(r"[0-9A-Fa-f]{8}")
 PASSWORD_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
-STEP_MQTT_BRIDGE = "mqtt_bridge"
-STEP_REST_API = "rest_api"
 STEP_RECONFIGURE_REST = "reconfigure_rest"
 STEP_RECONFIGURE_MQTT = "reconfigure_mqtt"
 
@@ -112,9 +105,9 @@ async def async_probe_gateway(hass: HomeAssistant, eag_id: str) -> JsonObject:
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect.
+    """Check that an MQTT-bridged gateway answers (reconfigure step).
 
-    Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
+    ``data`` holds the EAG identifier (key ``eag_id``).
     """
     await _async_import_mqtt(hass)
     from homeassistant.components import mqtt
@@ -203,60 +196,37 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Let the user choose how Home Assistant reaches the gateway.
+        """Add a gateway by the address of its REST API (phase R4.3).
 
-        The REST API is offered first (phase R4.2); the MQTT bridge stays
-        available as the second option. Existing entries are never switched.
+        This is the only way to add a gateway manually. An existing gateway
+        keeps its transport; switching is an explicit reconfigure choice.
         """
-        return self.async_show_menu(
-            step_id="user", menu_options=[STEP_REST_API, STEP_MQTT_BRIDGE]
-        )
-
-    # ──────────────────────────────────────────────────────────────────────
-    # MQTT transport (unchanged behaviour of the former user step)
-    # ──────────────────────────────────────────────────────────────────────
-
-    async def async_step_mqtt_bridge(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Add a gateway that is bridged into the MQTT broker."""
         errors: dict[str, str] = {}
-        await _async_import_mqtt(self.hass)
-        from homeassistant.components import mqtt
-
-        from .discovery import normalize_eag_id
-
-        # Check if MQTT integration is available
-        if not await mqtt.async_wait_for_mqtt_client(self.hass):
-            return self.async_abort(reason="mqtt_not_configured")
-
         if user_input is not None:
-            eag_id = normalize_eag_id(user_input[CONF_EAG_ID])
+            eag_id = await self._async_validate_rest(user_input, errors)
             if eag_id is not None:
                 await self.async_set_unique_id(eag_id)
                 self._abort_if_unique_id_configured()
-            try:
-                info = await validate_input(self.hass, user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except GatewayUnavailable:
-                errors["base"] = "gateway_unavailable"
-            except InvalidEagId:
-                errors[CONF_EAG_ID] = "invalid_eag_id"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-            else:
-                return self.async_create_entry(
-                    title=info["title"],
-                    data={CONF_EAG_ID: info["eag_id"]},
-                )
-
+                return self._async_create_rest_entry(eag_id, user_input)
         return self.async_show_form(
-            step_id=STEP_MQTT_BRIDGE,
-            data_schema=STEP_USER_DATA_SCHEMA,
+            step_id="user",
+            data_schema=_connection_schema(user_input or {}),
             errors=errors,
         )
+
+    @callback
+    def _async_create_rest_entry(
+        self, eag_id: str, user_input: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """Create a REST entry for a verified gateway."""
+        return self.async_create_entry(
+            title=f"Opus GreenNet ({eag_id})",
+            data={CONF_EAG_ID: eag_id, **_connection_data(user_input)},
+        )
+
+    # ──────────────────────────────────────────────────────────────────────
+    # MQTT discovery: an announced gateway is set up over REST
+    # ──────────────────────────────────────────────────────────────────────
 
     async def async_step_mqtt(
         self, discovery_info: MqttServiceInfo
@@ -288,31 +258,28 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_discovery_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Confirm a discovered gateway, then run the same fresh check as setup."""
+        """Ask for the REST address of a discovered gateway (phase R4.3).
+
+        The announcement provides only the EAG identifier, so the address is
+        entered here; the password suggests the vendor default (the EURID).
+        The address is accepted only if it answers as the announced gateway.
+        """
         errors: dict[str, str] = {}
         eag_id = self._discovered_eag_id
 
         if user_input is not None:
             # An entry for this gateway may have appeared while the form was open.
             self._abort_if_unique_id_configured()
-            try:
-                info = await validate_input(self.hass, {CONF_EAG_ID: eag_id})
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except GatewayUnavailable:
-                errors["base"] = "gateway_unavailable"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-            else:
-                return self.async_create_entry(
-                    title=info["title"],
-                    data={CONF_EAG_ID: info["eag_id"]},
-                )
+            found = await self._async_validate_rest(user_input, errors)
+            if found is not None and found != eag_id:
+                errors["base"] = "wrong_gateway"
+            elif found is not None:
+                return self._async_create_rest_entry(eag_id, user_input)
 
-        self._set_confirm_only()
+        defaults = {CONF_PASSWORD: eag_id, **(user_input or {})}
         return self.async_show_form(
             step_id="discovery_confirm",
+            data_schema=_connection_schema(defaults),
             description_placeholders={"eag_id": eag_id},
             errors=errors,
         )
@@ -337,28 +304,6 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
             _LOGGER.exception("Unexpected exception")
             errors["base"] = "unknown"
         return None
-
-    async def async_step_rest_api(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Add a gateway by the address of its REST API."""
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            eag_id = await self._async_validate_rest(user_input, errors)
-            if eag_id is not None:
-                await self.async_set_unique_id(eag_id)
-                # A configured gateway keeps its transport; switching is an
-                # explicit choice in the reconfigure flow.
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(
-                    title=f"Opus GreenNet ({eag_id})",
-                    data={CONF_EAG_ID: eag_id, **_connection_data(user_input)},
-                )
-        return self.async_show_form(
-            step_id=STEP_REST_API,
-            data_schema=_connection_schema(user_input or {}),
-            errors=errors,
-        )
 
     async def async_step_reauth(
         self, entry_data: Mapping[str, Any]

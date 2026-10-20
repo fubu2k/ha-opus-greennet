@@ -101,35 +101,59 @@ class MQTTTransport:
         await self.hass.async_block_till_done()
 
 
-async def start_user_flow(hass: HomeAssistant, transport_step: str) -> dict:
-    """Open the manual flow and choose a transport in its menu (phase 14)."""
+async def start_user_flow(hass: HomeAssistant) -> dict:
+    """Open the manual flow; it shows the REST form directly (phase R4.3)."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-    assert result["type"] is FlowResultType.MENU
-    # REST first, MQTT second (phase R4.2).
-    assert result["menu_options"] == ["rest_api", "mqtt_bridge"]
-    return await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": transport_step}
-    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    return result
 
 
 async def configure_bridge(hass: HomeAssistant, eag_id: str = "aabb0011") -> dict:
-    """Submit an MQTT bridge through the actual config flow manager."""
-    result = await start_user_flow(hass, "mqtt_bridge")
-    assert result["type"] is FlowResultType.FORM
-    return await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"eag_id": eag_id}
+    """Add an MQTT entry the way the former manual MQTT step did.
+
+    Since phase R4.3 new gateways are added over REST only; MQTT entries come
+    from earlier versions or from the reconfigure flow. Tests that need such an
+    entry get it with the former step's behaviour: the same normalisation, the
+    same single gateway probe (``validate_input``, unchanged MQTT traffic), the
+    same entry data and unique ID. A known gateway aborts before the probe.
+    """
+    from custom_components.opus_greennet.config_flow import validate_input
+    from custom_components.opus_greennet.discovery import normalize_eag_id
+
+    normalized = normalize_eag_id(eag_id)
+    known = {entry.unique_id for entry in hass.config_entries.async_entries(DOMAIN)}
+    if normalized is not None and normalized in known:
+        return {"type": FlowResultType.ABORT, "reason": "already_configured"}
+    info = await validate_input(hass, {"eag_id": eag_id})
+    entry = ConfigEntry(
+        version=1,
+        minor_version=1,
+        domain=DOMAIN,
+        title=info["title"],
+        data={"eag_id": info["eag_id"]},
+        source=config_entries.SOURCE_USER,
+        options={},
+        unique_id=info["eag_id"],
+        discovery_keys={},
+        subentries_data=None,
     )
+    await hass.config_entries.async_add(entry)
+    return {
+        "type": FlowResultType.CREATE_ENTRY,
+        "title": entry.title,
+        "data": dict(entry.data),
+        "result": entry,
+    }
 
 
 async def configure_rest_bridge(
     hass: HomeAssistant, gateway: FakeGateway, **overrides: Any
 ) -> dict[str, Any]:
     """Submit a REST gateway through the actual config flow manager."""
-    result = await start_user_flow(hass, "rest_api")
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "rest_api"
+    result = await start_user_flow(hass)
     return await hass.config_entries.flow.async_configure(
         result["flow_id"], {**gateway.config, **overrides}
     )

@@ -141,15 +141,17 @@ def test_config_flow_errors_and_aborts_are_translated() -> None:
     # Every form field is described (quality-scale rule config-flow).
     with_fields = {name for name, step in steps.items() if "data" in step}
     assert with_fields == {
-        "mqtt_bridge",
-        "rest_api",
+        "user",
+        "discovery_confirm",
         "reauth_confirm",
         "reconfigure_rest",
     }
     for name in with_fields:
         assert set(steps[name]["data"]) == set(steps[name]["data_description"]), name
-    # The manual entry point is a menu of both transports (phase 14).
-    assert set(steps["user"]["menu_options"]) == {"mqtt_bridge", "rest_api"}
+    # The manual entry point is the REST form (phase R4.3); MQTT is chosen
+    # only in the reconfigure menu.
+    assert "menu_options" not in steps["user"]
+    assert not {"mqtt_bridge", "rest_api"} & set(steps)
     assert set(steps["reconfigure"]["menu_options"]) == {
         "reconfigure_rest",
         "reconfigure_mqtt",
