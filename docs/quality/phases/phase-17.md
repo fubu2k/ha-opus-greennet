@@ -1,10 +1,10 @@
 # Phase 17 – REST plan R3: REST client hardening and library boundary
 
-- **Status:** prepared on branch `feat/opus-r3-rest-client-hardening`. Not
-  merged; no pull request opened, no version change, no CHANGELOG entry, no
-  release. Merge approval remains separate (`implementation-plan.md` sections 4
-  and 5); the merge target is `feature/rest-api-integration`, not `main`
-  (branch policy of 2026-10-20).
+- **Status:** completed. Branch `feat/opus-r3-rest-client-hardening`
+  (`561723d` tests, `f1a0fba` code and docs) merged by the maintainer into
+  `feature/rest-api-integration` via PR #18 (merge commit `1c30105`,
+  2026-10-20). CI on the merged head green (section 5). No version change, no
+  CHANGELOG entry, no release; `main` untouched (branch policy of 2026-10-20).
 - **Plan:** `Implementations-Plan-Rest-API.md` phase R3 (section 8), findings
   B-1 and B-6 (section 2.6), design decision E5 (section 5.1). Guardrails per
   decision D3 (section 0.1): A1–A5 for the MQTT path and shared code, best
@@ -181,7 +181,14 @@ whole MQTT suite), coverage gates, Hassfest. **CI is the test evidence.**
 
 | Run | Head | Result |
 |-----|------|--------|
-| workflow_dispatch "Tests" on `feat/opus-r3-rest-client-hardening` | branch head | **pending** – to be started by the maintainer and recorded here |
+| `39423057097` (workflow_dispatch) | `feature/rest-api-integration` `1c30105` (merge of PR #18; code identical to `f1a0fba`) | **success**: `validate`, `Hassfest at Home Assistant 2026.10.2 (fixed reference)`, `Home Assistant 2026.10.2 (fixed reference)`, `Home Assistant (latest stable)` |
+
+No CI run ran on the branch before the merge (the workflow starts on pull
+requests only for base `main`); the run above on the merged head is the test
+evidence of this phase. Exact test counts and coverage percentages are in the
+job logs and the `reference-baseline-*` artifact (90-day retention); the logs
+could not be downloaded from the authoring environment (HTTP 403 on the log
+storage) and are therefore not quoted here.
 
 A green test job covers ruff, `ruff format --check`, strict mypy, `pytest -v`
 with coverage (`fail_under = 97`), the per-module gate
@@ -227,10 +234,9 @@ string changed: the new reason text is passed through the existing
 
 ## 9. Review status and next step
 
-- Start the workflow "Tests" (workflow_dispatch) on the branch and record the
-  run in section 5.
-- Review: open a pull request with base `feature/rest-api-integration` and
-  compare `feat/opus-r3-rest-client-hardening` after review.
+- Merged via PR #18 (`1c30105`); CI run `39423057097` green on the merged
+  head (section 5). This record was added on branch `docs/opus-r3-record-ci`;
+  it changes no code, test or workflow.
 - Next REST phase: R4 (stream lifecycle) or R1 (measurement), each with its
   own approval.
-- No merge, no PR and no release permission is implied.
+- No release permission is implied.
