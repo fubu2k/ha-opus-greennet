@@ -143,7 +143,7 @@ Suggested branch names below do not imply existing branches.
 | 4 | `fix/opus-q04-background-efficiency` | `8ece6eaf7be8ce7ccdbf5c9cf54cb93449a10ea7` | Completed |
 | 5 | `feat/opus-q05-strict-typing` | `bf2ad417559cdaee3b695274a37455476a356e6c` | Completed |
 | 6 | `feat/opus-q06-entity-metadata` | `feabed53b5761104e9ed917c0dc44b2afb584df7` | Completed: mandatory handle diagnostics (PR #2, see `phases/phase-06.md`) |
-| 6 (metadata) | `fix/opus-q06-metadata` | `8001d8b2cfe657dddfee8eaaa5eae68bd4b15149` | Implemented, awaiting CI and review: SMS supply voltage diagnostic, whole-percent battery display (see `phases/phase-06.md`) |
+| 6 (metadata) | `fix/opus-q06-metadata` | `8001d8b2cfe657dddfee8eaaa5eae68bd4b15149` | Completed: SMS supply voltage diagnostic, whole-percent battery display (PR #10, merge `6ce8f38`; see `phases/phase-06.md`) |
 | 7 | `feat/opus-quality-scale-evidence` | `f4008667c0d42b202554fb0849ee3226b81b011a` | Completed |
 
 Historical phase reports remain evidence of what actually ran. Do not imply
@@ -217,6 +217,18 @@ change) was approved by the maintainer and implemented on branch
 `feat/opus-q12-late-answer-diagnostics` (report section 13; CI run
 `39314655845`). Completed: merged via PR #11 (`1be841e`) and PR #12
 (`e57cbd2`), CI green on `main` (run `39315310796`), CHANGELOG "Unreleased".
+
+Status update 2026-10-20 (phase 13): base `main` `96510dd` (phase 12 merged,
+CHANGELOG "Unreleased"). Final rule audit on branch
+`docs/opus-q13-quality-acceptance`, report `phases/phase-13.md`. All 54 rules
+re-verified statically against the code: 45 done, 9 exempt, 0 todo, no status
+change; exemption comments made explicit; evidence matrix gains exemption
+justifications and evidence limits. The per-entity inventory of section 10 is
+recorded in the phase 13 report (documentation only; RSSI and overlapping
+handle projections reviewed, no change proposed). Documentation only: no
+change to code, tests, workflows, manifest, version or CHANGELOG. Open
+maintainer decisions (not rule blockers) are listed in the report. CI on the
+branch pending; not merged.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:
@@ -343,9 +355,11 @@ entries, existing user settings preserved, no extra radio communication.
   disablement decision. Battery levels stay ordinary (non-diagnostic) readings.
 - No parsing, coordinator, transport, timing, topic, translation or icon
   change; no new publish (A1). Tests: `tests/test_sensor_metadata.py`.
-- Still open: the complete per-entity inventory (purpose, class, state class,
-  category, translation key, icon, default, update frequency), RSSI and the
-  overlapping handle projections.
+- Still open after phase 6: the complete per-entity inventory (purpose,
+  class, state class, category, translation key, icon, default, update
+  frequency), RSSI and the overlapping handle projections. Phase 13 recorded
+  the inventory and the review of RSSI and the handle projections in
+  `phases/phase-13.md` section 4 (no change proposed).
 
 ## 11. Concrete icon policy and implementation guide (added in revision 3)
 
@@ -526,7 +540,7 @@ investigation from implementation approval.
 Acceptance: deterministic tests, stated residual risks, no extra requests/retries.
 Changing production timeout behaviour requires a separate design decision.
 
-## 15. Planned phase 13 – Final rule audit and report
+## 15. Phase 13 – Final rule audit and report (implemented, awaiting CI and review)
 
 Suggested branch: `docs/opus-q13-quality-acceptance`.
 

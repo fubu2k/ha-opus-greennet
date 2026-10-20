@@ -12,17 +12,35 @@ Rule -> implementation -> tests -> documentation for every rule in
 - Rule keys, tiers and the file schema are taken from hassfest
   (`script/hassfest/quality_scale.py`, home-assistant/core commit
   `7ff0e7fbdea4e079ae3f99e048497f5e8c7e3360`, 2026-10-14): 54 rules (bronze 20,
-  silver 10, gold 21, platinum 3). Rule texts:
-  <https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/>.
+  silver 10, gold 21, platinum 3). Phase 8 rechecked them against the fixed
+  reference, Home Assistant `2026.10.2` (core
+  `8d7fd8b68677c2585be36ec86043308f403875b8`): same 54 keys and tiers. Rule
+  texts: <https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/>.
 - Hassfest skips `quality_scale.yaml` for custom integrations. The CI test
   `tests/test_quality_scale.py` therefore applies the official schema, the
   official rule keys, the applicable official validators (`config-flow`,
   `runtime-data`, `strict-typing`, `test-before-setup`, `unique-config-entry`,
   `discovery`) and checks that this table matches the YAML.
-- Summary: 45 done, 9 exempt, 0 todo (phase 9 closed `discovery`,
+- Summary: **45 done, 9 exempt, 0 todo** (phase 9 closed `discovery`,
   `docs-examples`, `docs-use-cases`, `icon-translations` and `repair-issues`).
-  Exemptions still need acceptance by an official review, and discovery has not
-  been observed on hardware, so no tier is claimed.
+- **Phase 13 final audit** (2026-10-20, base `main`
+  `96510dd52931fac560cef4904ca5fcabda05348a`, report `phases/phase-13.md`):
+  every row below was re-verified against the code at that base. All named
+  test files and test functions exist, every cited README heading exists, the
+  code facts (classes, defaults, categories, icons, manifest keys, timing
+  constants) match, and every exemption is re-justified in the section
+  "Exemption justifications". No status changed; exemption comments were made
+  more explicit. The audit is static; the test result of record is the CI run
+  on the phase 13 branch (see the report).
+- Result: every applicable rule is done or justified as exempt. One finding
+  stays open: **F13-1**, the rocker event entities carry no device class
+  although `EventDeviceClass.BUTTON` fits (`entity-device-class`, "where
+  possible"). It is a one-attribute metadata change and therefore outside this
+  documentation-only phase. The **Platinum-equivalent self-assessment** is
+  final once F13-1 is closed or the maintainer records why it stays open. It remains a
+  self-assessment: the exemptions have not been accepted by an official Home
+  Assistant review, and discovery, ACK 201 handling and radio/battery effects
+  have not been observed on hardware (see "Limits of this evidence").
 
 `QS` = `tests/test_quality_scale.py`, `TR` = `tests/test_translations.py`,
 `DI` = `tests/test_discovery.py`, `IC` = `tests/test_icon_translations.py`,
@@ -33,7 +51,7 @@ Rule -> implementation -> tests -> documentation for every rule in
 | Rule | Status | Implementation | Tests | Documentation |
 |------|--------|----------------|-------|---------------|
 | `action-setup` | done | `__init__.py`: `async_setup` -> `_register_services`; handlers validate entry and device | `test_service_actions.py::test_actions_are_registered_before_any_entry_loads`, `::test_unknown_and_unloaded_entries_are_validation_errors`; QS `test_actions_are_set_up_in_async_setup` | README Services |
-| `appropriate-polling` | exempt | Push integration (`iot_class: local_push`); `entity.py` `_attr_should_poll = False`; 60 s gateway health probe only | QS `test_every_entity_class_has_entity_name_and_no_polling`; TR `test_every_created_entity_has_a_translated_name` (`should_poll is False`) | README Availability and command behavior |
+| `appropriate-polling` | exempt | Push integration (`iot_class: local_push`); `entity.py` `_attr_should_poll = False`; 60 s gateway uptime probe only (`coordinator.py` `GATEWAY_HEALTH_INTERVAL`), a gateway endpoint without device queries | QS `test_every_entity_class_has_entity_name_and_no_polling`; TR `test_every_created_entity_has_a_translated_name` (`should_poll is False`); `test_traffic_baseline.py::test_frozen_timing_baseline`, `::test_gateway_lifecycle_traffic` | README Availability and command behavior |
 | `brands` | done | `brand/icon.png`, `icon@2x.png`, `logo.png`, `logo@2x.png` (local brand images, HA 2026.3+) | QS `test_brands` | [Brand images](https://developers.home-assistant.io/docs/core/integration/brand_images/) |
 | `common-modules` | done | `coordinator.py` (runtime coordinator), `entity.py` (`OpusGreenNetEntity`) | QS `test_common_modules` | README Project Structure |
 | `config-flow` | done | `config_flow.py`, `manifest.json` `config_flow: true`, `data_description` in `strings.json` | QS `test_config_flow_validator`; TR `test_config_flow_errors_and_aborts_are_translated` | README Configuration |
@@ -85,8 +103,8 @@ Rule -> implementation -> tests -> documentation for every rule in
 | `docs-use-cases` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Use cases |
 | `dynamic-devices` | done | `SIGNAL_DEVICE_DISCOVERED` dispatcher listeners in every platform | `test_coordinator_parsing.py::test_live_device_discovery_runs_after_initial_timer_completed`; `test_entities.py::test_sensor_setup_adds_new_types_after_profile_discovery`; `test_platform_edge_cases.py::test_lock_setup_adds_already_discovered_handles` | README Removing or replacing a device |
 | `entity-category` | done | `EntityCategory.DIAGNOSTIC` for signal strength, actuator status binary sensors, the D2-06-40 `unlock_request`/`mechanics_fault` handle diagnostics and the SMS `supply_voltage` (enabled) | `test_binary_sensor_descriptions.py::test_description_inventory_matches_stable`; `test_entities.py::test_sensor_values_and_metadata`; `test_handle_diagnostics.py`; `test_sensor_metadata.py` | `phases/phase-06.md` |
-| `entity-device-class` | done | Device classes on sensors, binary sensors and covers | `test_entities.py::test_sensor_values_and_metadata`, `::test_moisture_sensor_values_and_metadata`; `test_binary_sensor_descriptions.py` | – |
-| `entity-disabled-by-default` | done | `entity_registry_enabled_default = False` for the signal strength sensor and the D2-06-40 `unlock_request`/`mechanics_fault` diagnostics (new registry entries only) | `test_entities.py::test_sensor_values_and_metadata`; `test_handle_diagnostics.py::test_new_handle_registers_disabled_diagnostics`, `::test_existing_diagnostic_entries_keep_user_settings` | README HOPPE window handles; `phases/phase-06.md` |
+| `entity-device-class` | done | Device classes on sensors, binary sensors and covers (`CoverDeviceClass.BLIND`, D2-05 position and angle); rocker event entities have no class yet: open finding F13-1 (`EventDeviceClass.BUTTON`), see `phases/phase-13.md` | `test_entities.py::test_sensor_values_and_metadata`, `::test_moisture_sensor_values_and_metadata`; `test_binary_sensor_descriptions.py` | – |
+| `entity-disabled-by-default` | done | `entity_registry_enabled_default = False` for the signal strength sensor and the D2-06-40 `unlock_request`/`mechanics_fault` diagnostics (new registry entries only) | `test_entities.py::test_sensor_values_and_metadata`; `test_handle_diagnostics.py::test_new_handle_registers_disabled_diagnostics`, `::test_existing_diagnostic_entries_keep_user_settings`, `::test_activating_diagnostics_sends_no_device_request` | README HOPPE window handles; `phases/phase-06.md` |
 | `entity-translations` | done | `translation_key` on every named entity; `strings.json`, `translations/en.json`, `translations/de.json` | TR (all tests) | – |
 | `exception-translations` | done | `translation_domain`/`translation_key` on raised Home Assistant errors | TR `test_raised_exception_keys_are_translated`; `test_service_actions.py::test_rejected_read_surfaces_translated_error` | – |
 | `icon-translations` | done | `icons.json`: `sensor.handle_state`, `sensor.unlock_request`, `binary_sensor.handle_closed`, `binary_sensor.mechanics_fault` (state icons with neutral defaults) and four service icons; every other entity keeps its domain/device-class icon; no Python icon property | IC (states, fallbacks, unchanged classes, HA icon loader, no MQTT); CI `script/check_icons.py` against the MDI catalogue of core `8d7fd8b`; hassfest at `8d7fd8b` (schema) | README HOPPE window handles; `phases/phase-09.md` |
@@ -101,3 +119,32 @@ Rule -> implementation -> tests -> documentation for every rule in
 | `async-dependency` | exempt | No Python requirements | QS `test_no_requirements_for_dependency_rules` | – |
 | `inject-websession` | exempt | No HTTP client imports | QS `test_no_requirements_for_dependency_rules` | – |
 | `strict-typing` | done | `[tool.mypy] strict = true` for all modules; CI step `python -m mypy`; typed `OpusGreenNetConfigEntry` | QS `test_strict_typing_requires_typed_config_entry_everywhere`, `test_strict_typing_gate_is_configured_and_enforced_in_ci` | `phases/phase-05.md` |
+
+## Exemption justifications (phase 13)
+
+Each exemption was checked against the rule text and the code at the audit
+base. "Check" names what would invalidate the exemption.
+
+| Rule | Why the rule does not apply | Check |
+|------|-----------------------------|-------|
+| `appropriate-polling` | The rule sets the update interval of polling integrations. Entity state arrives only by MQTT push (`local_push`, `should_poll = False`). The 60 s uptime probe measures gateway reachability, updates no entity state from devices and addresses no radio device (guardrails A1, A2). | An entity with `should_poll = True`, an `update_interval`, or a periodic `put/devices/<DEV>/state` query. |
+| `docs-conditions` | No condition platform and no `device_condition.py`. | A condition module is added. |
+| `docs-triggers` | No trigger platform and no `device_trigger.py`. Rocker presses are event entities; the core state trigger covers them and README Examples shows it. | A trigger module is added. |
+| `docs-configuration-parameters` | No options flow, so nothing can be configured after setup. The single setup value is covered by `docs-installation-parameters`. | `async_get_options_flow` or an `OptionsFlow` is added. |
+| `reauthentication-flow` | The config entry stores only the EAG identifier, no credentials. Broker credentials belong to the Home Assistant MQTT integration and the Mosquitto bridge; the gateway password is set in the bridge configuration (README MQTT Bridge Setup). | A secret is stored in the config entry. |
+| `discovery-update-info` | No host, port or other network data is stored. The gateway is addressed by its EAG identifier through the shared broker; discovery announces only that identifier, which is the unique ID, so there is nothing to update. | A network address is stored in the entry. |
+| `reconfiguration-flow` | The only value is the EAG identifier, which is the unique ID. A different identifier is a different gateway and therefore a new entry. | A changeable, non-identity setting is added. |
+| `async-dependency` | `manifest.json` `requirements: []`; the integration uses Home Assistant's async MQTT API. | A Python requirement is added. |
+| `inject-websession` | No HTTP client is imported or used. | Any HTTP client use. |
+
+## Limits of this evidence
+
+- Tests simulate MQTT. They pin publish counts by endpoint scope
+  (`test_traffic_baseline.py`), not radio transmissions, and cannot rule out
+  hidden firmware radio effects.
+- Not observed on hardware: MQTT discovery, ACK 201 (SoftSmartAck) delivery,
+  late-answer frequency, battery impact of any change.
+- Icon tests check `icons.json`, the MDI catalogue of core `8d7fd8b` and Home
+  Assistant's icon loader; no rendered frontend was inspected.
+- Exemptions are this repository's reasoning; an official review may judge
+  them differently.
