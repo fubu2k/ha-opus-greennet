@@ -312,7 +312,8 @@ hardening: HTTP status line and document status checked separately (B-1),
 injected web session, credential-free error texts and no retries. Only REST
 behaviour change: an answer with a non-2xx HTTP status now fails even when its
 body reports 200 (decision D3, disclosed in the report). MQTT path untouched
-(A1–A5). Not merged; merge approval remains separate.
+(A1–A5). Merged into `feature/rest-api-integration` via PR #18 (`1c30105`);
+CI run `39423057097` green on the merged head.
 
 Unless marked completed above, all work below is planned, not implemented.
 Default order:

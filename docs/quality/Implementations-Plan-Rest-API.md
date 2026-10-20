@@ -524,7 +524,7 @@ Wire- oder Verkehrsänderung auf MQTT oder REST. K7 bleibt offen (R8).
 
 **Status 2026-10-20:** umgesetzt auf Branch `feat/opus-r3-rest-client-hardening`
 (Basis `feature/rest-api-integration` `b9c3fb0`), Bericht `phases/phase-17.md`;
-nicht gemergt. B-1 behoben (HTTP-Status und JSON-Status getrennt, Fehlerklasse
+gemergt über PR #18 (`1c30105`), CI-Lauf `39423057097` grün. B-1 behoben (HTTP-Status und JSON-Status getrennt, Fehlerklasse
 mit `http_status` und `gateway_status`), B-6 behoben (`PriorityLock` und
 Prioritäten im REST-Koordinator; `api.py` importiert nur Standardbibliothek,
 aiohttp und `wire.py`). Keine Wiederholungen, Nebenläufigkeit und Timeouts
