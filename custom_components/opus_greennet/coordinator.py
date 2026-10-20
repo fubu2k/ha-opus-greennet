@@ -229,6 +229,14 @@ class OpusGreenNetCoordinator:
         self._command_waiters: dict[str, int] = {}
         self._sent_commands: dict[str, list[tuple[float, frozenset[object]]]] = {}
         self._cover_movements: dict[tuple[str, int], CoverMovement] = {}
+        # Last vertical run duration per device and channel from the device
+        # list (diagnostics only, REST phase 02). Never used for estimates,
+        # timers or queries.
+        self.last_vertical_movement_times: dict[str, dict[int, float]] = {}
+        # Origin and value of each cover position at the moment the integration
+        # set it (diagnostics only). A position that differs from the recorded
+        # value was written by an entity estimate.
+        self._position_origins: dict[tuple[str, int], tuple[str, int]] = {}
         self._pending_reconciliation_queries: dict[
             tuple[str, int], list[Callable[[], None]]
         ] = {}
@@ -505,7 +513,9 @@ class OpusGreenNetCoordinator:
                     self._record_confirmed_feedback(
                         device_id, protocol.device_state_functions(data)
                     )
-                self._apply_device_object(data, authoritative=True)
+                self._apply_device_object(
+                    data, authoritative=True, position_origin="reported"
+                )
         elif content == "telegram":
             if (telegram := as_object(document.get("telegram"))) is not None:
                 self._handle_telegram(telegram)
@@ -599,6 +609,7 @@ class OpusGreenNetCoordinator:
         *,
         authoritative: bool,
         requested_at: float | None = None,
+        position_origin: str = "device list",
     ) -> None:
         """Create or refresh one device from its gateway object.
 
@@ -611,8 +622,7 @@ class OpusGreenNetCoordinator:
             return
         self._unknown_devices.pop(device_id, None)
         existing = self.devices.get(device_id)
-        dbm = EnOceanDevice._parse_integer(data.get("dbm"))
-        device = EnOceanDevice(
+        listed = EnOceanDevice(
             device_id=device_id,
             friendly_id=protocol.metadata_text(data.get("friendlyId")) or device_id,
             eeps=object_items(data.get("eeps")),
@@ -620,31 +630,27 @@ class OpusGreenNetCoordinator:
             physical_device=protocol.metadata_text(data.get("physicalDevice")),
             first_seen=protocol.metadata_text(data.get("firstSeen")),
             last_seen=protocol.metadata_text(data.get("lastSeen")),
-            dbm=dbm,
+            dbm=EnOceanDevice._parse_integer(data.get("dbm")),
         )
-        if existing is not None:
-            device.channels = existing.channels
-            # A device list refreshes metadata and state, never a previous
-            # rocker occurrence.
-            device.clear_button_occurrence()
-            device.last_update_source = existing.last_update_source
-            device.last_update_received_monotonic = (
-                existing.last_update_received_monotonic
-            )
-            device.last_update_dispatched_monotonic = (
-                existing.last_update_dispatched_monotonic
-            )
-            device.last_command_error = existing.last_command_error
+        was_known = existing is not None and bool(existing.eeps)
+        if existing is None:
+            device = listed
+        else:
+            # Update in place (REST phase 02, E6/B-4): channels, the last
+            # command error and update timestamps stay on the same object that
+            # entities and running commands hold.
+            device = existing
             telegram_at = self._telegram_metadata_at.get(device_id)
             newer_telegram = (
                 requested_at is not None
                 and telegram_at is not None
                 and telegram_at >= requested_at
             )
-            if dbm is None or newer_telegram:
-                device.dbm = existing.dbm
-            if not device.last_seen or newer_telegram:
-                device.last_seen = existing.last_seen
+            device.apply_listed_metadata(listed, keep_signal=newer_telegram)
+            # A device list refreshes metadata and state, never a previous
+            # rocker occurrence.
+            device.clear_button_occurrence()
+        self._record_last_movement_times(device_id, data)
         functions = (
             protocol.device_state_functions(data)
             if authoritative or existing is None
@@ -654,8 +660,9 @@ class OpusGreenNetCoordinator:
             device.update_from_telegram({"functions": functions})
             if authoritative or existing is None:
                 device.last_update_source = "device list"
+                self._note_position_origin(device, functions, position_origin)
         self.devices[device_id] = device
-        if existing is None or not existing.eeps:
+        if not was_known:
             _LOGGER.info(
                 "Device discovered: %s (%s) - EEPs: %s - Type: %s",
                 device.friendly_id,
@@ -670,6 +677,62 @@ class OpusGreenNetCoordinator:
             self._dispatch_state(device)
 
     @callback
+    def _note_position_origin(
+        self, device: EnOceanDevice, functions: Sequence[WireFunction], origin: str
+    ) -> None:
+        """Record the origin of every valid position in ``functions``.
+
+        Only numeric positions count: ``unknown`` leaves the position and its
+        recorded origin unchanged. Diagnostics only (REST phase 02).
+        """
+        default = protocol.channel_from_functions(functions)
+        for function in functions:
+            if function.get("key") != KEY_POSITION:
+                continue
+            if (
+                EnOceanDevice._parse_number(
+                    function.get("value"), minimum=0, maximum=100
+                )
+                is None
+            ):
+                continue
+            channel_id = protocol.function_channel(function, default)
+            channel = (
+                device.channels.get(channel_id) if channel_id is not None else None
+            )
+            if channel_id is None or channel is None or channel.position is None:
+                continue
+            self._position_origins[(device.device_id, channel_id)] = (
+                origin,
+                channel.position,
+            )
+
+    def position_origin(self, device_id: str, channel_id: int) -> str | None:
+        """Return where a channel's current position came from (diagnostics).
+
+        ``device list`` (a snapshot), ``reported`` (device report),
+        ``assumed`` (end of a travel estimate) or ``estimated``
+        (acknowledged command or a foreign command telegram). None without a
+        position. Never used for state, timers or queries.
+        """
+        device = self.devices.get(device_id)
+        channel = device.channels.get(channel_id) if device is not None else None
+        if channel is None or channel.position is None:
+            return None
+        recorded = self._position_origins.get((device_id, channel_id))
+        if recorded is None or recorded[1] != channel.position:
+            return "estimated"
+        return recorded[0]
+
+    @callback
+    def _record_last_movement_times(self, device_id: str, data: JsonObject) -> None:
+        """Keep the last run durations a device list reports (diagnostics)."""
+        if durations := protocol.last_vertical_movement_times(data):
+            self.last_vertical_movement_times.setdefault(device_id, {}).update(
+                durations
+            )
+
+    @callback
     def async_forget_device(self, device_id: str) -> None:
         """Discard only this child's state and queued work, without gateway writes."""
         for did, channel_id in list(self._cover_movements):
@@ -677,6 +740,9 @@ class OpusGreenNetCoordinator:
                 self._clear_cover_movement(did, channel_id, notify=False)
         self.devices.pop(device_id, None)
         self._telegram_metadata_at.pop(device_id, None)
+        self.last_vertical_movement_times.pop(device_id, None)
+        for origin_key in [k for k in self._position_origins if k[0] == device_id]:
+            del self._position_origins[origin_key]
         self._cancel_reconciliation_queries(device_id)
         for key in list(self._feedback_revisions):
             if key[0] == device_id:
@@ -800,6 +866,11 @@ class OpusGreenNetCoordinator:
             update["telegramInfo"] = telegram.get("telegramInfo")
             self._telegram_metadata_at[device_id] = received_at
         device.update_from_telegram(update)
+        # A foreign command is applied optimistically; a device report is
+        # feedback (diagnostics only).
+        self._note_position_origin(
+            device, applied, "estimated" if is_outbound else "reported"
+        )
         if not is_outbound and protocol.has_operational_state(functions):
             device.last_command_error = None
 
@@ -950,6 +1021,10 @@ class OpusGreenNetCoordinator:
             channel = device.get_or_create_channel(channel_id)
             channel.position = movement.target  # Assumed, not physical feedback.
             channel.state_revision += 1
+            self._position_origins[(device_id, channel_id)] = (
+                "assumed",
+                movement.target,
+            )
             self._dispatch_state(device)
 
     def _start_cover_commands(

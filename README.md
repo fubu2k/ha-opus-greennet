@@ -457,7 +457,10 @@ latest command error without adding volatile diagnostic fields to every entity
 state. Addresses, credentials, identifiers and the gateway's HomeKit setup code
 (also as its QR setup payload) are redacted. The gateway section shows
 `first_device_list_seconds`, the time from opening the event stream to its
-first device list at startup.
+first device list at startup. For covers each device shows
+`last_vertical_movement_time` (the last run duration the gateway reports, if
+any) and `position_origin` per channel: `device list`, `reported`,
+`estimated` or `assumed` (the travel estimate ended without a report).
 
 For local switch tests, press the physical control and compare
 `gateway_to_ha_ms` with the `entity_write` timing. If the gateway latency is
@@ -516,6 +519,7 @@ tests/
 ├── test_coordinator_status_checks.py  # HTTP vs. gateway status as seen by commands and the health probe
 ├── test_api_hardening.py        # HTTP vs. gateway status, no retries, no credentials in errors
 ├── test_coordinator_devices.py  # Device lists: discovery, resync and metadata refresh
+├── test_coordinator_domain_model.py # In-place device update, last run duration, position origin, rocker and cover regression cases
 ├── test_coordinator_telegrams.py # Device reports, outbound commands and their effects
 ├── test_coordinator_requests.py # Request queue, acknowledgements and error mapping
 ├── test_coordinator_commands.py # Command acknowledgements, outages and unload

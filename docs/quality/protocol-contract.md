@@ -184,6 +184,20 @@ send it. **[Code][Test]**
   **[HW][Code][Test]**
 - Value validation per key is unchanged (see `EnOceanDevice.update_from_telegram`
   and the former contract §4). **[Code][Test]**
+- A device list updates a known device object in place
+  (`EnOceanDevice.apply_listed_metadata`, REST phase 02): only the list
+  metadata (`LISTED_METADATA_FIELDS`) is replaced; channels, the last command
+  error and update timestamps stay. **[Code][Test]**
+- `configuration.parameters` key `lastVerticalMovementTime` (duration of the
+  last vertical run, seconds) is kept per device and channel and shown in
+  diagnostics as `last_vertical_movement_time`. It is never used for
+  estimates, timers or queries and causes no request. Present only in
+  `GET /devices`, not in the streamed list. **[Upstream note][Code][Test]**
+- Diagnostics show per cover channel `position_origin`: `device list`,
+  `reported` (device report or `device` document), `estimated` (foreign
+  command or entity estimate after an acknowledgement) or `assumed` (travel
+  estimate ended after movement time + 5 s without a report). `unknown`
+  changes neither the position nor its origin. **[Code][Test]**
 
 ## 8. Entity inventory and identities (A5, unchanged)
 
@@ -225,3 +239,4 @@ optional `config_entry_id`.
   sensors and stand-alone rocker switches: not present on the test
   installation; covered by tests with the documented payloads.
 - Whether the gateway ever sends `content = "device"` documents on the stream.
+- The key `lastVerticalMovementTime` on the maintainer's gateway.

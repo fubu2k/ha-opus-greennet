@@ -163,6 +163,10 @@ async def async_get_config_entry_diagnostics(
     coordinator = runtime_data.coordinator
 
     devices: list[dict[str, Any]] = []
+    # REST phase 02: last vertical run duration and position origin per
+    # channel, for diagnostics only.
+    movement_times = getattr(coordinator, "last_vertical_movement_times", None)
+    origin = getattr(coordinator, "position_origin", None)
     for device in coordinator.devices.values():
         devices.append(
             {
@@ -180,6 +184,16 @@ async def async_get_config_entry_diagnostics(
                 },
             }
         )
+        if isinstance(movement_times, dict):
+            devices[-1]["last_vertical_movement_time"] = dict(
+                movement_times.get(device.device_id, {})
+            )
+            if callable(origin):
+                devices[-1]["position_origin"] = {
+                    channel_id: origin(device.device_id, channel_id)
+                    for channel_id, channel in device.channels.items()
+                    if channel.position is not None
+                }
 
     return _redact_diagnostics(
         {
