@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.opus_greennet.const import DOMAIN
@@ -17,7 +18,9 @@ async def test_handle_positions_and_lock_safety(
     hass: HomeAssistant, gateway: FakeGateway, eep: str
 ) -> None:
     gateway.devices = [device_object("HANDLE", eep)]
-    await setup_bridge(hass, gateway)
+    # Lock requests settle before they are sent; not needed in this test.
+    settle = patch("custom_components.opus_greennet.lock.LOCK_SETTLE_SECONDS", 0)
+    entry = await setup_bridge(hass, gateway)
     state = await wait_for_entity(hass, "sensor", "AABB0011_HANDLE_handle_state")
     positions = {}
     for suffix in ("open", "tilt", "closed"):
@@ -58,7 +61,10 @@ async def test_handle_positions_and_lock_safety(
         )
         await wait_until(lambda: hass.states.get(state).state == "closed")
         assert hass.states.get(lock).state == "unknown"
-        for value in ("unlocked", "locked"):
+        # The reported lock-bolt is a binary sensor (on = unlocked); the lock
+        # entity is the gateway's stored answer to the unlock request.
+        bolt = await wait_for_entity(hass, "binary_sensor", "AABB0011_HANDLE_lock_bolt")
+        for value, expected in (("unlocked", "on"), ("locked", "off")):
             await gateway.push(
                 telegram(
                     "HANDLE",
@@ -68,16 +74,33 @@ async def test_handle_positions_and_lock_safety(
                     ],
                 )
             )
-            await wait_until(lambda: hass.states.get(lock).state == value)
-        before = list(gateway.requests)
-        for service in ("lock", "unlock"):
-            with pytest.raises(HomeAssistantError) as error:
-                await hass.services.async_call(
-                    "lock", service, {"entity_id": lock}, blocking=True
-                )
-            assert error.value.translation_key == "autolock_read_only"
-        assert gateway.requests == before
+            await wait_until(lambda: hass.states.get(bolt).state == expected)
+        assert hass.states.get(lock).state == "unknown"
+        # The gateway stores the answer for the sleeping handle (status 202).
+        gateway.responses["/devices/HANDLE/state"] = {"header": {"httpStatus": 202}}
+        settle.start()
+        await hass.services.async_call(
+            "lock", "unlock", {"entity_id": lock}, blocking=True
+        )
+        assert gateway.requests_to("PUT", "/devices/HANDLE/state")[-1] == {
+            "state": {"functions": [{"key": "unlock", "value": "allowed"}]}
+        }
+        assert hass.states.get(lock).state == "unlocked"
+        await hass.services.async_call(
+            "lock", "lock", {"entity_id": lock}, blocking=True
+        )
+        assert gateway.requests_to("PUT", "/devices/HANDLE/state")[-1] == {
+            "state": {"functions": [{"key": "unlock", "value": "notAllowed"}]}
+        }
         assert hass.states.get(lock).state == "locked"
+        # The answer the gateway sends the handle ("to") updates it as well.
+        # Forget the own commands so it is not taken for their echo.
+        entry.runtime_data.coordinator._sent_commands.clear()  # noqa: SLF001
+        await gateway.push(
+            telegram("HANDLE", [{"key": "unlock", "value": "allowed"}], direction="to")
+        )
+        await wait_until(lambda: hass.states.get(lock).state == "unlocked")
+        settle.stop()
     else:
         assert (
             er.async_get(hass).async_get_entity_id(

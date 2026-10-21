@@ -38,6 +38,10 @@ BOOLEAN_CHANNEL_STATES: Final[dict[str, Callable[[EnOceanChannel], bool | None]]
     "mechanics_fault": lambda channel: channel.mechanics_fault,
     "smoke_alarm": lambda channel: channel.smoke_alarm,
     "battery_low": lambda channel: channel.battery_low,
+    # LOCK device class: on = unlocked.
+    "bolt_unlocked": lambda channel: (
+        None if channel.is_locked is None else not channel.is_locked
+    ),
 }
 
 
@@ -159,6 +163,20 @@ async def async_setup_entry(
                     )
                 )
             if device.has_autolock:
+                # Lock-bolt the handle reports; the lock entity is the stored
+                # answer to its unlock request.
+                entities.append(
+                    OpusGreenNetStateBinarySensor(
+                        coordinator,
+                        eag_id,
+                        gateway_device_id,
+                        device,
+                        "lock_bolt",
+                        "bolt_unlocked",
+                        BinarySensorDeviceClass.LOCK,
+                        entity_category=EntityCategory.DIAGNOSTIC,
+                    )
+                )
                 # Mechanics fault (Mechanik-Fehler) serves troubleshooting: a
                 # diagnostic entity, disabled only for NEW registry entries.
                 entities.append(
@@ -310,6 +328,9 @@ class OpusGreenNetHandlePositionSensor(OpusGreenNetBaseBinarySensor):
         suffix = "handle_tilt" if position == "tilted" else f"handle_{position}"
         super().__init__(coordinator, eag_id, gateway_device_id, device, suffix, suffix)
         self._position = position
+        # The handle sensor shows the position; these binary sensors serve
+        # automations (e.g. window contacts): diagnostic, enabled and visible.
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         # WINDOW displays ON as open, so it must not be used for ON-means-closed.
         self._attr_device_class = (
             BinarySensorDeviceClass.WINDOW if position != "closed" else None

@@ -30,10 +30,18 @@ class TestDeviceProperties:
             ("D2-01-01", "switch"),
             ("D2-01-02", "light"),
             ("D2-01-03", "light"),
-            ("D2-01-04", "switch"),
-            ("D2-01-06", "light"),
+            # EEP specification: the type number is no channel count.
+            ("D2-01-04", "light"),
+            ("D2-01-05", "light"),
+            ("D2-01-06", "switch"),
+            ("D2-01-07", "switch"),
+            ("D2-01-08", "switch"),
+            ("D2-01-09", "light"),
+            ("D2-01-0A", "switch"),
+            ("D2-01-0F", "switch"),
+            ("D2-01-10", "switch"),
             ("D2-01-11", "switch"),
-            ("D2-01-12", "light"),
+            ("D2-01-12", "switch"),
             ("D2-05-00", "cover"),
             ("D2-05-01", "cover"),
             ("D2-05-02", "cover"),
@@ -59,20 +67,30 @@ class TestDeviceProperties:
         [
             "D2-01-02",
             "D2-01-03",
-            "D2-01-06",
-            "D2-01-07",
-            "D2-01-0A",
-            "D2-01-0B",
-            "D2-01-0F",
-            "D2-01-10",
-            "D2-01-12",
+            "D2-01-04",
+            "D2-01-05",
+            "D2-01-09",
             "A5-38-08",
         ],
     )
     def test_is_dimmable_true(self, make_device, eep):
         assert make_device(eep).is_dimmable is True
 
-    @pytest.mark.parametrize("eep", ["D2-01-00", "D2-01-01", "D2-01-04", "D2-01-11"])
+    @pytest.mark.parametrize(
+        "eep",
+        [
+            "D2-01-00",
+            "D2-01-01",
+            "D2-01-06",
+            "D2-01-07",
+            "D2-01-0A",
+            "D2-01-0B",
+            "D2-01-0F",
+            "D2-01-10",
+            "D2-01-11",
+            "D2-01-12",
+        ],
+    )
     def test_is_dimmable_false(self, make_device, eep):
         assert make_device(eep).is_dimmable is False
 
@@ -119,12 +137,16 @@ class TestDeviceProperties:
         [
             ("D2-01-00", 1),
             ("D2-01-02", 1),
-            ("D2-01-04", 2),
-            ("D2-01-06", 2),
-            ("D2-01-08", 4),
-            ("D2-01-0A", 4),
-            ("D2-01-0D", 8),
-            ("D2-01-0F", 8),
+            ("D2-01-04", 1),
+            ("D2-01-06", 1),
+            ("D2-01-08", 1),
+            ("D2-01-0A", 1),
+            ("D2-01-0D", 1),
+            ("D2-01-0E", 1),
+            ("D2-01-0F", 1),
+            ("D2-01-10", 2),
+            ("D2-01-11", 2),
+            ("D2-01-12", 2),
             ("XX-YY-ZZ", 1),
         ],
     )

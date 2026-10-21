@@ -208,7 +208,8 @@ async def coord() -> AsyncIterator[OpusGreenNetCoordinator]:
             "/system/info": {"systemInfo": {"eurid": "AABB0011"}},
             "/system/uptime": {"systemUptimeResponse": {"uptime": 10}},
             "/devices": {"devices": []},
-        }[path]
+            # Profiles read at setup: none available (EEP tables apply).
+        }.get(path, {})
     )
     with (
         patch(f"{MODULE}.async_dispatcher_send"),

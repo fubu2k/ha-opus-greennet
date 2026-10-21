@@ -3,8 +3,8 @@
 The gateway serves every endpoint below on one HTTP port (8080 by default)
 with basic authentication. Responses are JSON objects carrying their own
 ``header.httpStatus``. Both statuses are checked: the HTTP status line must
-report success (2xx) and the document status must be 200 or 201 (phase R3,
-finding B-1). ``GET /devices/stream`` keeps the response open and writes one
+report success (2xx) and the document status must be 200, 201 or 202 (phase
+R3, finding B-1). ``GET /devices/stream`` keeps the response open and writes one
 JSON document per event: first the complete device list, then every telegram
 and device change as it happens.
 
@@ -116,7 +116,8 @@ def decode_response(text: str, *, require_status: bool = True) -> JsonObject:
     """Validate a gateway document and reject a negative status.
 
     Status 201 is the SoftSmartAck acceptance of the protocol and counts as
-    success like 200.
+    success like 200. Status 202 is the gateway storing a target state for a
+    sleeping SoftSmartAck device (e.g. the HOPPE unlock answer), also success.
     """
     try:
         decoded = parse_json(text)
@@ -130,7 +131,7 @@ def decode_response(text: str, *, require_status: bool = True) -> JsonObject:
             status = response_status(data)
         except ValueError as err:
             raise OpusResponseError(str(err)) from err
-        if status not in (200, 201):
+        if status not in (200, 201, 202):
             raise OpusResponseError(
                 _error_reason(data, status), status, gateway_status=status
             )

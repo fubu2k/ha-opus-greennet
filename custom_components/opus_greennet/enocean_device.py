@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from math import isfinite
+from types import MappingProxyType
 from typing import ClassVar
 
 from .const import (
     A5_04_TEMPERATURE_RANGES,
     BUTTON_KEYS,
+    D2_01_CHANNEL_COUNTS,
+    D2_01_DIMMER_EEPS,
     DEFAULT_CHANNEL,
     EEP_MAPPINGS,
+    ERROR_CODE_EEPS,
+    ERROR_CODE_NONE,
+    GATEWAY_DIMMER_EEPS,
+    ILLUMINATION_EEPS,
+    ILLUMINATION_MAX_LUX,
     KEY_ACTUATOR_DEACTIVATED,
     KEY_ACTUATOR_LOW_BATTERY,
     KEY_ACTUATOR_NOT_RESPONDING,
@@ -23,15 +32,19 @@ from .const import (
     KEY_DIMMER,
     KEY_ENERGY,
     KEY_ENERGY_CONSUMPTION,
+    KEY_ERROR_CODE,
     KEY_FEED_TEMPERATURE,
     KEY_HEATER_MODE,
     KEY_HUMIDITY,
+    KEY_ILLUMINATION,
     KEY_LIQUID_DETECTED,
     KEY_LOCAL_CONTROL,
+    KEY_LOCKING_MODE,
     KEY_MISSING_TEMPERATURE,
     KEY_POSITION,
     KEY_POWER,
     KEY_POWER_STATE,
+    KEY_REPOSITIONING,
     KEY_ROTATION_TIME,
     KEY_SUMMER_MODE,
     KEY_SWITCH,
@@ -39,10 +52,20 @@ from .const import (
     KEY_TEMPERATURE_ORIGIN,
     KEY_TEMPERATURE_SETPOINT,
     KEY_THERMAL_MODE,
+    KEY_UNLOCK,
     KEY_VERTICAL_MOVEMENT_TIME,
     KEY_WINDOW_OPEN,
+    LOCAL_CONTROL_EEPS,
+    LOCKING_MODE_EEPS,
+    LOCKING_MODES,
     OPUS_MOTION_DETECTOR_EEPS,
+    REPOSITIONING_EEPS,
+    ROCKER_2_BUTTON_KEYS,
+    ROCKER_EEP_PREFIXES,
     STATE_ON,
+    UNLOCK_ALLOWED,
+    UNLOCK_NOT_ALLOWED,
+    VALUE_OVER_RANGE,
 )
 from .wire import (
     JsonObject,
@@ -51,6 +74,43 @@ from .wire import (
     object_items,
     string_key,
 )
+
+# Handle positions as the profiles report them, normalised to the entity
+# states. HOPPE D2-03-10 reports "tilt", F6-10-00 "up" (both "Window is tilt").
+HANDLE_STATES: dict[str, str] = {
+    "open": "open",
+    "closed": "closed",
+    "tilted": "tilted",
+    "tilt": "tilted",
+    "up": "tilted",
+}
+
+_EMPTY_RANGES: Mapping[str, float] = MappingProxyType({})
+
+
+@dataclass(frozen=True)
+class DeviceProfile:
+    """What the gateway profile of a device offers (``/devices/<id>/profile``).
+
+    ``to_keys`` are the function keys the device accepts, ``from_keys`` the
+    keys it reports. ``channels`` is the number of output channels of the
+    ``channel`` key in a ``to`` group (None without such a key).
+    ``from_maxima`` holds the upper range limit of numeric ``from`` keys.
+    """
+
+    to_keys: frozenset[str] = frozenset()
+    from_keys: frozenset[str] = frozenset()
+    channels: int | None = None
+    from_maxima: Mapping[str, float] = _EMPTY_RANGES
+
+    @property
+    def output(self) -> str | None:
+        """Return "light" for dimValue, "switch" for switch outputs, else None."""
+        if KEY_DIMMER in self.to_keys:
+            return "light"
+        if KEY_SWITCH in self.to_keys:
+            return "switch"
+        return None
 
 
 @dataclass
@@ -67,6 +127,7 @@ class EnOceanChannel:
     vertical_movement_time: float | None = None
     movement: str | None = None  # Estimated opening/closing, never physical feedback
     local_control: bool | None = None
+    locking_mode: str | None = None  # block, unblock or alarm (D2-05)
     energy: float | None = None
     power: float | None = None
     liquid_detected: bool | None = None
@@ -76,10 +137,17 @@ class EnOceanChannel:
     battery_level: float | None = None
     motion: bool | None = None
     illuminance: float | None = None
+    # True while the sensor reports illumination above its range.
+    illuminance_over_range: bool | None = None
+    # "noError" or a reported error code (A5-07 supply voltage byte 251-255).
+    error_code: str | None = None
     supply_voltage: float | None = None
     handle_state: str | None = None
     is_locked: bool | None = None
     unlock_request: bool | None = None
+    # Answer the gateway gives the handle's next unlock request (its stored
+    # target state): True = allowed (green), False = not allowed (red).
+    unlock_allowed: bool | None = None
     mechanics_fault: bool | None = None
     # Climate fields
     temperature: float | None = None
@@ -136,6 +204,8 @@ class EnOceanDevice:
     dbm: int | None = None
     last_command_error: str | None = None
     channels: dict[int, EnOceanChannel] = field(default_factory=dict)
+    # Gateway profile read at setup; None means the EEP tables decide.
+    profile: DeviceProfile | None = field(default=None, repr=False, compare=False)
 
     # Fields a gateway device list owns. ``apply_listed_metadata`` replaces
     # them in place; every other field is runtime state of this integration
@@ -162,6 +232,9 @@ class EnOceanDevice:
         a newer telegram reported them (finding B-5).
         """
         self.friendly_id = listed.friendly_id
+        if listed.eep_names != self.eep_names:
+            # A profile describes the announced EEPs; it is stale otherwise.
+            self.profile = None
         self.eeps = listed.eeps
         self.manufacturer = listed.manufacturer
         self.physical_device = listed.physical_device
@@ -179,8 +252,27 @@ class EnOceanDevice:
         return None
 
     @property
+    def eep_names(self) -> tuple[str, ...]:
+        """Return the announced EEP names in gateway order."""
+        return tuple(
+            name
+            for eep in self.eeps
+            if isinstance(eep, dict) and (name := string_key(eep, "eep")) is not None
+        )
+
+    @property
+    def _d2_01_profile_output(self) -> str | None:
+        """Return the output type a D2-01 gateway profile declares."""
+        eep = self.primary_eep
+        if self.profile is None or eep is None or not eep.startswith("D2-01-"):
+            return None
+        return self.profile.output
+
+    @property
     def entity_type(self) -> str | None:
-        """Determine the entity type based on the primary EEP."""
+        """Determine the entity type from the gateway profile or the primary EEP."""
+        if (output := self._d2_01_profile_output) is not None:
+            return output
         eep = self.primary_eep
         if eep and eep in EEP_MAPPINGS:
             return EEP_MAPPINGS[eep][0]
@@ -188,22 +280,91 @@ class EnOceanDevice:
 
     @property
     def is_dimmable(self) -> bool:
-        """Check if this device supports dimming."""
+        """Check if this device supports dimming (dimValue commands)."""
+        if (output := self._d2_01_profile_output) is not None:
+            return output == "light"
         eep = self.primary_eep
-        if eep:
-            return eep in [
-                "D2-01-02",
-                "D2-01-03",
-                "D2-01-06",
-                "D2-01-07",
-                "D2-01-0A",
-                "D2-01-0B",
-                "D2-01-0F",
-                "D2-01-10",
-                "D2-01-12",
-                "A5-38-08",
-            ]
-        return False
+        return eep in D2_01_DIMMER_EEPS or eep in GATEWAY_DIMMER_EEPS
+
+    def _reports(self, key: str, fallback_eeps: frozenset[str]) -> bool:
+        """Return whether the device reports ``key``: profile first, then EEP."""
+        if self.profile is not None:
+            return key in self.profile.from_keys
+        return self.primary_eep in fallback_eeps
+
+    def _accepts(self, key: str, fallback_eeps: frozenset[str]) -> bool:
+        """Return whether the device accepts ``key``: profile first, then EEP."""
+        if self.profile is not None:
+            return key in self.profile.to_keys
+        return self.primary_eep in fallback_eeps
+
+    @property
+    def has_local_control(self) -> bool:
+        """Return whether the actuator reports its local control setting."""
+        return self._reports(KEY_LOCAL_CONTROL, LOCAL_CONTROL_EEPS)
+
+    @property
+    def supports_locking_mode(self) -> bool:
+        """Return whether the blind accepts and reports a locking mode."""
+        return self.is_cover and self._accepts(KEY_LOCKING_MODE, LOCKING_MODE_EEPS)
+
+    @property
+    def supports_repositioning(self) -> bool:
+        """Return whether the blind accepts a reference run before positioning."""
+        return self.is_cover and self._accepts(KEY_REPOSITIONING, REPOSITIONING_EEPS)
+
+    @property
+    def reports_illuminance(self) -> bool:
+        """Return whether the presence detector reports illumination."""
+        return self.is_presence_detector and self._reports(
+            KEY_ILLUMINATION, ILLUMINATION_EEPS
+        )
+
+    @property
+    def reports_error_code(self) -> bool:
+        """Return whether the presence detector reports a supply error code."""
+        return self.is_presence_detector and self._reports(
+            KEY_ERROR_CODE, ERROR_CODE_EEPS
+        )
+
+    @property
+    def illuminance_maximum(self) -> float:
+        """Return the upper end of the illumination range in lux."""
+        if self.profile is not None:
+            maximum = self.profile.from_maxima.get(KEY_ILLUMINATION)
+            if maximum is not None:
+                return maximum
+        return ILLUMINATION_MAX_LUX
+
+    @property
+    def rocker_eep(self) -> str | None:
+        """Return the announced rocker switch EEP (F6-02-xx/F6-03-xx), if any."""
+        return next(
+            (name for name in self.eep_names if name.startswith(ROCKER_EEP_PREFIXES)),
+            None,
+        )
+
+    @property
+    def has_secondary_rocker(self) -> bool:
+        """Return whether an actuator also reports its built-in rocker buttons."""
+        return (
+            self.rocker_eep is not None
+            and self.entity_type != "event"
+            and not self.is_opus_motion_detector
+        )
+
+    @property
+    def button_keys(self) -> tuple[str, ...]:
+        """Return the rocker button keys this device can report."""
+        if self.profile is not None:
+            reported = tuple(
+                key for key in BUTTON_KEYS if key in self.profile.from_keys
+            )
+            if reported:
+                return reported
+        if (eep := self.rocker_eep) is not None and eep.startswith("F6-02-"):
+            return ROCKER_2_BUTTON_KEYS
+        return BUTTON_KEYS
 
     @property
     def supports_ramping_mode(self) -> bool:
@@ -245,11 +406,7 @@ class EnOceanDevice:
     @property
     def _eep_names(self) -> set[str]:
         """Return all announced EEPs, not only the primary one."""
-        return {
-            name
-            for eep in self.eeps
-            if isinstance(eep, dict) and (name := string_key(eep, "eep")) is not None
-        }
+        return set(self.eep_names)
 
     @property
     def is_opus_motion_detector(self) -> bool:
@@ -311,32 +468,18 @@ class EnOceanDevice:
 
     @property
     def channel_count(self) -> int:
-        """Determine the number of channels based on EEP."""
+        """Return the number of output channels.
+
+        A D2-01 gateway profile with a ``channel`` key decides; without the key
+        the actuator has one channel. Otherwise the EEP specification table
+        applies (only D2-01-10, -11 and -12 have two channels).
+        """
         eep = self.primary_eep
         if not eep:
             return 1
-
-        # Multi-channel actuators
-        channel_map = {
-            "D2-01-04": 2,
-            "D2-01-05": 2,
-            "D2-01-06": 2,
-            "D2-01-07": 2,
-            "D2-01-08": 4,
-            "D2-01-09": 4,
-            "D2-01-0A": 4,
-            "D2-01-0B": 4,
-            "D2-01-0D": 8,
-            "D2-01-0E": 8,
-            "D2-01-0F": 8,
-            "D2-01-10": 8,
-            # Local Control variants: same channel count as their non-LC counterparts
-            # D2-01-11 = 2-ch switch with local control (same as D2-01-04/05)
-            # D2-01-12 = 2-ch dimmer with local control (same as D2-01-06/07)
-            "D2-01-11": 2,
-            "D2-01-12": 2,
-        }
-        return channel_map.get(eep, 1)
+        if self._d2_01_profile_output is not None and self.profile is not None:
+            return self.profile.channels or 1
+        return D2_01_CHANNEL_COUNTS.get(eep, 1)
 
     def get_or_create_channel(
         self, channel_id: int = DEFAULT_CHANNEL
@@ -405,6 +548,24 @@ class EnOceanDevice:
         if (channel := self._estimate_channel(snapshot)) is None:
             return False
         channel.position = position
+        return True
+
+    def apply_locking_mode_estimate(
+        self, snapshot: ChannelStateSnapshot, locking_mode: str
+    ) -> bool:
+        """Assume an acknowledged blind locking mode; return whether it applied."""
+        if (channel := self._estimate_channel(snapshot)) is None:
+            return False
+        channel.locking_mode = locking_mode
+        return True
+
+    def apply_unlock_permission_estimate(
+        self, snapshot: ChannelStateSnapshot, allowed: bool
+    ) -> bool:
+        """Assume an accepted unlock answer; return whether it applied."""
+        if (channel := self._estimate_channel(snapshot)) is None:
+            return False
+        channel.unlock_allowed = allowed
         return True
 
     def apply_cover_tilt_estimate(
@@ -606,12 +767,19 @@ class EnOceanDevice:
                     channel.is_on = brightness > 0
 
             elif key == KEY_POSITION:
+                # D2-05 reports "unknown" while a blind moves; the last known
+                # position stays until the end report.
                 channel.position = self._integer_reading(
                     channel.position, value, 0, 100
                 )
 
             elif key == KEY_ANGLE:
                 channel.angle = self._integer_reading(channel.angle, value, 0, 100)
+
+            elif key == KEY_LOCKING_MODE:
+                # "noChange" in a command keeps the reported mode.
+                if isinstance(value, str) and value in LOCKING_MODES:
+                    channel.locking_mode = value
 
             elif key == KEY_VERTICAL_MOVEMENT_TIME:
                 channel.vertical_movement_time = self._float_reading(
@@ -677,22 +845,37 @@ class EnOceanDevice:
                 )
 
             elif key in ("illuminance", "supplyVoltage") or (
-                key == "illumination" and self.is_presence_detector
+                key == KEY_ILLUMINATION and self.is_presence_detector
             ):
                 if key == "supplyVoltage":
                     channel.supply_voltage = self._float_reading(
                         channel.supply_voltage, value, minimum=0, allow_unavailable=True
                     )
+                elif value == VALUE_OVER_RANGE:
+                    # Brighter than the sensor can measure: show its maximum.
+                    channel.illuminance = self.illuminance_maximum
+                    channel.illuminance_over_range = True
                 else:
+                    if value == "notAvailable":
+                        channel.illuminance_over_range = None
+                    elif self._parse_float(value, minimum=0) is not None:
+                        channel.illuminance_over_range = False
                     channel.illuminance = self._float_reading(
                         channel.illuminance, value, minimum=0, allow_unavailable=True
                     )
 
+            elif key == KEY_ERROR_CODE and self.is_presence_detector:
+                if value == ERROR_CODE_NONE:
+                    channel.error_code = ERROR_CODE_NONE
+                elif (
+                    code := self._parse_integer(value, minimum=251, maximum=255)
+                ) is not None:
+                    channel.error_code = str(code)
+
             elif key == "handleState" or (key == "handle" and self.is_window_handle):
-                if value == "tilt":
-                    value = "tilted"
+                # Unknown values, e.g. the gateway's "unkown", are unknown.
                 channel.handle_state = (
-                    value if value in ("open", "closed", "tilted") else None
+                    HANDLE_STATES.get(value) if isinstance(value, str) else None
                 )
 
             elif key == "lock":
@@ -700,10 +883,15 @@ class EnOceanDevice:
                     value, "locked", "unlocked"
                 )
 
-            elif key == "unlockRequest" or (key == "unlock" and self.has_autolock):
-                channel.unlock_request = self._parse_detector_boolean(
-                    value, "requested", "notRequested"
-                )
+            elif key == "unlockRequest" or (key == KEY_UNLOCK and self.has_autolock):
+                # "allowed"/"notAllowed" is the answer to the handle (a "to"
+                # telegram or the gateway's target state), not a request.
+                if value in (UNLOCK_ALLOWED, UNLOCK_NOT_ALLOWED):
+                    channel.unlock_allowed = value == UNLOCK_ALLOWED
+                else:
+                    channel.unlock_request = self._parse_detector_boolean(
+                        value, "requested", "notRequested"
+                    )
 
             elif key == "mechanicsFault" or (key == "mechanics" and self.has_autolock):
                 channel.mechanics_fault = self._parse_detector_boolean(

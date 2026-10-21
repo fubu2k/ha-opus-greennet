@@ -30,7 +30,8 @@ over IP REST API: no MQTT broker and no broker bridge are needed.
 - **Climate control**: HeatArea thermostat support for Valve, CosiTherm, and Electro Heating areas
 - **Sensors**: Humidity, temperature, power consumption, and signal strength monitoring
 - **Binary sensors**: Water leak detection, window open detection, actuator error states, battery monitoring
-- **Events**: Per-button rocker switch press/release events (`buttonA0`, `buttonAI`, `buttonB0`, `buttonBI`, `multipleButtons`)
+- **Events**: Per-button rocker switch press/release events (`buttonA0` … `buttonDI`, `multipleButtons`), also for the buttons built into actuators
+- **Gateway profiles**: Switch or dimmer and the channel count of D2-01 actuators follow the profile the gateway reports for each device
 - **Device services**: ReCom API access for advanced device configuration and diagnostics
 - **UI Configuration**: Set up via Home Assistant's Integrations page
 
@@ -38,15 +39,54 @@ over IP REST API: no MQTT broker and no broker bridge are needed.
 
 | Entity Type | EEP Profiles | Description |
 |-------------|--------------|-------------|
-| **Light** | D2-01-02, D2-01-03, D2-01-06, D2-01-07, D2-01-0A, D2-01-0B, D2-01-0F, D2-01-10, D2-01-12, A5-38-08, A5-38-09 | Dimmable lights and gateway switching |
-| **Switch** | D2-01-00, D2-01-01, D2-01-04, D2-01-05, D2-01-08, D2-01-09, D2-01-0C, D2-01-0D, D2-01-0E, D2-01-11 | On/Off switches and actuators |
-| **Cover** | D2-05-00, D2-05-01, D2-05-02 | Blinds, shades, and shutters |
+| **Light** | D2-01-02, D2-01-03, D2-01-04, D2-01-05, D2-01-09, A5-38-08, A5-38-09 | Dimmers (1 channel) and gateway switching |
+| **Switch** | D2-01-00, D2-01-01, D2-01-06, D2-01-07, D2-01-08, D2-01-0A, D2-01-0B, D2-01-0C, D2-01-0D, D2-01-0E, D2-01-0F (1 channel); D2-01-10, D2-01-11, D2-01-12 (2 channels) | On/Off switches and actuators |
+| **Cover** | D2-05-00, D2-05-01, D2-05-02 | Blinds, shades, and shutters; D2-05-00/02 also a Blockage switch and reference-run buttons (diagnostic) |
 | **Climate** | D1-4B-05, D1-4B-06, D1-4B-07 | OPUS HeatArea thermostats (Valve, CosiTherm, Electro Heating) |
-| **Sensor** | A5-04-01, A5-04-02, A5-04-03, A5-07-01, A5-07-03, _(from climate devices)_ | Temperature and humidity (A5-04-01/02/03, including the OPUS motion detector), illuminance, supply voltage, battery level, humidity, feed temperature, power consumption, signal strength |
-| **Binary Sensor** | D5-00-01, F6-05-01, F6-05-02, A5-07-01, A5-07-03, F6-02-01 + A5-04-01, _(from climate devices)_ | Contact open/closed state, SMS motion detection, OPUS motion detector (`buttonAI` = motion, `buttonA0` = no motion), water leak detection, RWM smoke alarm and low battery, window open, actuator errors, battery low |
-| **Handle sensors** | D2-06-40, F6-10-00, D2-03-10 | Handle position plus separate open, tilted and closed binary sensors |
-| **Lock** | D2-06-40 | Read-only AutoLock status, unlock-request sensor and mechanics-fault binary sensor |
-| **Event** | F6-02-01, F6-02-02, F6-02-03, F6-03-01, F6-03-02 | Rocker switch press/release events, per button (`buttonA0_pressed`, `buttonA0_released`, …, `multipleButtons_released`) with `button` and `action` event attributes |
+| **Sensor** | A5-04-01, A5-04-02, A5-04-03, A5-07-01, A5-07-03, _(from climate devices)_ | Temperature and humidity (A5-04-01/02/03, including the OPUS motion detector), illuminance (A5-07-03 only), supply voltage, battery level, humidity, feed temperature, power consumption, signal strength |
+| **Binary Sensor** | D5-00-01, F6-05-01, F6-05-02, A5-07-01, A5-07-03, F6-02-01 + A5-04-01, D2-01 with local control, _(from climate devices)_ | Contact open/closed state, SMS motion detection and sensor error (diagnostic), OPUS motion detector (`buttonAI` = motion, `buttonA0` = no motion), water leak detection, RWM smoke alarm and low battery, window open, actuator errors, battery low, local control (diagnostic, disabled by default) |
+| **Handle sensors** | D2-06-40, F6-10-00, D2-03-10 | Handle position plus separate open, tilted and closed binary sensors, battery level (diagnostic) |
+| **Lock** | D2-06-40 | AutoLock: lock and unlock the handle, unlock-request sensor and mechanics-fault binary sensor |
+| **Event** | F6-02-01, F6-02-02, F6-02-03, F6-03-01, F6-03-02 | Rocker switch press/release events, per button (`buttonA0_pressed`, `buttonA0_released`, …, `multipleButtons_released`) with `button` and `action` event attributes; F6-03 rockers also report `buttonC0` … `buttonDI` |
+
+### Switch or dimmer, and channel count (D2-01)
+
+At setup the integration reads one gateway profile per EEP combination
+(`GET /devices/<id>/profile`, gateway data without a radio telegram). A D2-01
+actuator whose profile accepts `dimValue` becomes a light, one that accepts
+`switch` a switch; a `channel` key in the profile gives the channel count.
+When a profile cannot be read, the table above (EEP specification) decides.
+Devices paired later use a profile already read for the same EEPs, otherwise the
+table until the next reload. Diagnostics show the source per device.
+
+Earlier releases derived type and channel count from the EEP number. A
+single-channel actuator that was created as channel 0 keeps its entity ID and
+settings. Entities of channels or of a platform the device does not have are
+removed (with a log warning) only when the gateway profile confirmed the
+outputs; update dashboards and automations that used them.
+
+### Buttons built into actuators
+
+Many OPUS actuators also announce a rocker profile (F6-03-01) for their own
+buttons. They get an event entity named *Buttons* with the unique ID suffix
+`_buttons`, so it never collides with the switch, light or cover entity of the
+same device. Plain rocker switches keep their previous event entity.
+
+All button event entities (rockers and actuator buttons) are meant for
+automations: they are enabled but hidden by default, so they do not appear in
+automatically generated dashboards. This applies to newly created entities;
+existing ones keep their visibility, and you can show or hide them in the
+entity settings.
+
+### Presence detectors (A5-07)
+
+`motionDetected = false` means the detector is *uncertain of occupancy*, not that
+the room is certainly empty; Home Assistant shows it as `off` (no motion). An
+illumination above the sensor range (`overRange`, above 1000 lx) is shown as the
+range maximum with the attribute `over_range: true`. The diagnostic *Sensor
+error* binary sensor is on while the detector reports an error code (251-255)
+and off (OK) otherwise, also while no error code has been reported. A5-07-01 has no illumination sensor, so no illuminance
+entity is created for it.
 
 D2-01 dimmers switch to the new brightness at once, like commands from Apple
 Home. An action with a `transition` (any duration) uses the dimmer's own
@@ -57,6 +97,29 @@ Cover tilt controls are hidden when the bridge reports `rotationTime` as `0` or
 `noRotation`, as used for plain roller shutters. The integration uses the existing
 device discovery and state updates, without extra configuration queries. When no
 valid rotation time is available, tilt support follows the device's EEP profile.
+
+Blinds report position and angle as `unknown` while they move; Home Assistant
+keeps the last known value until the end report arrives. Command targets of
+`unknown` are ignored.
+
+D2-05-00 and D2-05-02 blinds have a diagnostic **Blockage** switch for automations
+(e.g. wind protection or a door that is open). It is disabled by default because
+it stops the blind; enable it per blind when you need it. On sends `lockingMode = block`, off
+sends `unblock`. A D2-05-00 `alarm` counts as blocked; the reported mode is the
+`locking_mode` attribute. The diagnostic buttons **Reference run via top** and
+**Reference run via bottom** drive the blind to an end position first
+(`repositioning = firstUp`/`firstDown`) and then back to its last known position,
+which recalibrates the blind's position tracking. Every blind also has a diagnostic
+**Last run time** sensor: the seconds from a position command (from Home
+Assistant, another controller or a reference run) to the blind's report at the
+target. Attributes give the direction (`up`, `down`, `reference_up`,
+`reference_down`), start and end position (100 = open) and whether the run
+covered the full height (`full_travel`), which is the value to compare with the
+configured `verticalMovementTime`. Runs ended by Stop, without an end report or
+only confirmed by a status query record no time. Each measured run is also
+logged at info level. Movement and rotation times of
+a D2-05-00 "Set parameters" command from another controller (milliseconds) are
+not taken over; they come from the device list (seconds).
 
 Covers with a positive configured `verticalMovementTime` show estimated
 `opening` / `closing` while travelling, instead of immediately showing the target
@@ -76,17 +139,36 @@ behaviour. Existing entity IDs, tilt support, and Stop commands are unchanged.
 ### HOPPE window handles
 
 All three handle profiles provide a position sensor and separate Open, Tilted,
-and Closed binary sensors. `tilt` is normalized to `tilted`; missing or invalid
-positions stay unknown. These report handle position, not an independent
+and Closed binary sensors. `tilt` (D2-03-10) and `up` (F6-10-00) are normalized
+to `tilted`; missing or invalid positions, including the gateway's `unkown`, stay
+unknown. A diagnostic battery level sensor shows the level from the device list. The
+Open, Tilted and Closed binary sensors are diagnostic entities for automations
+(enabled and visible); the handle position sensor stays the main entity. These report handle position, not an independent
 measurement of the window sash. For Cover Control Automation, assign the Open
 and Tilted binary sensors to its respective window-contact inputs.
 
 D2-06-40 also exposes the reported lock state independently of handle position,
-an unlock-request sensor, and a mechanics-fault sensor. AutoLock is read-only:
-lock/unlock actions raise an error without sending a command to the gateway. A
-reporter's tested write path disrupted the gateway, and control remains disabled
-pending manufacturer clarification. AutoLock configuration and
-reported lock state are separate; a closed handle does not imply a locked handle.
+an unlock-request sensor, a mechanics-fault sensor and a diagnostic **Lock
+bolt** binary sensor (the reported lock-bolt, on = unlocked). The **AutoLock**
+lock entity sets the answer the gateway gives the handle: when the handle's
+button is pressed, the handle asks whether it may be unlocked
+(`unlock = requested`, attribute `unlock_requested`). *Unlocked* stores
+`unlock = allowed`: the button lights green and the handle can be turned.
+*Locked* stores `notAllowed`: the button lights red and the handle stays
+locked. The gateway keeps this answer as the handle's target state (it
+acknowledges with status 202) and uses it at every request, also while the
+handle sleeps; the lock entity shows that stored answer, read from the device
+list at start-up. The attribute `bolt_locked` repeats the reported lock-bolt.
+Quick changes settle for 10 seconds (the entity shows *locking*/*unlocking*):
+only the last one is sent, because the gateway queues every answer for the
+sleeping handle and an earlier one could otherwise reach it first.
+
+### Water sensors (F6-05-01)
+
+The water leak sensor sends only when its state changes, and the gateway
+lists no state for it. Until it has reported water, the binary sensor shows
+*dry* instead of *unknown*; an outage of the gateway still shows
+*unavailable*.
 
 ### Single input contacts
 
@@ -293,7 +375,8 @@ zone does not by itself prove that it is currently heating.
   status query.
 - Cover positions during movement are estimates based on the reported travel
   time. The final position comes from the device report or status query.
-- The HOPPE AutoLock entity is read-only; lock and unlock actions are rejected.
+- A HOPPE AutoLock answer queued for the sleeping handle takes effect only when
+  the handle wakes up (e.g. at its next button press).
 - The gateway is not discovered automatically; its address is entered once.
   Give the gateway a fixed address, or update it with **Reconfigure**.
 - The gateway's API is plain HTTP with basic authentication, as provided by the
@@ -319,6 +402,12 @@ device management, accessible via **Developer Tools** → **Actions**:
 | `opus_greennet.set_device_configuration` | `device_id`, `configuration` | Write configuration to an EnOcean device via ReCom API |
 | `opus_greennet.get_device_parameters` | `device_id` | Retrieve DDF parameters for an EnOcean device via ReCom API |
 | `opus_greennet.reload_entry` | _(optional)_ `config_entry_id` | Re-run integration setup/teardown without restarting HA |
+
+One further action is available to every user:
+
+| Service | Parameters | Description |
+|---------|-----------|-------------|
+| `opus_greennet.set_cover_position` | `device_id`, `position` (100 = open), _(optional)_ `repositioning` (`direct`, `first_up`, `first_down`), `channel`, `config_entry_id` | Move a D2-05 blind, optionally after a reference run to an end position |
 
 The `device_id` is the EURID of the target device (fictional example: `AABB1122`). Select a
 gateway when more than one Opus GreenNet config entry is loaded. The two read
@@ -493,7 +582,7 @@ custom_components/opus_greennet/
 ├── enocean_device.py     # Device and channel data model
 ├── entity.py             # Shared entity and device-registry behavior
 ├── diagnostics.py        # Redacted integration diagnostics
-├── lock.py               # Read-only HOPPE AutoLock status
+├── lock.py               # HOPPE AutoLock lock entity (lock/unlock)
 ├── light.py              # Light entity platform
 ├── switch.py             # Switch entity platform
 ├── cover.py              # Cover entity platform
@@ -501,7 +590,8 @@ custom_components/opus_greennet/
 ├── sensor.py             # Sensor entity platform
 ├── binary_sensor.py      # Binary sensor entity platform
 ├── binary_sensor_descriptions.py # Moisture and HeatArea sensor definitions
-├── event.py              # Event entity platform (rocker switches)
+├── event.py              # Event entity platform (rocker switches and actuator buttons)
+├── button.py             # Reference-run buttons for D2-05 blinds (diagnostic)
 ├── services.yaml         # HA service definitions
 ├── strings.json          # UI, service, and exception translation source
 └── translations/
@@ -539,13 +629,15 @@ tests/
 ├── test_contact_sensor.py       # D5-00-01 states, live updates, and reload
 ├── test_opus_motion_detector.py # OPUS motion detector (F6-02-01 + A5-04-01)
 ├── test_scalar_telemetry.py     # Battery level and signal strength
-├── test_window_handles.py       # Handle positions and protected AutoLock actions
+├── test_window_handles.py       # Handle positions and AutoLock actions
+├── test_autolock_control.py     # AutoLock commands, transitions and unlock requests
 ├── test_device_removal.py       # Child removal, rediscovery and request isolation
 ├── test_cover_stop.py           # Stop command encoding and follow-up queries
 ├── test_cover_movement.py       # Estimated travel, feedback, timing and cleanup
 ├── test_reconciliation_feedback.py # Valid feedback, channels, and command timing
 ├── test_event_entity.py         # Rocker switch event entity tests
 ├── test_event_lifecycle.py      # Transient button fields are never replayed
+├── test_eep_profile_alignment.py # Gateway profiles, D2-01 table, blockage, reference runs, new sensors
 ├── test_entities.py             # Entity state and Home Assistant service tests
 ├── test_platform_edge_cases.py  # Platform setup and entity edge cases
 ├── test_init.py                 # Entry setup, migration errors, unloading, services
@@ -588,7 +680,7 @@ The v0.7.0b1 quality beta requires HA 2026.10.1 or newer, including for manual i
 Its combined suite contains 1,315 tests, with strict typing and per-module coverage gates.
 Users on older HA versions should keep stable v0.6.0 or upgrade HA first.
 Version 1.0 replaces the MQTT transport with the gateway's REST API. Its suite
-contains 1,535 tests that run against an in-process gateway serving the REST API
+contains 1,770 tests that run against an in-process gateway serving the REST API
 and its event stream over real HTTP (`tests/fake_gateway.py`).
 CI resolves the latest stable Home Assistant release from PyPI on each run and
 tests that exact version, recorded in the workflow summary. It runs on pull

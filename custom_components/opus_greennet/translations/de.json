@@ -109,6 +109,15 @@
       },
       "mechanics_fault": {
         "name": "Mechanik-Fehler"
+      },
+      "local_control": {
+        "name": "Vor-Ort-Bedienung"
+      },
+      "sensor_error": {
+        "name": "Sensorfehler"
+      },
+      "lock_bolt": {
+        "name": "Riegel"
       }
     },
     "cover": {
@@ -160,23 +169,39 @@
           "requested": "Angefordert",
           "not_requested": "Nicht angefordert"
         }
+      },
+      "last_run_time": {
+        "name": "Letzte Fahrzeit"
       }
     },
     "switch": {
       "channel": {
         "name": "Kanal {channel}"
+      },
+      "blockage": {
+        "name": "Blockierung"
       }
     },
     "lock": {
       "autolock": {
         "name": "AutoLock"
       }
+    },
+    "button": {
+      "reference_run_up": {
+        "name": "Referenzfahrt über oben"
+      },
+      "reference_run_down": {
+        "name": "Referenzfahrt über unten"
+      }
+    },
+    "event": {
+      "buttons": {
+        "name": "Taster"
+      }
     }
   },
   "exceptions": {
-    "autolock_read_only": {
-      "message": "Die AutoLock-Steuerung ist bis zur Klärung durch den Hersteller deaktiviert. Es wird nur der gemeldete Schlosszustand angezeigt."
-    },
     "config_entry_not_found": {
       "message": "Es existiert kein Opus-GreenNet-Konfigurationseintrag mit der ID {config_entry_id}."
     },
@@ -212,6 +237,9 @@
     },
     "wrong_gateway": {
       "message": "Unter der konfigurierten Adresse antwortet ein anderes OPUS-Gateway."
+    },
+    "repositioning_not_supported": {
+      "message": "Gerät {device_id} ist keine Jalousie mit diesem Kanal und dieser Positionierungsart."
     }
   },
   "services": {
@@ -270,6 +298,32 @@
         }
       },
       "name": "Gerätekonfiguration setzen"
+    },
+    "set_cover_position": {
+      "name": "Jalousieposition setzen",
+      "description": "Fährt eine D2-05-Jalousie auf eine Position, optional nach einer Referenzfahrt in eine Endlage, die die Positionserfassung nachkalibriert.",
+      "fields": {
+        "device_id": {
+          "name": "Geräte-ID",
+          "description": "EURID der Jalousie."
+        },
+        "position": {
+          "name": "Position",
+          "description": "Zielposition in Prozent, 100 ist offen und 0 geschlossen (Home-Assistant-Skala)."
+        },
+        "repositioning": {
+          "name": "Referenzfahrt",
+          "description": "Zuerst in eine Endlage fahren. Direkt fährt ohne Referenzfahrt."
+        },
+        "channel": {
+          "name": "Kanal",
+          "description": "Ausgangskanal des Jalousieaktors."
+        },
+        "config_entry_id": {
+          "name": "Gateway",
+          "description": "Zu verwendendes Gateway. Auswahl erforderlich, wenn mehrere Gateways geladen sind."
+        }
+      }
     }
   },
   "issues": {
@@ -282,6 +336,15 @@
             "description": "Bei der Übernahme der Upstream-Unique-IDs hat die Integration zwei Registry-Einträge für dasselbe Gerät und Gateway gefunden. Deine bestehende Entität {preserved_entity_id} wurde mit Entitäts-ID, Name und Einstellungen beibehalten, die doppelte Entität {removed_entity_id} wurde entfernt.\n\nAutomationen, Skripte, Szenen und Dashboards, die noch {removed_entity_id} verwenden, funktionieren nicht mehr. Ersetze diese Entitäts-ID durch {preserved_entity_id} und wähle anschließend Absenden, um diesen Hinweis zu schließen. Dabei wird nichts an das Gateway oder das Gerät gesendet."
           }
         }
+      }
+    }
+  },
+  "selector": {
+    "repositioning": {
+      "options": {
+        "direct": "Direkt",
+        "first_up": "Zuerst nach oben (obere Endlage)",
+        "first_down": "Zuerst nach unten (untere Endlage)"
       }
     }
   }

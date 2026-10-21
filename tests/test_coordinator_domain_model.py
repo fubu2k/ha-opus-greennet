@@ -42,6 +42,8 @@ RUNTIME_FIELDS = {
     "last_update_dispatched_monotonic",
     "last_command_error",
     "channels",
+    # Gateway profile read at setup; dropped when the announced EEPs change.
+    "profile",
 }
 
 
@@ -237,8 +239,12 @@ def test_position_origin_follows_the_source(coord) -> None:
     assert coord.position_origin(COVER, 0) == "device list"
     _report(coord, 40)
     assert coord.position_origin(COVER, 0) == "reported"
-    # "unknown" changes neither the position nor its origin.
+    # A reported "unknown" (blind moving) keeps the last position and origin.
     _report(coord, "unknown")
+    assert coord.devices[COVER].channels[0].position == 40
+    assert coord.position_origin(COVER, 0) == "reported"
+    # A command target of "unknown" is no report: position and origin stay.
+    _report(coord, "unknown", direction="to")
     assert coord.devices[COVER].channels[0].position == 40
     assert coord.position_origin(COVER, 0) == "reported"
 
@@ -305,7 +311,8 @@ async def test_rocker_then_unknown_then_end_position(
         await gateway.push(telegram(COVER, [{"key": "buttonA0", "value": action}]))
     await gateway.push(telegram(COVER, [{"key": "position", "value": "unknown"}]))
     await hass.async_block_till_done()
-    # Neither the rocker nor "unknown" changes or confirms the position.
+    # The rocker changes nothing; the reported "unknown" (blind moving) keeps
+    # the last known position until the end report.
     assert hass.states.get(entity_id).attributes["current_position"] == 0
     await gateway.push(telegram(COVER, [{"key": "position", "value": 0}]))
     await wait_until(

@@ -182,8 +182,23 @@ async def async_get_config_entry_diagnostics(
                     channel_id: asdict(channel)
                     for channel_id, channel in device.channels.items()
                 },
+                # Where type and channels come from: the gateway profile read
+                # at setup, or the EEP tables when it could not be read.
+                "capabilities": {
+                    "source": "gateway profile" if device.profile else "EEP table",
+                    "entity_type": device.entity_type,
+                    "channel_count": device.channel_count,
+                    "dimmable": device.is_dimmable,
+                },
             }
         )
+        runs = getattr(coordinator, "last_cover_runs", None)
+        if isinstance(runs, dict):
+            devices[-1]["last_cover_run"] = {
+                channel_id: asdict(run)
+                for (device_id, channel_id), run in runs.items()
+                if device_id == device.device_id
+            }
         if isinstance(movement_times, dict):
             devices[-1]["last_vertical_movement_time"] = dict(
                 movement_times.get(device.device_id, {})

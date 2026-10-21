@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from .const import (
@@ -17,17 +18,20 @@ from .const import (
     KEY_CHANNEL,
     KEY_DIMMER,
     KEY_HEATER_MODE,
+    KEY_LOCKING_MODE,
     KEY_POSITION,
     KEY_ROTATION_TIME,
     KEY_STOP,
     KEY_SWITCH,
     KEY_TEMPERATURE_SETPOINT,
+    KEY_UNLOCK,
     KEY_VERTICAL_MOVEMENT_TIME,
     KNOWN_STATE_KEYS,
+    LOCKING_MODES,
     RWM_EEP,
 )
-from .enocean_device import EnOceanDevice
-from .wire import WireFunction, WireMapping
+from .enocean_device import DeviceProfile, EnOceanDevice
+from .wire import WireFunction, WireMapping, as_object, object_items
 
 if TYPE_CHECKING:
     from .wire import JsonValue
@@ -70,6 +74,56 @@ def telegram_timestamp(value: object) -> float | None:
         return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f%z").timestamp()
     except ValueError:
         return None
+
+
+def device_profile(document: WireMapping) -> DeviceProfile | None:
+    """Read the capabilities of a ``/devices/<id>/profile`` document.
+
+    The gateway lists the function groups of every announced EEP together.
+    Each group has a ``direction`` (``to``: accepted commands, ``from``:
+    reports) and ``functions`` with a ``key`` and allowed ``values`` (enums or
+    a ``range``). Returns None when the document has no usable group.
+    """
+    profile = as_object(document.get("profile"))
+    if profile is None:
+        return None
+    to_keys: set[str] = set()
+    from_keys: set[str] = set()
+    channels: int | None = None
+    maxima: dict[str, float] = {}
+    groups = object_items(profile.get("functionGroups"))
+    for group in groups:
+        direction = group.get("direction")
+        if direction not in ("to", "from", "both"):
+            continue
+        for function in object_items(group.get("functions")):
+            key = function.get("key")
+            if not isinstance(key, str) or not key:
+                continue
+            if direction in ("to", "both"):
+                to_keys.add(key)
+            if direction in ("from", "both"):
+                from_keys.add(key)
+            for value in object_items(function.get("values")):
+                limits = as_object(value.get("range"))
+                if limits is None:
+                    continue
+                maximum = EnOceanDevice._parse_number(limits.get("max"), minimum=0)
+                if maximum is None:
+                    continue
+                if key == KEY_CHANNEL and direction in ("to", "both"):
+                    if float(maximum).is_integer():
+                        channels = max(channels or 0, int(maximum) + 1)
+                elif direction in ("from", "both"):
+                    maxima[key] = float(maximum)
+    if not to_keys and not from_keys:
+        return None
+    return DeviceProfile(
+        to_keys=frozenset(to_keys),
+        from_keys=frozenset(from_keys),
+        channels=channels,
+        from_maxima=MappingProxyType(maxima),
+    )
 
 
 def channel_from_functions(functions: Sequence[WireFunction]) -> int | None:
@@ -211,6 +265,17 @@ def device_state_functions(data: WireMapping) -> list[WireFunction]:
         )
     if "batteryLevel" in data:
         state_functions.append({"key": "batteryLevel", "value": data["batteryLevel"]})
+    # The answer the gateway stores for a sleeping device's next request
+    # (HOPPE unlock permission) is listed as ``targetState``.
+    targets = data.get("targetState")
+    if isinstance(targets, list):
+        state_functions.extend(
+            target
+            for target in targets
+            if isinstance(target, dict)
+            and target.get("key") == KEY_UNLOCK
+            and "value" in target
+        )
     return state_functions + configuration_state_functions(data)
 
 
@@ -246,6 +311,9 @@ def confirmed_fields_by_channel(
             valid = value in ("on", "off")
         elif key == KEY_HEATER_MODE:
             valid = value in ("heating", "on", "off", "autoOff")
+        elif key == KEY_LOCKING_MODE:
+            # "noChange" in a position command expects no locking feedback.
+            valid = value in LOCKING_MODES
         else:
             continue
         channel = function_channel(function, default)

@@ -6,20 +6,27 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.components.switch.const import DOMAIN as SWITCH_DOMAIN
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import OpusGreenNetConfigEntry
-from .const import CONF_EAG_ID, DEFAULT_CHANNEL
+from .const import (
+    CONF_EAG_ID,
+    DEFAULT_CHANNEL,
+    LOCKING_MODE_ALARM,
+    LOCKING_MODE_BLOCK,
+    LOCKING_MODE_UNBLOCK,
+)
 from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
     CommandDelivery,
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanDevice
-from .entity import OpusGreenNetEntity, migrate_legacy_multichannel_entity
+from .entity import OpusGreenNetEntity, migrate_output_entities
 
 # The coordinator serializes commands per device; entities receive pushed state.
 PARALLEL_UPDATES = 0
@@ -38,11 +45,24 @@ async def async_setup_entry(
 
     @callback
     def async_add_switch(device: EnOceanDevice) -> None:
-        """Add a switch entity for a discovered device."""
+        """Add switch entities for a discovered device."""
+        if device.supports_locking_mode:
+            async_add_entities(
+                [
+                    OpusGreenNetBlockageSwitch(
+                        coordinator=coordinator,
+                        eag_id=eag_id,
+                        gateway_device_id=gateway_device_id,
+                        device=device,
+                        channel_id=channel_id,
+                    )
+                    for channel_id in range(device.channel_count)
+                ]
+            )
         if device.entity_type != "switch":
             return
 
-        migrate_legacy_multichannel_entity(
+        migrate_output_entities(
             entity_registry,
             SWITCH_DOMAIN,
             eag_id,
@@ -135,3 +155,67 @@ class OpusGreenNetSwitch(OpusGreenNetEntity, SwitchEntity):
             and self._device.apply_switch_estimate(snapshot, False)
         ):
             self.async_write_ha_state()
+
+
+class OpusGreenNetBlockageSwitch(OpusGreenNetEntity, SwitchEntity):
+    """Blockage of a D2-05 blind (``lockingMode``), e.g. for automations.
+
+    On sends ``block``, off sends ``unblock``. A D2-05-00 blind can also report
+    ``alarm``, which counts as blocked; the reported mode is an attribute.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "blockage"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Blocking stops the blind; only enabled on purpose.
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        channel_id: int = DEFAULT_CHANNEL,
+    ) -> None:
+        """Initialize the blockage switch."""
+        super().__init__(coordinator, eag_id, gateway_device_id, device, channel_id)
+        channel_suffix = f"_ch{channel_id}" if device.channel_count > 1 else ""
+        self._attr_unique_id = f"{eag_id}_{device.device_id}_blockage{channel_suffix}"
+
+    def _locking_mode(self) -> str | None:
+        channel = self._device.channels.get(self._channel_id)
+        return channel.locking_mode if channel else None
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether the blind is blocked (``block`` or ``alarm``)."""
+        mode = self._locking_mode()
+        if mode is None:
+            return None
+        return mode in (LOCKING_MODE_BLOCK, LOCKING_MODE_ALARM)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        """Return the reported locking mode."""
+        mode = self._locking_mode()
+        return {} if mode is None else {"locking_mode": mode}
+
+    async def _async_set_mode(self, mode: str) -> None:
+        snapshot = self._device.snapshot_channel_state(self._channel_id)
+        delivery = await self._coordinator.async_set_cover_locking_mode(
+            self._device.device_id, mode, self._channel_id
+        )
+        if (
+            delivery is not CommandDelivery.DEFERRED
+            and self._device.apply_locking_mode_estimate(snapshot, mode)
+        ):
+            self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Block the blind."""
+        await self._async_set_mode(LOCKING_MODE_BLOCK)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Release the blockage."""
+        await self._async_set_mode(LOCKING_MODE_UNBLOCK)

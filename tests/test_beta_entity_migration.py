@@ -70,6 +70,8 @@ async def test_migration_preserves_entity_id_and_settings(
                 {"key": "lock", "value": "locked"},
                 {"key": "unlock", "value": False},
             ],
+            # The lock entity shows the gateway's stored unlock answer.
+            targetState=[{"key": "unlock", "value": "notAllowed"}],
         )
     ]
     await gateway.push(gateway.devices_document())

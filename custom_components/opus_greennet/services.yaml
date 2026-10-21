@@ -48,3 +48,44 @@ reload_entry:
       selector:
         config_entry:
           integration: opus_greennet
+
+set_cover_position:
+  fields:
+    device_id:
+      required: true
+      example: "AABBCCDD"
+      selector:
+        text:
+    position:
+      required: true
+      example: 50
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+    repositioning:
+      required: false
+      default: direct
+      selector:
+        select:
+          translation_key: repositioning
+          options:
+            - direct
+            - first_up
+            - first_down
+    channel:
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 7
+          step: 1
+          mode: box
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: opus_greennet
