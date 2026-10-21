@@ -16,7 +16,7 @@ async def test_handle_positions_and_lock_safety(
     hass: HomeAssistant, gateway: FakeGateway, eep: str
 ) -> None:
     gateway.devices = [device_object("HANDLE", eep)]
-    await setup_bridge(hass, gateway)
+    entry = await setup_bridge(hass, gateway)
     state = await wait_for_entity(hass, "sensor", "AABB0011_HANDLE_handle_state")
     positions = {}
     for suffix in ("open", "tilt", "closed"):
@@ -89,6 +89,8 @@ async def test_handle_positions_and_lock_safety(
         }
         assert hass.states.get(lock).state == "locked"
         # The answer the gateway sends the handle ("to") updates it as well.
+        # Forget the own commands so it is not taken for their echo.
+        entry.runtime_data.coordinator._sent_commands.clear()  # noqa: SLF001
         await gateway.push(
             telegram("HANDLE", [{"key": "unlock", "value": "allowed"}], direction="to")
         )
