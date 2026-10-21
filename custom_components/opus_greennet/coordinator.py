@@ -66,11 +66,14 @@ from .const import (
     KEY_REPOSITIONING,
     KEY_ROTATION_TIME,
     KEY_STOP,
+    KEY_UNLOCK,
     KEY_VERTICAL_MOVEMENT_TIME,
     RAMPING_MODE_FADE,
     RAMPING_MODE_SWITCH,
     REPOSITIONING_FIRST_DOWN,
     REPOSITIONING_FIRST_UP,
+    UNLOCK_ALLOWED,
+    UNLOCK_NOT_ALLOWED,
     VALUE_UNKNOWN,
 )
 from .enocean_device import DeviceProfile, EnOceanDevice
@@ -1747,6 +1750,23 @@ class OpusGreenNetCoordinator:
         return await self.async_send_command(
             device_id, self._with_channel_if_needed(device_id, functions, channel)
         )
+
+    async def async_set_handle_unlock(
+        self, device_id: str, *, allowed: bool
+    ) -> CommandDelivery:
+        """Unlock (``allowed``) or lock (``notAllowed``) a HOPPE AutoLock handle.
+
+        The handle sleeps between uses; the gateway then queues the answer
+        (201, SoftSmartAck) until the handle wakes up, e.g. when its button
+        is pressed.
+        """
+        functions: list[WireFunction] = [
+            {
+                "key": KEY_UNLOCK,
+                "value": UNLOCK_ALLOWED if allowed else UNLOCK_NOT_ALLOWED,
+            }
+        ]
+        return await self.async_send_command(device_id, functions)
 
     async def async_set_cover_locking_mode(
         self,

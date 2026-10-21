@@ -52,6 +52,7 @@ from .const import (
     KEY_TEMPERATURE_ORIGIN,
     KEY_TEMPERATURE_SETPOINT,
     KEY_THERMAL_MODE,
+    KEY_UNLOCK,
     KEY_VERTICAL_MOVEMENT_TIME,
     KEY_WINDOW_OPEN,
     LOCAL_CONTROL_EEPS,
@@ -62,6 +63,8 @@ from .const import (
     ROCKER_2_BUTTON_KEYS,
     ROCKER_EEP_PREFIXES,
     STATE_ON,
+    UNLOCK_ALLOWED,
+    UNLOCK_NOT_ALLOWED,
     VALUE_OVER_RANGE,
     VALUE_UNKNOWN,
 )
@@ -874,10 +877,13 @@ class EnOceanDevice:
                     value, "locked", "unlocked"
                 )
 
-            elif key == "unlockRequest" or (key == "unlock" and self.has_autolock):
-                channel.unlock_request = self._parse_detector_boolean(
-                    value, "requested", "notRequested"
-                )
+            elif key == "unlockRequest" or (key == KEY_UNLOCK and self.has_autolock):
+                # "allowed"/"notAllowed" is a controller's answer ("to"), not
+                # a request of the handle; it leaves the request state alone.
+                if value not in (UNLOCK_ALLOWED, UNLOCK_NOT_ALLOWED):
+                    channel.unlock_request = self._parse_detector_boolean(
+                        value, "requested", "notRequested"
+                    )
 
             elif key == "mechanicsFault" or (key == "mechanics" and self.has_autolock):
                 channel.mechanics_fault = self._parse_detector_boolean(

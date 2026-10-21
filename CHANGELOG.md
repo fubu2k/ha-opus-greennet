@@ -18,6 +18,7 @@ Changes on top of 1.0.0b1 (REST phases 01–04 of the quality series). No versio
 - Every streamed document is limited to 8 MB, also when it arrives in one chunk.
 
 ### Added
+- **HOPPE SecureConnect AutoLock (D2-06-40) can be locked and unlocked.** The lock entity answers the handle's unlock protocol over the REST API (`unlock = allowed` unlocks, `notAllowed` locks); it shows *unlocking*/*locking* until the handle reports its lock-bolt, also when the gateway queues the answer for the sleeping handle (status 201). The handle's own request (`unlock = requested`) is the lock attribute `unlock_requested`; an answer from another controller no longer clears it.
 - Diagnostics: `first_device_list_seconds` (time from opening the stream to its first device list), and per cover `last_vertical_movement_time` (the last run duration the gateway reports, if any) and `position_origin` per channel (`device list`, `reported`, `estimated` or `assumed`). Diagnostic values only; they never change state and cause no request.
 - Diagnostics also redact the HomeKit QR setup payload (`homekitQR`).
 - CI tests every change against a fixed Home Assistant 2026.10.2 (with hassfest built from the same core commit and an icon check) in addition to the latest stable release.

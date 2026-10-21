@@ -199,9 +199,6 @@
     }
   },
   "exceptions": {
-    "autolock_read_only": {
-      "message": "Die AutoLock-Steuerung ist bis zur Klärung durch den Hersteller deaktiviert. Es wird nur der gemeldete Schlosszustand angezeigt."
-    },
     "config_entry_not_found": {
       "message": "Es existiert kein Opus-GreenNet-Konfigurationseintrag mit der ID {config_entry_id}."
     },

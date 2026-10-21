@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.opus_greennet.const import DOMAIN
@@ -69,15 +68,26 @@ async def test_handle_positions_and_lock_safety(
                 )
             )
             await wait_until(lambda: hass.states.get(lock).state == value)
-        before = list(gateway.requests)
-        for service in ("lock", "unlock"):
-            with pytest.raises(HomeAssistantError) as error:
-                await hass.services.async_call(
-                    "lock", service, {"entity_id": lock}, blocking=True
-                )
-            assert error.value.translation_key == "autolock_read_only"
-        assert gateway.requests == before
-        assert hass.states.get(lock).state == "locked"
+        # Unlocking answers the handle's unlock protocol ("allowed"); the
+        # state waits for the handle's lock report.
+        await hass.services.async_call(
+            "lock", "unlock", {"entity_id": lock}, blocking=True
+        )
+        assert gateway.requests_to("PUT", "/devices/HANDLE/state")[-1] == {
+            "state": {"functions": [{"key": "unlock", "value": "allowed"}]}
+        }
+        assert hass.states.get(lock).state == "unlocking"
+        await gateway.push(telegram("HANDLE", [{"key": "lock", "value": "unlocked"}]))
+        await wait_until(lambda: hass.states.get(lock).state == "unlocked")
+        await hass.services.async_call(
+            "lock", "lock", {"entity_id": lock}, blocking=True
+        )
+        assert gateway.requests_to("PUT", "/devices/HANDLE/state")[-1] == {
+            "state": {"functions": [{"key": "unlock", "value": "notAllowed"}]}
+        }
+        assert hass.states.get(lock).state == "locking"
+        await gateway.push(telegram("HANDLE", [{"key": "lock", "value": "locked"}]))
+        await wait_until(lambda: hass.states.get(lock).state == "locked")
     else:
         assert (
             er.async_get(hass).async_get_entity_id(
