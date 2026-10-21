@@ -11,6 +11,10 @@ and device change as it happens.
 This module only speaks HTTP. It knows nothing about Home Assistant entities
 and never repeats a request; the coordinator maps its exceptions to
 translated errors.
+
+Phase 1 hardening: redirects are never followed (the Authorization header must
+not leave the configured gateway), every response body is size-bounded, and
+host and port are validated before any URL is built.
 """
 
 from __future__ import annotations
@@ -19,7 +23,9 @@ import asyncio
 import base64
 import codecs
 import heapq
+import ipaddress
 import itertools
+import re
 from collections.abc import AsyncGenerator, Mapping
 from math import isfinite
 from typing import Final
@@ -42,6 +48,9 @@ STREAM_IDLE_TIMEOUT: Final = 900.0
 # Upper bound for one streamed JSON document (the full device list of a large
 # installation is a few hundred kilobytes).
 MAX_DOCUMENT_SIZE: Final = 8 * 1024 * 1024
+# Upper bound for the body of one ordinary (non-stream) response.
+MAX_RESPONSE_SIZE: Final = MAX_DOCUMENT_SIZE
+_READ_CHUNK_SIZE: Final = 64 * 1024
 
 # Queue priorities: lower values are dispatched first. User-initiated control
 # commands must never wait behind status queries, and delayed (background)
@@ -50,6 +59,8 @@ PRIORITY_COMMAND: Final = 0
 PRIORITY_QUERY: Final = 10
 PRIORITY_BACKGROUND: Final = 20
 
+_HOSTNAME_LABEL: Final = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
+
 
 class OpusApiError(Exception):
     """Base class for gateway API failures."""
@@ -57,6 +68,10 @@ class OpusApiError(Exception):
 
 class OpusConnectionError(OpusApiError):
     """The gateway could not be reached or did not answer in time."""
+
+
+class OpusInvalidHostError(OpusConnectionError):
+    """The configured host or port cannot address a gateway."""
 
 
 class OpusTimeoutError(OpusConnectionError):
@@ -89,6 +104,37 @@ class OpusResponseError(OpusApiError):
         self.status = status
         self.http_status = http_status
         self.gateway_status = gateway_status
+
+
+def validate_host(host: str) -> str:
+    """Return ``host`` unchanged if it is a bare IP literal or hostname.
+
+    URLs, paths, credentials, ports, queries, fragments, whitespace and control
+    characters are rejected so that the configured value can only ever select
+    the machine, never alter the request target (SSRF, request smuggling).
+    """
+    if not isinstance(host, str) or not host or host != host.strip():
+        raise OpusInvalidHostError("The gateway host is empty or has whitespace")
+    candidate = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        pass
+    else:
+        return host
+    if host.startswith("[") or len(host) > 253:
+        raise OpusInvalidHostError("The gateway host is not valid")
+    labels = host.rstrip(".").split(".")
+    if not all(_HOSTNAME_LABEL.match(label) for label in labels):
+        raise OpusInvalidHostError("The gateway host is not valid")
+    return host
+
+
+def validate_port(port: int) -> int:
+    """Return ``port`` if it is a valid TCP port number."""
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise OpusInvalidHostError("The gateway port is not valid")
+    return port
 
 
 def response_status(data: JsonObject) -> int:
@@ -319,6 +365,8 @@ class OpusGatewayClient:
         username: str,
         password: str,
     ) -> None:
+        validate_host(host)
+        validate_port(port)
         self._session = session
         self.host = host
         self.port = port
@@ -362,10 +410,11 @@ class OpusGatewayClient:
                 f"{self._base_url}{path}",
                 headers=self._headers,
                 json=body,
+                allow_redirects=False,
                 timeout=aiohttp.ClientTimeout(total=timeout, connect=CONNECT_TIMEOUT),
             ) as response:
                 _raise_for_auth(response)
-                text = await response.text(errors="replace")
+                text = await _read_bounded_text(response)
         except TimeoutError as err:
             raise OpusTimeoutError(f"{method} {path} timed out") from err
         except aiohttp.ClientError as err:
@@ -391,6 +440,7 @@ class OpusGatewayClient:
             async with self._session.get(
                 f"{self._base_url}/devices/stream",
                 headers=self._headers,
+                allow_redirects=False,
                 timeout=aiohttp.ClientTimeout(
                     total=None,
                     connect=CONNECT_TIMEOUT,
@@ -416,6 +466,19 @@ class OpusGatewayClient:
             raise OpusConnectionError(f"The event stream failed: {err}") from err
         except ValueError as err:
             raise OpusResponseError("The event stream contains invalid JSON") from err
+
+
+async def _read_bounded_text(response: aiohttp.ClientResponse) -> str:
+    """Read a response body, refusing more than ``MAX_RESPONSE_SIZE`` bytes."""
+    declared = response.content_length
+    if declared is not None and declared > MAX_RESPONSE_SIZE:
+        raise OpusResponseError("The gateway response is too large")
+    body = bytearray()
+    async for chunk in response.content.iter_chunked(_READ_CHUNK_SIZE):
+        body.extend(chunk)
+        if len(body) > MAX_RESPONSE_SIZE:
+            raise OpusResponseError("The gateway response is too large")
+    return body.decode("utf-8", errors="replace")
 
 
 def _raise_for_auth(response: aiohttp.ClientResponse) -> None:
