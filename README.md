@@ -146,17 +146,17 @@ measurement of the window sash. For Cover Control Automation, assign the Open
 and Tilted binary sensors to its respective window-contact inputs.
 
 D2-06-40 also exposes the reported lock state independently of handle position,
-an unlock-request sensor, and a mechanics-fault sensor. The **AutoLock** lock
-entity locks and unlocks the handle over the REST API. When the handle's button
-is pressed, the handle asks the gateway whether it may unlock
-(`unlock = requested`, shown as the lock attribute `unlock_requested` and the
-unlock-request sensor). Unlock answers `unlock = allowed` and lock answers
-`notAllowed`; a locked handle cannot be turned. The handle sleeps between uses,
-so the gateway may queue the answer (status 201) until it wakes up, e.g. at the
-next button press. Until the handle reports its lock-bolt, the entity shows
-*unlocking* or *locking* (up to 1 minute, or 10 minutes for a queued answer).
-The state always follows the reported lock-bolt; a closed handle does not
-imply a locked handle.
+an unlock-request sensor, a mechanics-fault sensor and a diagnostic **Lock
+bolt** binary sensor (the reported lock-bolt, on = unlocked). The **AutoLock**
+lock entity sets the answer the gateway gives the handle: when the handle's
+button is pressed, the handle asks whether it may be unlocked
+(`unlock = requested`, attribute `unlock_requested`). *Unlocked* stores
+`unlock = allowed`: the button lights green and the handle can be turned.
+*Locked* stores `notAllowed`: the button lights red and the handle stays
+locked. The gateway keeps this answer as the handle's target state (it
+acknowledges with status 202) and uses it at every request, also while the
+handle sleeps; the lock entity shows that stored answer, read from the device
+list at start-up. The attribute `bolt_locked` repeats the reported lock-bolt.
 
 ### Water sensors (F6-05-01)
 

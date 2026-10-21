@@ -146,6 +146,9 @@ class EnOceanChannel:
     handle_state: str | None = None
     is_locked: bool | None = None
     unlock_request: bool | None = None
+    # Answer the gateway gives the handle's next unlock request (its stored
+    # target state): True = allowed (green), False = not allowed (red).
+    unlock_allowed: bool | None = None
     mechanics_fault: bool | None = None
     # Climate fields
     temperature: float | None = None
@@ -557,6 +560,15 @@ class EnOceanDevice:
         channel.locking_mode = locking_mode
         return True
 
+    def apply_unlock_permission_estimate(
+        self, snapshot: ChannelStateSnapshot, allowed: bool
+    ) -> bool:
+        """Assume an accepted unlock answer; return whether it applied."""
+        if (channel := self._estimate_channel(snapshot)) is None:
+            return False
+        channel.unlock_allowed = allowed
+        return True
+
     def apply_cover_tilt_estimate(
         self, snapshot: ChannelStateSnapshot, angle: int
     ) -> bool:
@@ -878,9 +890,11 @@ class EnOceanDevice:
                 )
 
             elif key == "unlockRequest" or (key == KEY_UNLOCK and self.has_autolock):
-                # "allowed"/"notAllowed" is a controller's answer ("to"), not
-                # a request of the handle; it leaves the request state alone.
-                if value not in (UNLOCK_ALLOWED, UNLOCK_NOT_ALLOWED):
+                # "allowed"/"notAllowed" is the answer to the handle (a "to"
+                # telegram or the gateway's target state), not a request.
+                if value in (UNLOCK_ALLOWED, UNLOCK_NOT_ALLOWED):
+                    channel.unlock_allowed = value == UNLOCK_ALLOWED
+                else:
                     channel.unlock_request = self._parse_detector_boolean(
                         value, "requested", "notRequested"
                     )

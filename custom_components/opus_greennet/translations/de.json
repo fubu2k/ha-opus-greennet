@@ -115,6 +115,9 @@
       },
       "sensor_error": {
         "name": "Sensorfehler"
+      },
+      "lock_bolt": {
+        "name": "Riegel"
       }
     },
     "cover": {

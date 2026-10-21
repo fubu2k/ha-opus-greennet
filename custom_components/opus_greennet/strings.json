@@ -115,6 +115,9 @@
       },
       "sensor_error": {
         "name": "Sensor error"
+      },
+      "lock_bolt": {
+        "name": "Lock bolt"
       }
     },
     "cover": {

@@ -57,7 +57,10 @@ async def test_handle_positions_and_lock_safety(
         )
         await wait_until(lambda: hass.states.get(state).state == "closed")
         assert hass.states.get(lock).state == "unknown"
-        for value in ("unlocked", "locked"):
+        # The reported lock-bolt is a binary sensor (on = unlocked); the lock
+        # entity is the gateway's stored answer to the unlock request.
+        bolt = await wait_for_entity(hass, "binary_sensor", "AABB0011_HANDLE_lock_bolt")
+        for value, expected in (("unlocked", "on"), ("locked", "off")):
             await gateway.push(
                 telegram(
                     "HANDLE",
@@ -67,27 +70,29 @@ async def test_handle_positions_and_lock_safety(
                     ],
                 )
             )
-            await wait_until(lambda: hass.states.get(lock).state == value)
-        # Unlocking answers the handle's unlock protocol ("allowed"); the
-        # state waits for the handle's lock report.
+            await wait_until(lambda: hass.states.get(bolt).state == expected)
+        assert hass.states.get(lock).state == "unknown"
+        # The gateway stores the answer for the sleeping handle (status 202).
+        gateway.responses["/devices/HANDLE/state"] = {"header": {"httpStatus": 202}}
         await hass.services.async_call(
             "lock", "unlock", {"entity_id": lock}, blocking=True
         )
         assert gateway.requests_to("PUT", "/devices/HANDLE/state")[-1] == {
             "state": {"functions": [{"key": "unlock", "value": "allowed"}]}
         }
-        assert hass.states.get(lock).state == "unlocking"
-        await gateway.push(telegram("HANDLE", [{"key": "lock", "value": "unlocked"}]))
-        await wait_until(lambda: hass.states.get(lock).state == "unlocked")
+        assert hass.states.get(lock).state == "unlocked"
         await hass.services.async_call(
             "lock", "lock", {"entity_id": lock}, blocking=True
         )
         assert gateway.requests_to("PUT", "/devices/HANDLE/state")[-1] == {
             "state": {"functions": [{"key": "unlock", "value": "notAllowed"}]}
         }
-        assert hass.states.get(lock).state == "locking"
-        await gateway.push(telegram("HANDLE", [{"key": "lock", "value": "locked"}]))
-        await wait_until(lambda: hass.states.get(lock).state == "locked")
+        assert hass.states.get(lock).state == "locked"
+        # The answer the gateway sends the handle ("to") updates it as well.
+        await gateway.push(
+            telegram("HANDLE", [{"key": "unlock", "value": "allowed"}], direction="to")
+        )
+        await wait_until(lambda: hass.states.get(lock).state == "unlocked")
     else:
         assert (
             er.async_get(hass).async_get_entity_id(

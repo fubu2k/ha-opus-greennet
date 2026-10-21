@@ -48,6 +48,8 @@ def _handle(eep: str) -> dict:
     return {
         "deviceId": "HANDLE",
         "eeps": [{"eep": eep}],
+        # The gateway's stored answer to the next unlock request.
+        "targetState": [{"key": "unlock", "value": "notAllowed"}],
         "states": [
             {"key": key, "value": value} for key, value in HANDLE_STATES.items()
         ],

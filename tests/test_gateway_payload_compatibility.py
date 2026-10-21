@@ -193,11 +193,12 @@ async def test_hoppe_original_keys_reach_position_entities(
     assert hass.states.get(tilt).state == "on"
     channel = entry.runtime_data.coordinator.devices["HANDLE"].channels[0]
     if eep == "D2-06-40":
-        lock = await wait_for_entity(hass, "lock", "AABB0011_HANDLE_autolock")
+        bolt = await wait_for_entity(hass, "binary_sensor", "AABB0011_HANDLE_lock_bolt")
         fault = await wait_for_entity(
             hass, "binary_sensor", "AABB0011_HANDLE_mechanics_fault"
         )
-        assert hass.states.get(lock).state == "unlocked"
+        # LOCK device class: on = unlocked.
+        assert hass.states.get(bolt).state == "on"
         assert channel.unlock_request is True
         assert hass.states.get(request).state == "requested"
         assert hass.states.get(fault).state == "on"
