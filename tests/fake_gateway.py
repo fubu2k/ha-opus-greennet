@@ -75,6 +75,9 @@ class FakeGateway:
         self.username = "admin"
         self.password = password
         self.devices: list[dict[str, Any]] = []
+        # Gateway profiles per device ID (GET /devices/<id>/profile); devices
+        # without an entry answer like a gateway without the endpoint.
+        self.profiles: dict[str, dict[str, Any]] = {}
         self.uptime: int | str = 3600
         self.system_info: dict[str, Any] = {}
         self.accept_auth = True
@@ -252,6 +255,11 @@ class FakeGateway:
                 return {
                     "header": {**ok, "content": "configuration"},
                     "configuration": {"deviceId": parts[1], "parameters": []},
+                }
+            if parts[2] == "profile" and parts[1] in self.profiles:
+                return {
+                    "header": {**ok, "content": "profile"},
+                    "profile": self.profiles[parts[1]],
                 }
             if parts[2] == "parameters":
                 return {"header": {**ok, "content": "parameters"}, "parameters": []}

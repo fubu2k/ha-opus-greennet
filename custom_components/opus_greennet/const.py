@@ -15,28 +15,56 @@ DEFAULT_PORT: Final = 8080
 DEFAULT_USERNAME: Final = "admin"
 
 # EEP (EnOcean Equipment Profile) to entity type mappings
-# Format: EEP prefix -> (entity_type, description)
+# Format: EEP -> (entity_type, description)
+#
+# D2-01 types follow the EEP specification (EnOcean Alliance EEP viewer, the
+# same profile format the gateway serves under /devices/<id>/profile). Their
+# number is not a channel count: most types are single-channel actuators that
+# differ in measurement and local-control features. When the gateway profile
+# of a device can be read, it decides switch vs. dimmer and the channel count
+# (``EnOceanDevice.profile``); this table is the fallback.
 EEP_MAPPINGS: Final = {
-    # Electronic Switch Actuators (D2-01-xx)
-    "D2-01-00": ("switch", "Electronic Switch Actuator, 1 Channel"),
-    "D2-01-01": ("switch", "Electronic Switch Actuator, 1 Channel with Energy"),
-    "D2-01-02": ("light", "Dimmer, 1 Channel"),
-    "D2-01-03": ("light", "Dimmer, 1 Channel with Energy"),
-    "D2-01-04": ("switch", "Electronic Switch Actuator, 2 Channels"),
-    "D2-01-05": ("switch", "Electronic Switch Actuator, 2 Channels with Energy"),
-    "D2-01-06": ("light", "Dimmer, 2 Channels"),
-    "D2-01-07": ("light", "Dimmer, 2 Channels with Energy"),
-    "D2-01-08": ("switch", "Electronic Switch Actuator, 4 Channels"),
-    "D2-01-09": ("switch", "Electronic Switch Actuator, 4 Channels with Energy"),
-    "D2-01-0A": ("light", "Dimmer, 4 Channels"),
-    "D2-01-0B": ("light", "Dimmer, 4 Channels with Energy"),
-    "D2-01-0C": ("switch", "Pilot Wire Controller"),
-    "D2-01-0D": ("switch", "Electronic Switch Actuator, 8 Channels"),
-    "D2-01-0E": ("switch", "Electronic Switch Actuator, 8 Channels with Energy"),
-    "D2-01-0F": ("light", "Dimmer, 8 Channels"),
-    "D2-01-10": ("light", "Dimmer, 8 Channels with Energy"),
-    "D2-01-11": ("switch", "Electronic Switch Actuator, 2 Channels with Local Control"),
-    "D2-01-12": ("light", "Dimmer, 2 Channels with Local Control"),
+    # Electronic switches and dimmers (D2-01-xx)
+    "D2-01-00": ("switch", "Switch, 1 channel, energy measurement, local control"),
+    "D2-01-01": ("switch", "Switch, 1 channel, local control"),
+    "D2-01-02": ("light", "Dimmer, 1 channel, energy measurement, local control"),
+    "D2-01-03": ("light", "Dimmer, 1 channel, local control"),
+    "D2-01-04": (
+        "light",
+        "Dimmer, 1 channel, energy and power measurement, local control",
+    ),
+    "D2-01-05": (
+        "light",
+        "Dimmer, 1 channel, energy and power measurement, local control",
+    ),
+    "D2-01-06": ("switch", "Switch, 1 channel, energy measurement"),
+    "D2-01-07": ("switch", "Switch, 1 channel"),
+    "D2-01-08": (
+        "switch",
+        "Switch, 1 channel, energy and power measurement, local control",
+    ),
+    "D2-01-09": (
+        "light",
+        "Dimmer, 1 channel, energy and power measurement, local control",
+    ),
+    "D2-01-0A": ("switch", "Switch, 1 channel, power failure detection, local control"),
+    "D2-01-0B": (
+        "switch",
+        "Switch, 1 channel, energy and power measurement, power failure detection, "
+        "local control",
+    ),
+    "D2-01-0C": (
+        "switch",
+        "Pilot wire controller, energy and power measurement, local control",
+    ),
+    "D2-01-0D": ("switch", "Switch, 1 channel, local control"),
+    # D2-01-0E could not be checked against the EEP viewer; single channel as
+    # in the EEP specification, without assumed local control.
+    "D2-01-0E": ("switch", "Switch, 1 channel"),
+    "D2-01-0F": ("switch", "Switch, 1 channel, external button, local control"),
+    "D2-01-10": ("switch", "Switch, 2 channels, energy measurement"),
+    "D2-01-11": ("switch", "Switch, 2 channels"),
+    "D2-01-12": ("switch", "Switch, 2 channels, external button"),
     # Blinds Control (D2-05-xx)
     "D2-05-00": ("cover", "Blinds Control for Position and Angle"),
     "D2-05-01": ("cover", "Blinds Control for Position"),
@@ -69,6 +97,45 @@ EEP_MAPPINGS: Final = {
     "F6-05-01": ("binary_sensor", "Liquid Leakage Sensor"),
 }
 
+# Fallback capabilities of the D2-01 types (EEP specification), used only
+# when the gateway profile of a device could not be read.
+D2_01_DIMMER_EEPS: Final = frozenset(
+    {"D2-01-02", "D2-01-03", "D2-01-04", "D2-01-05", "D2-01-09"}
+)
+D2_01_CHANNEL_COUNTS: Final = {"D2-01-10": 2, "D2-01-11": 2, "D2-01-12": 2}
+LOCAL_CONTROL_EEPS: Final = frozenset(
+    {
+        "D2-01-00",
+        "D2-01-01",
+        "D2-01-02",
+        "D2-01-03",
+        "D2-01-04",
+        "D2-01-05",
+        "D2-01-08",
+        "D2-01-09",
+        "D2-01-0A",
+        "D2-01-0B",
+        "D2-01-0C",
+        "D2-01-0D",
+        "D2-01-0F",
+    }
+)
+# Gateway dimming (A5-38-08) has no D2-01 profile; it stays a dimmer.
+GATEWAY_DIMMER_EEPS: Final = frozenset({"A5-38-08"})
+
+# Blinds with the "Go to Position and Angle" locking mode and repositioning.
+LOCKING_MODE_EEPS: Final = frozenset({"D2-05-00", "D2-05-02"})
+REPOSITIONING_EEPS: Final = frozenset({"D2-05-00", "D2-05-02"})
+
+# Presence detectors: A5-07-03 reports illumination, A5-07-01 does not.
+ILLUMINATION_EEPS: Final = frozenset({"A5-07-03"})
+ERROR_CODE_EEPS: Final = frozenset({"A5-07-01", "A5-07-03"})
+# Upper end of the A5-07-03 illumination range; "overRange" lies above it.
+ILLUMINATION_MAX_LUX: Final = 1000.0
+
+# Rocker switch profiles that may also be announced by actuators.
+ROCKER_EEP_PREFIXES: Final = ("F6-02-", "F6-03-")
+
 # Temperature range (degC) per A5-04 profile; heating profiles use 0..40.
 A5_04_TEMPERATURE_RANGES: Final = {
     "A5-04-01": (0, 40),
@@ -97,6 +164,23 @@ RAMPING_MODE_SWITCH: Final = "switch"
 RAMPING_MODE_FADE: Final = "rampingTime1"
 KEY_POSITION: Final = "position"
 KEY_STOP: Final = "stop"
+# D2-05 "Go to Position and Angle": blockage and reference run.
+KEY_LOCKING_MODE: Final = "lockingMode"
+LOCKING_MODE_BLOCK: Final = "block"
+LOCKING_MODE_UNBLOCK: Final = "unblock"
+LOCKING_MODE_ALARM: Final = "alarm"  # D2-05-00 only
+LOCKING_MODES: Final = (LOCKING_MODE_BLOCK, LOCKING_MODE_UNBLOCK, LOCKING_MODE_ALARM)
+KEY_REPOSITIONING: Final = "repositioning"
+REPOSITIONING_DIRECT: Final = "direct"
+REPOSITIONING_FIRST_UP: Final = "firstUp"
+REPOSITIONING_FIRST_DOWN: Final = "firstDown"
+REPOSITIONING_MODES: Final = (
+    REPOSITIONING_DIRECT,
+    REPOSITIONING_FIRST_UP,
+    REPOSITIONING_FIRST_DOWN,
+)
+# Value of a cover position or angle the device cannot report right now.
+VALUE_UNKNOWN: Final = "unknown"
 KEY_ANGLE: Final = "angle"
 KEY_ROTATION_TIME: Final = "rotationTime"
 KEY_VERTICAL_MOVEMENT_TIME: Final = "verticalMovementTime"
@@ -108,6 +192,10 @@ KEY_ENERGY: Final = "energy"
 KEY_POWER: Final = "power"
 KEY_LIQUID_DETECTED: Final = "liquidDetected"
 KEY_CONTACT: Final = "contact"
+KEY_ILLUMINATION: Final = "illumination"
+VALUE_OVER_RANGE: Final = "overRange"
+KEY_ERROR_CODE: Final = "errorCode"
+ERROR_CODE_NONE: Final = "noError"
 
 # Climate function keys
 KEY_TEMPERATURE: Final = "temperature"
@@ -130,12 +218,24 @@ KEY_ACTUATOR_NOT_RESPONDING: Final = "actuatorNotResponding"
 KEY_MISSING_TEMPERATURE: Final = "missingTemperature"
 KEY_CIRCUIT_IN_USE: Final = "circuitInUse"
 
-# Rocker switch button keys (F6-02-xx / F6-03-xx profiles)
+# Rocker switch button keys. F6-02-xx has the rockers A and B, F6-03-xx
+# additionally C and D.
+ROCKER_2_BUTTON_KEYS: Final = (
+    "buttonA0",
+    "buttonAI",
+    "buttonB0",
+    "buttonBI",
+    "multipleButtons",
+)
 BUTTON_KEYS: Final = (
     "buttonA0",
     "buttonAI",
     "buttonB0",
     "buttonBI",
+    "buttonC0",
+    "buttonCI",
+    "buttonD0",
+    "buttonDI",
     "multipleButtons",
 )
 BUTTON_VALUE_PRESSED: Final = "pressed"
@@ -203,6 +303,8 @@ KNOWN_STATE_KEYS: Final = frozenset(
         "actuatorNotResponding",
         "missingTemperature",
         "circuitInUse",
+        KEY_LOCKING_MODE,
+        KEY_ERROR_CODE,
         *BUTTON_KEYS,
     }
 )

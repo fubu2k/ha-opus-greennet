@@ -50,7 +50,13 @@ def test_rocker_event_is_a_button_with_unchanged_metadata(eep: str) -> None:
 
     assert entity.device_class is EventDeviceClass.BUTTON
     assert entity.unique_id == "AABB0011_ROCKER1"
-    assert entity.event_types == EVENT_TYPES
+    # F6-02 rockers have the rockers A and B, F6-03 rockers A to D.
+    expected = (
+        EVENT_TYPES
+        if eep == "F6-03-01"
+        else [t for t in EVENT_TYPES if not t.startswith(("buttonC", "buttonD"))]
+    )
+    assert entity.event_types == expected
     assert entity.entity_category is None
     assert entity.entity_registry_enabled_default is True
 

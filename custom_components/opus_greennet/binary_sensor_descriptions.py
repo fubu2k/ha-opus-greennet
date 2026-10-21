@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from homeassistant.components.binary_sensor.const import BinarySensorDeviceClass
 from homeassistant.const import EntityCategory
 
-from .const import DEFAULT_CHANNEL
+from .const import DEFAULT_CHANNEL, ERROR_CODE_NONE
 from .enocean_device import EnOceanChannel, EnOceanDevice
 
 
@@ -38,6 +38,13 @@ def diagnostic_value(
     channel = device.channels.get(DEFAULT_CHANNEL)
     value = read(channel) if channel is not None else None
     return None if value is None else value != "reset"
+
+
+def error_code_problem(device: EnOceanDevice) -> bool | None:
+    """Report a problem for an error code, none for ``noError``."""
+    channel = device.channels.get(DEFAULT_CHANNEL)
+    code = channel.error_code if channel is not None else None
+    return None if code is None else code != ERROR_CODE_NONE
 
 
 BINARY_SENSOR_DESCRIPTIONS = (
@@ -109,5 +116,26 @@ BINARY_SENSOR_DESCRIPTIONS = (
         applies_to=lambda device: device.is_contact_sensor,
         value_fn=lambda device: channel_boolean(device, lambda c: c.contact),
         device_class=BinarySensorDeviceClass.OPENING,
+    ),
+    # On = the actuator's own buttons and inputs may switch it (D2-01
+    # "localControl"). A setting, not a state: diagnostic, disabled for new
+    # registry entries.
+    OpusBinarySensorDescription(
+        key="local_control",
+        translation_key="local_control",
+        applies_to=lambda device: device.has_local_control,
+        value_fn=lambda device: channel_boolean(device, lambda c: c.local_control),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_by_default=False,
+    ),
+    # A5-07 presence detectors report "noError" or an error code (251-255)
+    # in their supply voltage byte.
+    OpusBinarySensorDescription(
+        key="error_code",
+        translation_key="sensor_error",
+        applies_to=lambda device: device.reports_error_code,
+        value_fn=error_code_problem,
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
 )

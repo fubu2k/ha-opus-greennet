@@ -31,6 +31,14 @@
           "requested": "mdi:lock-clock"
         }
       }
+    },
+    "button": {
+      "reference_run_up": {
+        "default": "mdi:arrow-collapse-up"
+      },
+      "reference_run_down": {
+        "default": "mdi:arrow-collapse-down"
+      }
     }
   },
   "services": {
@@ -45,6 +53,9 @@
     },
     "set_device_configuration": {
       "service": "mdi:file-upload-outline"
+    },
+    "set_cover_position": {
+      "service": "mdi:blinds"
     }
   }
 }

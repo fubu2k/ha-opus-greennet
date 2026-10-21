@@ -114,7 +114,9 @@ async def test_presence_states_and_telemetry(
     entry = await setup_bridge(hass, gateway)
     motion = await wait_for_entity(hass, "binary_sensor", "AABB0011_SMS_motion")
     values = {}
-    for suffix in ("illuminance", "supply_voltage", "battery_level"):
+    # Only A5-07-03 reports illumination (EEP profile); A5-07-01 has no sensor.
+    readings = ("illuminance",) if eep == "A5-07-03" else ()
+    for suffix in (*readings, "supply_voltage", "battery_level"):
         values[suffix] = await wait_for_entity(hass, "sensor", f"AABB0011_SMS_{suffix}")
         assert hass.states.get(values[suffix]).state == "unknown"
     assert hass.states.get(motion).state == "unknown"
@@ -139,6 +141,8 @@ async def test_presence_states_and_telemetry(
         ("supply_voltage", 3.2, "V"),
         ("battery_level", 85, "%"),
     ]:
+        if suffix not in values:
+            continue
         state = hass.states.get(values[suffix])
         assert float(state.state) == value
         assert state.attributes["unit_of_measurement"] == unit
@@ -152,7 +156,8 @@ async def test_presence_states_and_telemetry(
     assert float(hass.states.get(values["battery_level"]).state) == 82
     # The metadata refresh keeps the live readings from the stream.
     assert hass.states.get(motion).state == "off"
-    assert float(hass.states.get(values["illuminance"]).state) == 200
+    if "illuminance" in values:
+        assert float(hass.states.get(values["illuminance"]).state) == 200
 
 
 @pytest.mark.parametrize(

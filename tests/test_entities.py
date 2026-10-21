@@ -38,6 +38,7 @@ from custom_components.opus_greennet.cover import (
     async_setup_entry as async_setup_covers,
 )
 from custom_components.opus_greennet.enocean_device import (
+    DeviceProfile,
     EnOceanChannel,
     EnOceanDevice,
 )
@@ -84,6 +85,17 @@ def _device(eep: str, *, device_id: str = "DEV1") -> EnOceanDevice:
     )
 
 
+def _two_channel_dimmer() -> EnOceanDevice:
+    """A two-channel D2-01 dimmer as its gateway profile declares it."""
+    device = _device("D2-01-12")
+    device.profile = DeviceProfile(
+        to_keys=frozenset({"channel", "dimValue", "rampingMode"}),
+        from_keys=frozenset({"channel", "dimValue"}),
+        channels=2,
+    )
+    return device
+
+
 def _coordinator() -> MagicMock:
     coordinator = MagicMock()
     coordinator.available = True
@@ -111,7 +123,7 @@ def _entry(coordinator: MagicMock) -> SimpleNamespace:
 @pytest.mark.asyncio
 async def test_light_properties_and_commands() -> None:
     coordinator = _coordinator()
-    device = _device("D2-01-06")
+    device = _two_channel_dimmer()
     device.channels[1] = EnOceanChannel(channel_id=1, is_on=True, brightness=50)
     entity = OpusGreenNetLight(
         coordinator, EAG_ID, GATEWAY_DEVICE_ID, device, channel_id=1
@@ -447,7 +459,7 @@ def test_keeps_single_channel_registry_entity() -> None:
 @pytest.mark.parametrize(
     ("setup", "eep", "expected_count"),
     [
-        (async_setup_lights, "D2-01-06", 2),
+        (async_setup_lights, "D2-01-12", 2),
         (async_setup_switches, "D2-01-11", 2),
         (async_setup_covers, "D2-05-00", 1),
         (async_setup_climate, "D1-4B-06", 1),
@@ -461,7 +473,9 @@ async def test_platform_setup_adds_expected_entities(
     setup, eep: str, expected_count: int
 ) -> None:
     coordinator = _coordinator()
-    coordinator.devices = {"DEV1": _device(eep)}
+    coordinator.devices = {
+        "DEV1": _two_channel_dimmer() if eep == "D2-01-12" else _device(eep)
+    }
     entry = _entry(coordinator)
     async_add_entities = MagicMock()
 
@@ -780,7 +794,7 @@ async def test_feedback_during_command_ack_wins_over_optimistic_state(
 
 async def test_other_channel_feedback_does_not_block_optimistic_state():
     coordinator = _coordinator()
-    device = _device("D2-01-04")
+    device = _device("D2-01-11")
     device.channels[0] = EnOceanChannel(channel_id=0, is_on=False)
     entity = OpusGreenNetSwitch(coordinator, EAG_ID, GATEWAY_DEVICE_ID, device)
     entity.async_write_ha_state = MagicMock()

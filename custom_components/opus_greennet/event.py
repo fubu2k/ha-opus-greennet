@@ -29,12 +29,18 @@ PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
 
-# One event type per (button, action) pair, e.g. "buttonA0_pressed".
-EVENT_TYPES: list[str] = [
-    f"{button}_{action}"
-    for button in BUTTON_KEYS
-    for action in (BUTTON_VALUE_PRESSED, BUTTON_VALUE_RELEASED)
-]
+
+def event_types(buttons: tuple[str, ...]) -> list[str]:
+    """Return one event type per (button, action) pair, e.g. "buttonA0_pressed"."""
+    return [
+        f"{button}_{action}"
+        for button in buttons
+        for action in (BUTTON_VALUE_PRESSED, BUTTON_VALUE_RELEASED)
+    ]
+
+
+# Every event type any rocker can report (F6-03-xx: rockers A to D).
+EVENT_TYPES: list[str] = event_types(BUTTON_KEYS)
 
 
 async def async_setup_entry(
@@ -49,8 +55,8 @@ async def async_setup_entry(
 
     @callback
     def async_add_event(device: EnOceanDevice) -> None:
-        """Add an event entity for a discovered device."""
-        if device.entity_type != "event":
+        """Add an event entity for a rocker or an actuator's rocker buttons."""
+        if device.entity_type != "event" and not device.has_secondary_rocker:
             return
 
         _LOGGER.debug(
@@ -87,7 +93,6 @@ class OpusGreenNetEvent(OpusGreenNetEntity, EventEntity):
     """Representation of an Opus GreenNet rocker switch event."""
 
     _attr_has_entity_name = True
-    _attr_event_types = EVENT_TYPES
     # Rockers are physical push buttons. Registry and frontend metadata only:
     # unique ID, event types, name and enablement stay unchanged, and a
     # user-chosen icon still takes precedence.
@@ -102,9 +107,16 @@ class OpusGreenNetEvent(OpusGreenNetEntity, EventEntity):
     ) -> None:
         """Initialize the event entity."""
         super().__init__(coordinator, eag_id, gateway_device_id, device)
-
-        self._attr_unique_id = f"{eag_id}_{device.device_id}"
-        self._attr_name = None  # Use device name
+        self._attr_event_types = event_types(device.button_keys)
+        if device.entity_type == "event":
+            # A rocker switch: the event entity is the device itself.
+            self._attr_unique_id = f"{eag_id}_{device.device_id}"
+            self._attr_name = None  # Use device name
+        else:
+            # Buttons of an actuator: the plain ID belongs to its switch,
+            # light or cover entity.
+            self._attr_unique_id = f"{eag_id}_{device.device_id}_buttons"
+            self._attr_translation_key = "buttons"
 
     @callback
     def _handle_state_update(self, device: EnOceanDevice) -> None:
@@ -121,7 +133,7 @@ class OpusGreenNetEvent(OpusGreenNetEntity, EventEntity):
             return
 
         event_type = f"{button}_{action}"
-        if event_type not in EVENT_TYPES:
+        if event_type not in self._attr_event_types:
             _LOGGER.debug(
                 "Ignoring unknown rocker event %s for device %s",
                 event_type,

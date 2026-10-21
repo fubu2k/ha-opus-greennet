@@ -109,6 +109,12 @@
       },
       "mechanics_fault": {
         "name": "Mechanics fault"
+      },
+      "local_control": {
+        "name": "Local control"
+      },
+      "sensor_error": {
+        "name": "Sensor error"
       }
     },
     "cover": {
@@ -165,11 +171,27 @@
     "switch": {
       "channel": {
         "name": "Channel {channel}"
+      },
+      "blockage": {
+        "name": "Blockage"
       }
     },
     "lock": {
       "autolock": {
         "name": "AutoLock"
+      }
+    },
+    "button": {
+      "reference_run_up": {
+        "name": "Reference run via top"
+      },
+      "reference_run_down": {
+        "name": "Reference run via bottom"
+      }
+    },
+    "event": {
+      "buttons": {
+        "name": "Buttons"
       }
     }
   },
@@ -212,6 +234,9 @@
     },
     "wrong_gateway": {
       "message": "The configured address answers as a different OPUS gateway."
+    },
+    "repositioning_not_supported": {
+      "message": "Device {device_id} is not a blind with this channel and positioning mode."
     }
   },
   "services": {
@@ -270,6 +295,32 @@
         }
       },
       "name": "Set device configuration"
+    },
+    "set_cover_position": {
+      "name": "Set blind position",
+      "description": "Moves a D2-05 blind to a position, optionally after a reference run to an end position that recalibrates its position tracking.",
+      "fields": {
+        "device_id": {
+          "name": "Device ID",
+          "description": "EURID of the blind."
+        },
+        "position": {
+          "name": "Position",
+          "description": "Target position in percent, 100 is open and 0 is closed (Home Assistant scale)."
+        },
+        "repositioning": {
+          "name": "Reference run",
+          "description": "Drive to an end position first. Direct moves without a reference run."
+        },
+        "channel": {
+          "name": "Channel",
+          "description": "Output channel of the blind actuator."
+        },
+        "config_entry_id": {
+          "name": "Gateway",
+          "description": "Gateway to use. Select one when more than one gateway is loaded."
+        }
+      }
     }
   },
   "issues": {
@@ -282,6 +333,15 @@
             "description": "While adopting the upstream unique IDs, the integration found two registry entries for the same device and gateway. It kept your existing entity {preserved_entity_id} with its entity ID, name and settings, and removed the duplicate entity {removed_entity_id}.\n\nAutomations, scripts, scenes and dashboards that still use {removed_entity_id} no longer work. Replace that entity ID with {preserved_entity_id}, then select Submit to dismiss this message. Nothing is sent to the gateway or the device."
           }
         }
+      }
+    }
+  },
+  "selector": {
+    "repositioning": {
+      "options": {
+        "direct": "Direct",
+        "first_up": "First up (top end position)",
+        "first_down": "First down (bottom end position)"
       }
     }
   }

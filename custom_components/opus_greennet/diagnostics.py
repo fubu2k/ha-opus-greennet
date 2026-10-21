@@ -182,6 +182,14 @@ async def async_get_config_entry_diagnostics(
                     channel_id: asdict(channel)
                     for channel_id, channel in device.channels.items()
                 },
+                # Where type and channels come from: the gateway profile read
+                # at setup, or the EEP tables when it could not be read.
+                "capabilities": {
+                    "source": "gateway profile" if device.profile else "EEP table",
+                    "entity_type": device.entity_type,
+                    "channel_count": device.channel_count,
+                    "dimmable": device.is_dimmable,
+                },
             }
         )
         if isinstance(movement_times, dict):

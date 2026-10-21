@@ -55,16 +55,24 @@ from .const import (
     COVER_MOVEMENT_GRACE_SECONDS,
     COVER_RECONCILIATION_DELAYS,
     DOMAIN,
+    KEY_ANGLE,
     KEY_CHANNEL,
     KEY_DIMMER,
+    KEY_LOCKING_MODE,
     KEY_POSITION,
     KEY_QUERY,
     KEY_RAMPING_MODE,
+    KEY_REPOSITIONING,
+    KEY_ROTATION_TIME,
     KEY_STOP,
+    KEY_VERTICAL_MOVEMENT_TIME,
     RAMPING_MODE_FADE,
     RAMPING_MODE_SWITCH,
+    REPOSITIONING_FIRST_DOWN,
+    REPOSITIONING_FIRST_UP,
+    VALUE_UNKNOWN,
 )
-from .enocean_device import EnOceanDevice
+from .enocean_device import DeviceProfile, EnOceanDevice
 from .wire import JsonObject, WireFunction, WireMapping, as_object, object_items
 
 _LOGGER = logging.getLogger(__name__)
@@ -247,6 +255,11 @@ class OpusGreenNetCoordinator:
         # background check is sent only while its channel is listed here;
         # feedback or a newer command removes it before the request is sent.
         self._reconcile_needed: set[tuple[str, int]] = set()
+        # Gateway profiles per announced EEP combination, read once at setup
+        # (GET /devices/<id>/profile, no radio telegram). Devices with the
+        # same EEPs share one profile. None marks a profile that could not be
+        # read; such devices use the EEP tables.
+        self.profiles: dict[tuple[str, ...], DeviceProfile | None] = {}
 
     # ──────────────────────────────────────────────────────────────────────
     # Lifecycle
@@ -289,6 +302,9 @@ class OpusGreenNetCoordinator:
             if not first.done():
                 first.cancel()
         self.first_device_list_seconds = round(monotonic() - opened_at, 3)
+        # Entities are created after setup returns, so their type and channel
+        # count can follow the gateway profiles read here.
+        await self._async_load_profiles()
         _LOGGER.debug(
             "OPUS gateway %s sent its first device list after %.3f s",
             self.eag_id,
@@ -560,6 +576,40 @@ class OpusGreenNetCoordinator:
                 self._async_refresh_device_list(), "device list refresh"
             )
 
+    async def _async_load_profiles(self) -> None:
+        """Read one gateway profile per announced EEP combination.
+
+        The profile is static gateway data (no radio telegram). A failure only
+        means the EEP tables decide for these devices. Devices paired later
+        take a profile read here when their EEPs match, otherwise the tables;
+        a reload reads the profiles again.
+        """
+        samples: dict[tuple[str, ...], str] = {}
+        for device in self.devices.values():
+            signature = device.eep_names
+            if signature and signature not in self.profiles:
+                samples.setdefault(signature, device.device_id)
+        for signature, device_id in samples.items():
+            profile: DeviceProfile | None = None
+            try:
+                profile = protocol.device_profile(
+                    await self.client.async_get(
+                        OpusGatewayClient.device_path(device_id, "profile")
+                    )
+                )
+            except OpusAuthError:
+                raise
+            except OpusApiError as err:
+                _LOGGER.debug(
+                    "Could not read the OPUS profile of %s (%s): %s",
+                    device_id,
+                    ", ".join(signature),
+                    err,
+                )
+            self.profiles[signature] = profile
+        for device in self.devices.values():
+            device.profile = self.profiles.get(device.eep_names)
+
     async def _async_refresh_device_list(self) -> None:
         """Refresh metadata and discover newly paired devices."""
         if not self.available:
@@ -635,6 +685,7 @@ class OpusGreenNetCoordinator:
         was_known = existing is not None and bool(existing.eeps)
         if existing is None:
             device = listed
+            device.profile = self.profiles.get(device.eep_names)
         else:
             # Update in place (REST phase 02, E6/B-4): channels, the last
             # command error and update timestamps stay on the same object that
@@ -647,6 +698,8 @@ class OpusGreenNetCoordinator:
                 and telegram_at >= requested_at
             )
             device.apply_listed_metadata(listed, keep_signal=newer_telegram)
+            if device.profile is None:
+                device.profile = self.profiles.get(device.eep_names)
             # A device list refreshes metadata and state, never a previous
             # rocker occurrence.
             device.clear_button_occurrence()
@@ -680,14 +733,22 @@ class OpusGreenNetCoordinator:
     def _note_position_origin(
         self, device: EnOceanDevice, functions: Sequence[WireFunction], origin: str
     ) -> None:
-        """Record the origin of every valid position in ``functions``.
+        """Record the origin of every position in ``functions``.
 
-        Only numeric positions count: ``unknown`` leaves the position and its
-        recorded origin unchanged. Diagnostics only (REST phase 02).
+        A numeric position records its origin. ``unknown`` has cleared the
+        position (``EnOceanDevice.update_from_telegram``), so its origin is
+        forgotten as well. Diagnostics only (REST phase 02).
         """
         default = protocol.channel_from_functions(functions)
         for function in functions:
             if function.get("key") != KEY_POSITION:
+                continue
+            if function.get("value") == VALUE_UNKNOWN:
+                unknown_channel = protocol.function_channel(function, default)
+                if unknown_channel is not None:
+                    self._position_origins.pop(
+                        (device.device_id, unknown_channel), None
+                    )
                 continue
             if (
                 EnOceanDevice._parse_number(
@@ -857,6 +918,15 @@ class OpusGreenNetCoordinator:
                     function.get("key") == KEY_POSITION
                     and protocol.function_channel(function, default) in estimated
                 )
+                # A command target of "unknown" is no report of the device.
+                and not (
+                    function.get("key") in (KEY_POSITION, KEY_ANGLE)
+                    and function.get("value") == VALUE_UNKNOWN
+                )
+                # Movement and rotation times come from the device list in
+                # seconds; a "Set parameters" command (D2-05-00) uses ms.
+                and function.get("key")
+                not in (KEY_ROTATION_TIME, KEY_VERTICAL_MOVEMENT_TIME)
             ]
         update: dict[str, object] = {"functions": applied}
         if not is_outbound:
@@ -947,7 +1017,11 @@ class OpusGreenNetCoordinator:
                 self._dispatch_state(device)
 
     def _start_cover_movement(
-        self, device: EnOceanDevice, channel_id: int, target: int
+        self,
+        device: EnOceanDevice,
+        channel_id: int,
+        target: int,
+        via: int | None = None,
     ) -> CoverMovement | None:
         channel = device.get_or_create_channel(channel_id)
         key = (device.device_id, channel_id)
@@ -971,9 +1045,18 @@ class OpusGreenNetCoordinator:
         full_time = channel.vertical_movement_time
         if full_time is None or full_time <= 0:
             return None
-        travel = (
-            full_time if current is None else abs(target - current) / 100 * full_time
-        )
+        if via is not None:
+            # Reference run: first to the end position ``via``, then back.
+            first_leg = (
+                full_time if current is None else abs(via - current) / 100 * full_time
+            )
+            travel = first_leg + abs(target - via) / 100 * full_time
+        else:
+            travel = (
+                full_time
+                if current is None
+                else abs(target - current) / 100 * full_time
+            )
         if travel == 0:
             self._dispatch_state(device)
             return None
@@ -984,9 +1067,10 @@ class OpusGreenNetCoordinator:
         if pending:
             self._pending_reconciliation_fields[key] = pending
             self._pending_reconciliation_queries[key] = []
+        first_target = target if via is None else via
         channel.movement = (
             "closing"
-            if (target > 50 if current is None else target > current)
+            if (first_target > 50 if current is None else first_target > current)
             else "opening"
         )
         # Prevent an entity awaiting its acknowledgement from replacing the
@@ -1034,6 +1118,17 @@ class OpusGreenNetCoordinator:
         if device is None or device.entity_type != "cover":
             return started
         default = protocol.channel_from_functions(functions)
+        repositioning = next(
+            (
+                function.get("value")
+                for function in functions
+                if function.get("key") == KEY_REPOSITIONING
+            ),
+            None,
+        )
+        via = {REPOSITIONING_FIRST_UP: 0, REPOSITIONING_FIRST_DOWN: 100}.get(
+            repositioning if isinstance(repositioning, str) else ""
+        )
         for function in functions:
             channel_id = protocol.function_channel(function, default)
             if channel_id is None:
@@ -1046,7 +1141,9 @@ class OpusGreenNetCoordinator:
                     function.get("value"), minimum=0, maximum=100
                 )
                 if target is not None:
-                    movement = self._start_cover_movement(device, channel_id, target)
+                    movement = self._start_cover_movement(
+                        device, channel_id, target, via
+                    )
                     if movement is not None:
                         started[channel_id] = movement
         return started
@@ -1459,9 +1556,34 @@ class OpusGreenNetCoordinator:
         device_id: str,
         position: int,
         channel: int = 0,
+        repositioning: str | None = None,
     ) -> CommandDelivery:
-        """Set OPUS position (0 = open, 100 = closed)."""
+        """Set OPUS position (0 = open, 100 = closed).
+
+        ``repositioning`` (D2-05 "Go to Position and Angle") makes the blind
+        drive to an end position first (``firstUp``/``firstDown``) and so
+        recalibrates its position tracking; ``direct`` is the default.
+        """
         functions: list[WireFunction] = [{"key": "position", "value": str(position)}]
+        if repositioning is not None:
+            functions.append({"key": KEY_REPOSITIONING, "value": repositioning})
+        return await self.async_send_command(
+            device_id, self._with_channel_if_needed(device_id, functions, channel)
+        )
+
+    async def async_set_cover_locking_mode(
+        self,
+        device_id: str,
+        locking_mode: str,
+        channel: int = 0,
+    ) -> CommandDelivery:
+        """Set the blockage of a blind (``block`` or ``unblock``).
+
+        Position and angle keep their profile default ``noChange``.
+        """
+        functions: list[WireFunction] = [
+            {"key": KEY_LOCKING_MODE, "value": locking_mode}
+        ]
         return await self.async_send_command(
             device_id, self._with_channel_if_needed(device_id, functions, channel)
         )

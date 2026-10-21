@@ -113,8 +113,15 @@ async def async_setup_entry(
                 )
             # The SMS supply voltage is device telemetry, so it is a diagnostic
             # entity. It stays enabled; existing entries keep their settings.
-            for suffix, device_class, unit, category in (
-                ("illuminance", SensorDeviceClass.ILLUMINANCE, LIGHT_LUX, None),
+            # Only A5-07-03 reports illumination (A5-07-01 has no sensor).
+            readings: list[
+                tuple[str, SensorDeviceClass, str, EntityCategory | None]
+            ] = []
+            if device.reports_illuminance:
+                readings.append(
+                    ("illuminance", SensorDeviceClass.ILLUMINANCE, LIGHT_LUX, None)
+                )
+            readings += [
                 (
                     "supply_voltage",
                     SensorDeviceClass.VOLTAGE,
@@ -127,7 +134,8 @@ async def async_setup_entry(
                     UnitOfRatio.PERCENTAGE,
                     None,
                 ),
-            ):
+            ]
+            for suffix, device_class, unit, category in readings:
                 entities.append(
                     OpusGreenNetMeasurementSensor(
                         coordinator,
@@ -177,6 +185,20 @@ async def async_setup_entry(
             entities.append(
                 OpusGreenNetHandleSensor(
                     coordinator, eag_id, gateway_device_id, device, "handle_state"
+                )
+            )
+            # Battery-powered handles: the device list reports the level.
+            # Mains-powered actuators get no battery sensor.
+            entities.append(
+                OpusGreenNetMeasurementSensor(
+                    coordinator,
+                    eag_id,
+                    gateway_device_id,
+                    device,
+                    "battery_level",
+                    SensorDeviceClass.BATTERY,
+                    UnitOfRatio.PERCENTAGE,
+                    entity_category=EntityCategory.DIAGNOSTIC,
                 )
             )
             if device.has_autolock:
@@ -397,6 +419,7 @@ class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
         entity_category: EntityCategory | None = None,
     ) -> None:
         super().__init__(coordinator, eag_id, gateway_device_id, device, suffix, suffix)
+        self._suffix = suffix
         # Typed accessor instead of getattr(); an unknown suffix fails at setup.
         self._read_value = MEASUREMENT_READINGS[suffix]
         self._attr_device_class = device_class
@@ -410,6 +433,15 @@ class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
         """Return the parsed value, or unknown before the first valid reading."""
         channel = self._device.channels.get(DEFAULT_CHANNEL)
         return self._read_value(channel) if channel is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, bool] | None:
+        """Mark an illuminance above the sensor range (shown as its maximum)."""
+        if self._suffix != "illuminance":
+            return None
+        channel = self._device.channels.get(DEFAULT_CHANNEL)
+        over_range = channel.illuminance_over_range if channel else None
+        return None if over_range is None else {"over_range": over_range}
 
 
 class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):

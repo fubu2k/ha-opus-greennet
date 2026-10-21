@@ -60,6 +60,8 @@ def _device_requests(gateway: FakeGateway, start: int = 0) -> list[str]:
         path
         for _method, path, _body in gateway.requests[start:]
         if path.startswith("/devices/HANDLE")
+        # The profile read at setup is gateway data, not radio traffic.
+        and not path.endswith("/profile")
     ]
 
 
