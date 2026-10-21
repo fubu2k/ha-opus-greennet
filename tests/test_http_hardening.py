@@ -60,7 +60,14 @@ def test_validate_host_rejects_non_unicast_addresses(host: str) -> None:
 
 @pytest.mark.parametrize(
     "host",
-    ["", " 192.168.1.20", "192.168.1.20 ", "http://192.168.1.20", "a/b", "a:80"],
+    [
+        "",
+        " 192.168.1.20",
+        "192.168.1.20 ",
+        "http://192.168.1.20",
+        "a/b",
+        "a:80",
+    ],
 )
 def test_validate_host_still_rejects_malformed_values(host: str) -> None:
     """Earlier host validation keeps working."""
@@ -68,7 +75,9 @@ def test_validate_host_still_rejects_malformed_values(host: str) -> None:
         validate_host(host)
 
 
-@pytest.mark.parametrize("username", ["admin", "user.name", "a" * MAX_CREDENTIAL_LENGTH])
+@pytest.mark.parametrize(
+    "username", ["admin", "user.name", "a" * MAX_CREDENTIAL_LENGTH]
+)
 def test_validate_username_accepts_plain_names(username: str) -> None:
     """Ordinary user names are returned unchanged."""
     assert validate_username(username) == username
@@ -113,7 +122,9 @@ def test_validate_password_rejects_non_string() -> None:
 
 def test_client_builds_basic_authentication_header() -> None:
     """A valid user name and password produce the expected header."""
-    client = OpusGatewayClient(MagicMock(), "192.168.1.20", 8080, "admin", "A1B2C3D4")
+    client = OpusGatewayClient(
+        MagicMock(), "192.168.1.20", 8080, "admin", "A1B2C3D4"
+    )
     expected = base64.b64encode(b"admin:A1B2C3D4").decode()
     assert client._headers == {"Authorization": f"Basic {expected}"}
 
@@ -121,7 +132,9 @@ def test_client_builds_basic_authentication_header() -> None:
 def test_client_rejects_non_unicast_host() -> None:
     """The client refuses to be built for the cloud metadata address."""
     with pytest.raises(OpusInvalidHostError):
-        OpusGatewayClient(MagicMock(), "169.254.169.254", 8080, "admin", "A1B2C3D4")
+        OpusGatewayClient(
+            MagicMock(), "169.254.169.254", 8080, "admin", "A1B2C3D4"
+        )
 
 
 def test_client_rejects_username_with_colon() -> None:
