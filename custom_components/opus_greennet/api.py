@@ -15,6 +15,12 @@ translated errors.
 Phase 1 hardening: redirects are never followed (the Authorization header must
 not leave the configured gateway), every response body is size-bounded, and
 host and port are validated before any URL is built.
+
+Phase 1b hardening: hosts that can never be a gateway (unspecified, multicast
+and link-local addresses such as the cloud metadata address) are rejected, and
+the basic-authentication credentials are validated so that a user name cannot
+break the ``user:password`` encoding. Public and loopback addresses stay
+allowed on purpose (VPN tunnels, tests).
 """
 
 from __future__ import annotations
@@ -51,6 +57,8 @@ MAX_DOCUMENT_SIZE: Final = 8 * 1024 * 1024
 # Upper bound for the body of one ordinary (non-stream) response.
 MAX_RESPONSE_SIZE: Final = MAX_DOCUMENT_SIZE
 _READ_CHUNK_SIZE: Final = 64 * 1024
+# Upper bound for the user name and the password of the gateway API.
+MAX_CREDENTIAL_LENGTH: Final = 256
 
 # Queue priorities: lower values are dispatched first. User-initiated control
 # commands must never wait behind status queries, and delayed (background)
@@ -112,15 +120,19 @@ def validate_host(host: str) -> str:
     URLs, paths, credentials, ports, queries, fragments, whitespace and control
     characters are rejected so that the configured value can only ever select
     the machine, never alter the request target (SSRF, request smuggling).
+    IP literals that can never be a gateway (unspecified, multicast and
+    link-local addresses) are rejected as well.
     """
     if not isinstance(host, str) or not host or host != host.strip():
         raise OpusInvalidHostError("The gateway host is empty or has whitespace")
     candidate = host[1:-1] if host.startswith("[") and host.endswith("]") else host
     try:
-        ipaddress.ip_address(candidate)
+        address = ipaddress.ip_address(candidate)
     except ValueError:
         pass
     else:
+        if address.is_unspecified or address.is_multicast or address.is_link_local:
+            raise OpusInvalidHostError("The gateway host is not a unicast address")
         return host
     if host.startswith("[") or len(host) > 253:
         raise OpusInvalidHostError("The gateway host is not valid")
@@ -135,6 +147,38 @@ def validate_port(port: int) -> int:
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise OpusInvalidHostError("The gateway port is not valid")
     return port
+
+
+def _has_control_character(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def validate_username(username: str) -> str:
+    """Return ``username`` if it can be sent in basic authentication.
+
+    A colon would shift the boundary between user name and password in the
+    ``user:password`` encoding; control characters could alter the header.
+    """
+    if (
+        not isinstance(username, str)
+        or not username
+        or len(username) > MAX_CREDENTIAL_LENGTH
+        or ":" in username
+        or _has_control_character(username)
+    ):
+        raise OpusAuthError("The gateway user name is not valid")
+    return username
+
+
+def validate_password(password: str) -> str:
+    """Return ``password`` if it can be sent in basic authentication."""
+    if (
+        not isinstance(password, str)
+        or len(password) > MAX_CREDENTIAL_LENGTH
+        or _has_control_character(password)
+    ):
+        raise OpusAuthError("The gateway password is not valid")
+    return password
 
 
 def response_status(data: JsonObject) -> int:
@@ -367,6 +411,8 @@ class OpusGatewayClient:
     ) -> None:
         validate_host(host)
         validate_port(port)
+        validate_username(username)
+        validate_password(password)
         self._session = session
         self.host = host
         self.port = port
