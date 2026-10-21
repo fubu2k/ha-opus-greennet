@@ -80,7 +80,7 @@ async def async_setup_entry(
 
 # Quickly repeated lock/unlock requests settle this long; only the last one
 # is sent to the gateway.
-LOCK_SETTLE_SECONDS = 2.0
+LOCK_SETTLE_SECONDS = 10.0
 
 
 class OpusGreenNetAutoLock(OpusGreenNetEntity, LockEntity):
