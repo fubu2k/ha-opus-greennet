@@ -73,8 +73,8 @@ def bounded_object_items(
     if items is None:
         return []
     return [
-        item 
-        for item in (as_object(entry) for entry in items[:limit]) 
+        item
+        for item in (as_object(entry) for entry in items[:limit])
         if item is not None
     ]
 
