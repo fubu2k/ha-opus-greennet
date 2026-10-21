@@ -14,11 +14,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from typing import Final
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
 type JsonList = list[JsonValue]
+
+# Upper bound for the entries read from one gateway list (devices, functions).
+# A real installation has far fewer; the bound only stops hostile documents.
+MAX_LIST_ITEMS: Final = 100_000
 
 
 def parse_json(text: str | bytes | bytearray) -> JsonValue:
@@ -28,8 +33,15 @@ def parse_json(text: str | bytes | bytearray) -> JsonValue:
     ``bool``/``None``, so its untyped result is a ``JsonValue`` by
     construction. NaN and Infinity literals are accepted here; the domain
     parsers reject non-finite numbers per field.
+
+    Extremely deep nesting makes the decoder raise ``RecursionError``. It is
+    reported as ``ValueError`` like any other invalid document, so callers'
+    existing error mapping applies.
     """
-    value: JsonValue = json.loads(text)
+    try:
+        value: JsonValue = json.loads(text)
+    except RecursionError as err:
+        raise ValueError("The JSON document is nested too deeply") from err
     return value
 
 
@@ -51,6 +63,18 @@ def object_items(value: object) -> list[JsonObject]:
     if items is None:
         return []
     return [item for item in (as_object(entry) for entry in items) if item is not None]
+
+
+def bounded_object_items(
+    value: object, limit: int = MAX_LIST_ITEMS
+) -> list[JsonObject]:
+    """Like ``object_items`` but reads at most ``limit`` list entries."""
+    items = as_list(value)
+    if items is None:
+        return []
+    return [
+        item for item in (as_object(entry) for entry in items[:limit]) if item is not None
+    ]
 
 
 def string_key(mapping: Mapping[str, object], key: str) -> str | None:
