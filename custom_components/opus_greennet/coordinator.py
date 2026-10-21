@@ -34,6 +34,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
+from homeassistant.util import dt as dt_util
 
 from . import protocol
 from .api import (
@@ -199,6 +200,49 @@ class CoverMovement:
         return self.started_at + self.travel + COVER_MOVEMENT_GRACE_SECONDS
 
 
+# A run without a matching end report is dropped after this many seconds.
+COVER_RUN_TIMEOUT_SECONDS = 300.0
+# Reported end positions within this distance of the target finish a run.
+COVER_RUN_TARGET_TOLERANCE = 2
+
+
+@dataclass
+class CoverRun:
+    """Measured travel of one cover command, from sending to the end report.
+
+    ``seconds`` stays None until the device reports a position at the target.
+    A status query sent meanwhile makes the measurement unusable: its answer
+    tells the position, not when the blind arrived.
+    """
+
+    start_position: int | None
+    target: int
+    repositioning: str | None
+    started_at: float
+    seconds: float | None = None
+    finished_at: str | None = None
+    queried: bool = False
+
+    @property
+    def direction(self) -> str:
+        """Return up/down, or the reference run direction (OPUS 0 = top)."""
+        if self.repositioning == REPOSITIONING_FIRST_UP:
+            return "reference_up"
+        if self.repositioning == REPOSITIONING_FIRST_DOWN:
+            return "reference_down"
+        if self.start_position is not None and self.target < self.start_position:
+            return "up"
+        return "down" if self.start_position is not None else "unknown"
+
+    @property
+    def full_travel(self) -> bool:
+        """Return whether the run covered the whole height without detour."""
+        return self.repositioning in (None, "direct") and {
+            self.start_position,
+            self.target,
+        } == {0, 100}
+
+
 class OpusGreenNetCoordinator:
     """Own the connection to one gateway and the state of its devices."""
 
@@ -274,6 +318,9 @@ class OpusGreenNetCoordinator:
         # same EEPs share one profile. None marks a profile that could not be
         # read; such devices use the EEP tables.
         self.profiles: dict[tuple[str, ...], DeviceProfile | None] = {}
+        # Cover runs being timed and the last completed one per channel.
+        self._cover_runs: dict[tuple[str, int], CoverRun] = {}
+        self.last_cover_runs: dict[tuple[str, int], CoverRun] = {}
 
     # ──────────────────────────────────────────────────────────────────────
     # Lifecycle
@@ -814,6 +861,9 @@ class OpusGreenNetCoordinator:
             if did == device_id:
                 self._clear_cover_movement(did, channel_id, notify=False)
         self.devices.pop(device_id, None)
+        for runs in (self._cover_runs, self.last_cover_runs):
+            for run_key in [k for k in runs if k[0] == device_id]:
+                del runs[run_key]
         self._telegram_metadata_at.pop(device_id, None)
         self.last_vertical_movement_times.pop(device_id, None)
         for origin_key in [k for k in self._position_origins if k[0] == device_id]:
@@ -923,6 +973,7 @@ class OpusGreenNetCoordinator:
             self._record_confirmed_feedback(device_id, functions)
         applied = functions
         if is_outbound:
+            self._start_cover_runs(device, functions, received_at)
             estimated = self._start_cover_commands(device, functions)
             default = protocol.channel_from_functions(functions)
             applied = [
@@ -1167,6 +1218,7 @@ class OpusGreenNetCoordinator:
         self, device_id: str, functions: Sequence[WireFunction]
     ) -> bool:
         """Confirm only reported fields on their own channel."""
+        self._finish_cover_runs(device_id, functions)
         confirmed = protocol.confirmed_fields_by_channel(functions)
         for channel_id, fields in confirmed.items():
             if KEY_POSITION in fields:
@@ -1181,6 +1233,111 @@ class OpusGreenNetCoordinator:
             if not expected:
                 self._cancel_reconciliation_queries(device_id, channel_id)
         return bool(confirmed)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Cover run times
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _start_cover_runs(
+        self,
+        device: EnOceanDevice | None,
+        functions: Sequence[WireFunction],
+        started_at: float,
+    ) -> None:
+        """Start timing every cover position command in ``functions``.
+
+        A stop ends the timing without a result; a new target replaces it.
+        """
+        if device is None or device.entity_type != "cover":
+            return
+        default = protocol.channel_from_functions(functions)
+        repositioning = next(
+            (
+                value
+                for function in functions
+                if function.get("key") == KEY_REPOSITIONING
+                and isinstance(value := function.get("value"), str)
+            ),
+            None,
+        )
+        for function in functions:
+            channel_id = protocol.function_channel(function, default)
+            if channel_id is None:
+                continue
+            key = (device.device_id, channel_id)
+            if function.get("key") == KEY_STOP:
+                self._cover_runs.pop(key, None)
+            elif (
+                function.get("key") == KEY_POSITION
+                and (
+                    target := EnOceanDevice._parse_integer(
+                        function.get("value"), minimum=0, maximum=100
+                    )
+                )
+                is not None
+            ):
+                channel = device.channels.get(channel_id)
+                self._cover_runs[key] = CoverRun(
+                    channel.position if channel is not None else None,
+                    target,
+                    repositioning,
+                    started_at,
+                )
+
+    def _mark_cover_runs_queried(self, device_id: str, channel_id: int) -> None:
+        """A status query answers with the position, not the arrival time."""
+        if (run := self._cover_runs.get((device_id, channel_id))) is not None:
+            run.queried = True
+
+    def _finish_cover_runs(
+        self, device_id: str, functions: Sequence[WireFunction]
+    ) -> None:
+        """Finish timed runs with a reported position at their target."""
+        if not self._cover_runs:
+            return
+        now = monotonic()
+        default = protocol.channel_from_functions(functions)
+        for function in functions:
+            if function.get("key") != KEY_POSITION:
+                continue
+            channel_id = protocol.function_channel(function, default)
+            position = EnOceanDevice._parse_integer(
+                function.get("value"), minimum=0, maximum=100
+            )
+            if channel_id is None or position is None:
+                continue
+            key = (device_id, channel_id)
+            run = self._cover_runs.get(key)
+            if run is None:
+                continue
+            seconds = now - run.started_at
+            if seconds > COVER_RUN_TIMEOUT_SECONDS:
+                del self._cover_runs[key]
+                continue
+            if abs(position - run.target) > COVER_RUN_TARGET_TOLERANCE:
+                continue  # an intermediate report, e.g. at a reference end
+            del self._cover_runs[key]
+            if run.queried:
+                _LOGGER.debug(
+                    "OPUS cover %s channel %s reached %s %% after a status "
+                    "query; no run time recorded",
+                    device_id,
+                    key[1],
+                    position,
+                )
+                continue
+            run.seconds = round(seconds, 2)
+            run.finished_at = dt_util.utcnow().isoformat()
+            self.last_cover_runs[key] = run
+            _LOGGER.info(
+                "OPUS cover %s channel %s: %s run from %s %% to %s %% took %.1f s",
+                device_id,
+                key[1],
+                run.direction,
+                "?" if run.start_position is None else run.start_position,
+                position,
+                run.seconds,
+            )
 
     def _cancel_reconciliation_queries(
         self, device_id: str, channel_id: int | None = None
@@ -1377,8 +1534,11 @@ class OpusGreenNetCoordinator:
         fields_by_channel = protocol.command_fields_by_channel(functions, device)
         revisions: dict[tuple[int, str], int] = {}
         started_movements: dict[int, CoverMovement] = {}
+        sent_at: list[float] = []
         body = {"state": {"functions": list(functions)}}
         _LOGGER.debug("Sending command to OPUS device %s: %s", device_id, body)
+
+        is_query = any(function.get("key") == KEY_QUERY for function in functions)
 
         @callback
         def snapshot_feedback() -> None:
@@ -1386,6 +1546,11 @@ class OpusGreenNetCoordinator:
             # Feedback for an earlier queued command cannot confirm this one.
             if background and still_needed is not None and not still_needed():
                 raise request_error("request_cancelled", device_id, SUPERSEDED)
+            sent_at.append(monotonic())
+            if is_query:
+                default = protocol.channel_from_functions(functions)
+                if default is not None:
+                    self._mark_cover_runs_queried(device_id, default)
             started_movements.update(self._start_cover_commands(device, functions))
             for movement in started_movements.values():
                 movement.accepted = False
@@ -1399,7 +1564,6 @@ class OpusGreenNetCoordinator:
                 }
             )
 
-        is_query = any(function.get("key") == KEY_QUERY for function in functions)
         if background:
             priority = PRIORITY_BACKGROUND
         elif is_query:
@@ -1450,6 +1614,8 @@ class OpusGreenNetCoordinator:
                 started_movements.clear()
                 fields_by_channel = {}
             if device is not None:
+                if delivery is CommandDelivery.SENT and sent_at:
+                    self._start_cover_runs(device, functions, sent_at[0])
                 if device.last_command_error is not None:
                     device.last_command_error = None
                     self._dispatch_state(device)

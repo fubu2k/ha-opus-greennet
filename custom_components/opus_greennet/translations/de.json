@@ -166,6 +166,9 @@
           "requested": "Angefordert",
           "not_requested": "Nicht angefordert"
         }
+      },
+      "last_run_time": {
+        "name": "Letzte Fahrzeit"
       }
     },
     "switch": {

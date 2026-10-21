@@ -18,6 +18,7 @@ from homeassistant.const import (
     UnitOfPower,
     UnitOfRatio,
     UnitOfTemperature,
+    UnitOfTime,
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -28,6 +29,7 @@ from .const import CONF_EAG_ID, DEFAULT_CHANNEL
 from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
     SIGNAL_DEVICE_REMOVED,
+    CoverRun,
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanChannel, EnOceanDevice
@@ -207,6 +209,15 @@ async def async_setup_entry(
                         coordinator, eag_id, gateway_device_id, device, "unlock_request"
                     )
                 )
+
+        if device.is_cover:
+            # Measured travel of the last command (diagnostic).
+            entities.extend(
+                OpusGreenNetCoverRunSensor(
+                    coordinator, eag_id, gateway_device_id, device, channel_id
+                )
+                for channel_id in range(device.channel_count)
+            )
 
         # Signal strength sensor (all devices with dbm data)
         entities.append(
@@ -487,3 +498,64 @@ class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
         if self._suffix == "handle_state":
             return channel.handle_state
         return None
+
+
+class OpusGreenNetCoverRunSensor(OpusGreenNetEntity, SensorEntity):
+    """Seconds from a position command to the blind's report at the target.
+
+    Measured by the integration for commands from Home Assistant and from
+    other controllers, including reference runs. A run ended by Stop, without
+    an end report or confirmed only by a status query records no time. The
+    attributes tell the direction, start and end (Home Assistant scale,
+    100 = open) and whether the run covered the full height.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "last_run_time"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_suggested_display_precision = 1
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        channel_id: int = DEFAULT_CHANNEL,
+    ) -> None:
+        """Initialize the run time sensor."""
+        super().__init__(coordinator, eag_id, gateway_device_id, device, channel_id)
+        channel_suffix = f"_ch{channel_id}" if device.channel_count > 1 else ""
+        self._attr_unique_id = (
+            f"{eag_id}_{device.device_id}_last_run_time{channel_suffix}"
+        )
+
+    def _run(self) -> CoverRun | None:
+        return self._coordinator.last_cover_runs.get(
+            (self._device.device_id, self._channel_id)
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the measured seconds of the last completed run."""
+        run = self._run()
+        return run.seconds if run is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object] | None:
+        """Describe the last run (positions in Home Assistant scale)."""
+        run = self._run()
+        if run is None:
+            return None
+        return {
+            "direction": run.direction,
+            "start_position": (
+                None if run.start_position is None else 100 - run.start_position
+            ),
+            "end_position": 100 - run.target,
+            "full_travel": run.full_travel,
+            "finished_at": run.finished_at,
+        }

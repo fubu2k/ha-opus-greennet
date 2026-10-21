@@ -192,6 +192,13 @@ async def async_get_config_entry_diagnostics(
                 },
             }
         )
+        runs = getattr(coordinator, "last_cover_runs", None)
+        if isinstance(runs, dict):
+            devices[-1]["last_cover_run"] = {
+                channel_id: asdict(run)
+                for (device_id, channel_id), run in runs.items()
+                if device_id == device.device_id
+            }
         if isinstance(movement_times, dict):
             devices[-1]["last_vertical_movement_time"] = dict(
                 movement_times.get(device.device_id, {})

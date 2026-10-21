@@ -166,6 +166,9 @@
           "requested": "Requested",
           "not_requested": "Not requested"
         }
+      },
+      "last_run_time": {
+        "name": "Last run time"
       }
     },
     "switch": {

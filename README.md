@@ -107,7 +107,15 @@ sends `unblock`. A D2-05-00 `alarm` counts as blocked; the reported mode is the
 `locking_mode` attribute. The diagnostic buttons **Reference run via top** and
 **Reference run via bottom** drive the blind to an end position first
 (`repositioning = firstUp`/`firstDown`) and then back to its last known position,
-which recalibrates the blind's position tracking. Movement and rotation times of
+which recalibrates the blind's position tracking. Every blind also has a diagnostic
+**Last run time** sensor: the seconds from a position command (from Home
+Assistant, another controller or a reference run) to the blind's report at the
+target. Attributes give the direction (`up`, `down`, `reference_up`,
+`reference_down`), start and end position (100 = open) and whether the run
+covered the full height (`full_travel`), which is the value to compare with the
+configured `verticalMovementTime`. Runs ended by Stop, without an end report or
+only confirmed by a status query record no time. Each measured run is also
+logged at info level. Movement and rotation times of
 a D2-05-00 "Set parameters" command from another controller (milliseconds) are
 not taken over; they come from the device list (seconds).
 

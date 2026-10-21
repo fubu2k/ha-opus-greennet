@@ -8,6 +8,7 @@ event entities, and the new diagnostic sensors.
 
 from __future__ import annotations
 
+from time import monotonic as monotonic_now
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1090,3 +1091,167 @@ async def test_f6_10_00_tilted_handle_reaches_the_entities(
     await gateway.push(telegram("HANDLE", [{"key": "handle", "value": "unkown"}]))
     await wait_until(lambda: hass.states.get(state).state == "unknown")
     assert hass.states.get(tilt).state == "unknown"
+
+
+# ── Cover run times ──────────────────────────────────────────────────────────
+
+
+def _cover_coordinator(position: int | None = 0) -> OpusGreenNetCoordinator:
+    coord = OpusGreenNetCoordinator(MagicMock(), MagicMock(), EAG_ID)
+    with patch(f"{MODULE}.async_dispatcher_send"):
+        coord._apply_device_object(  # noqa: SLF001
+            _listed("DEV1", "D2-05-02"), authoritative=True
+        )
+    coord.devices["DEV1"].get_or_create_channel(0).position = position
+    return coord
+
+
+def _report_position(coord, value, channel: int | None = None) -> None:
+    function: dict = {"key": "position", "value": value}
+    if channel is not None:
+        function["channel"] = channel
+    coord._record_confirmed_feedback("DEV1", [function])  # noqa: SLF001
+
+
+def test_run_time_from_command_to_end_report() -> None:
+    coord = _cover_coordinator(position=0)
+    device = coord.devices["DEV1"]
+    coord._start_cover_runs(  # noqa: SLF001
+        device, [{"key": "position", "value": "100"}], monotonic_now() - 25.4
+    )
+    _report_position(coord, 50)  # intermediate report: keeps timing
+    assert coord.last_cover_runs == {}
+    _report_position(coord, "unknown")
+    _report_position(coord, 99)  # within the tolerance of the target
+    run = coord.last_cover_runs[("DEV1", 0)]
+    assert run.seconds == pytest.approx(25.4, abs=0.5)
+    assert (run.direction, run.full_travel) == ("down", True)
+    assert run.finished_at is not None
+    assert coord._cover_runs == {}  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    ("start", "target", "repositioning", "direction", "full"),
+    [
+        (100, 0, None, "up", True),
+        (40, 60, "direct", "down", False),
+        (None, 0, None, "unknown", False),
+        (30, 30, "firstUp", "reference_up", False),
+        (30, 30, "firstDown", "reference_down", False),
+    ],
+)
+def test_run_direction_and_full_travel(start, target, repositioning, direction, full):
+    coord = _cover_coordinator(position=start)
+    functions = [{"key": "position", "value": str(target)}]
+    if repositioning:
+        functions.append({"key": "repositioning", "value": repositioning})
+    coord._start_cover_runs(  # noqa: SLF001
+        coord.devices["DEV1"], functions, monotonic_now()
+    )
+    run = coord._cover_runs[("DEV1", 0)]  # noqa: SLF001
+    assert (run.direction, run.full_travel) == (direction, full)
+
+
+def test_runs_without_a_usable_end_record_nothing() -> None:
+    coord = _cover_coordinator()
+    device = coord.devices["DEV1"]
+    key = ("DEV1", 0)
+    start = coord._start_cover_runs  # noqa: SLF001
+    # Stop ends the timing.
+    start(device, [{"key": "position", "value": "100"}], monotonic_now())
+    start(device, [{"key": "stop", "value": "true"}], monotonic_now())
+    assert key not in coord._cover_runs  # noqa: SLF001
+    # A status query in between makes the time meaningless.
+    start(device, [{"key": "position", "value": "100"}], monotonic_now())
+    coord._mark_cover_runs_queried("DEV1", 0)  # noqa: SLF001
+    coord._mark_cover_runs_queried("DEV1", 3)  # noqa: SLF001
+    _report_position(coord, 100)
+    # Too old runs are dropped.
+    start(device, [{"key": "position", "value": "100"}], monotonic_now() - 400)
+    _report_position(coord, 100)
+    # Reports for other channels, malformed values and selectors are ignored.
+    start(device, [{"key": "position", "value": "100"}], monotonic_now())
+    _report_position(coord, 100, channel=1)
+    _report_position(coord, "x")
+    _report_position(coord, 100, channel=-1)
+    coord._record_confirmed_feedback(  # noqa: SLF001
+        "DEV1", [{"key": "angle", "value": 10}]
+    )
+    assert coord.last_cover_runs == {}
+    assert key in coord._cover_runs  # noqa: SLF001
+    # Malformed targets, selectors and other devices start nothing.
+    coord._cover_runs.clear()  # noqa: SLF001
+    start(device, [{"key": "position", "value": "x"}], monotonic_now())
+    start(device, [{"key": "position", "value": "1", "channel": -1}], 0.0)
+    start(_device("D2-01-01"), [{"key": "position", "value": "1"}], 0.0)
+    start(None, [{"key": "position", "value": "1"}], 0.0)
+    assert coord._cover_runs == {}  # noqa: SLF001
+    # Forgetting the device drops its runs.
+    start(device, [{"key": "position", "value": "100"}], monotonic_now())
+    coord.last_cover_runs[key] = coord._cover_runs[key]  # noqa: SLF001
+    with patch(f"{MODULE}.async_dispatcher_send"):
+        coord.async_forget_device("DEV1")
+    assert coord._cover_runs == {} and coord.last_cover_runs == {}  # noqa: SLF001
+
+
+def test_foreign_command_is_timed_too() -> None:
+    coord = _cover_coordinator(position=100)
+    with (
+        patch(f"{MODULE}.async_dispatcher_send"),
+        patch(f"{MODULE}.async_call_later"),
+    ):
+        _outbound(coord, {"key": "position", "value": 0})
+        coord._cover_runs[("DEV1", 0)].started_at -= 26  # noqa: SLF001
+        coord._handle_telegram(  # noqa: SLF001
+            telegram("DEV1", [{"key": "position", "value": 0}])["telegram"]
+        )
+    run = coord.last_cover_runs[("DEV1", 0)]
+    assert run.direction == "up"
+    assert run.seconds == pytest.approx(26, abs=0.5)
+
+
+async def test_run_time_sensor_end_to_end(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    gateway.devices = [
+        device_object(
+            "BLIND",
+            "D2-05-02",
+            states=[{"key": "position", "value": 0.0}],
+        )
+    ]
+    entry = await setup_bridge(hass, gateway)
+    cover = await wait_for_entity(hass, "cover", f"{EAG_ID}_BLIND")
+    sensor = await wait_for_entity(hass, "sensor", f"{EAG_ID}_BLIND_last_run_time")
+    registry_entry = er.async_get(hass).async_get(sensor)
+    assert registry_entry.entity_category is EntityCategory.DIAGNOSTIC
+    assert hass.states.get(sensor).state == "unknown"
+
+    await hass.services.async_call(
+        "cover", "close_cover", {"entity_id": cover}, blocking=True
+    )
+    coordinator = entry.runtime_data.coordinator
+    coordinator._cover_runs[("BLIND", 0)].started_at -= 25  # noqa: SLF001
+    await gateway.push(telegram("BLIND", [{"key": "position", "value": 100}]))
+    await wait_until(lambda: hass.states.get(sensor).state != "unknown")
+    state = hass.states.get(sensor)
+    assert float(state.state) == pytest.approx(25, abs=1)
+    assert state.attributes["unit_of_measurement"] == "s"
+    assert state.attributes["direction"] == "down"
+    assert state.attributes["start_position"] == 100
+    assert state.attributes["end_position"] == 0
+    assert state.attributes["full_travel"] is True
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert diagnostics["devices"][0]["last_cover_run"][0]["target"] == 100
+
+
+def test_run_time_sensor_without_a_run_and_on_channels() -> None:
+    from custom_components.opus_greennet.sensor import OpusGreenNetCoverRunSensor
+
+    coordinator = MagicMock(last_cover_runs={})
+    device = _device("D2-05-02")
+    with patch.object(EnOceanDevice, "channel_count", 2):
+        sensor = OpusGreenNetCoverRunSensor(coordinator, EAG_ID, "gw", device, 1)
+    assert sensor.unique_id == f"{EAG_ID}_DEV1_last_run_time_ch1"
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes is None
