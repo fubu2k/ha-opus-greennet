@@ -40,6 +40,8 @@ def _device_requests(gateway: FakeGateway, device_id: str, start: int = 0):
         path
         for _method, path, _body in gateway.requests[start:]
         if path.startswith(f"/devices/{device_id}")
+        # The profile read at setup is gateway data, not radio traffic.
+        and not path.endswith("/profile")
     ]
 
 
@@ -97,7 +99,8 @@ def test_measurement_metadata_is_scoped(make_device) -> None:
         assert sensor.entity_registry_enabled_default is True
         assert sensor.device_class is SensorDeviceClass.BATTERY
     assert illuminance.entity_category is None
-    assert illuminance.suggested_display_precision is None
+    # Illuminance is shown in whole lux (display only).
+    assert illuminance.suggested_display_precision == 0
 
 
 @pytest.mark.parametrize("eep", ["A5-07-01", "A5-07-03"])
@@ -110,8 +113,20 @@ async def test_new_sms_registers_voltage_diagnostic_and_whole_battery(
 
     voltage = await wait_for_entity(hass, "sensor", f"{SMS_PREFIX}_supply_voltage")
     battery = await wait_for_entity(hass, "sensor", f"{SMS_PREFIX}_battery_level")
-    illuminance = await wait_for_entity(hass, "sensor", f"{SMS_PREFIX}_illuminance")
     motion = await wait_for_entity(hass, "binary_sensor", f"{SMS_PREFIX}_motion")
+    normal = [motion]
+    if eep == "A5-07-03":
+        # Only A5-07-03 reports illumination (EEP profile).
+        normal.append(
+            await wait_for_entity(hass, "sensor", f"{SMS_PREFIX}_illuminance")
+        )
+    else:
+        assert (
+            er.async_get(hass).async_get_entity_id(
+                "sensor", DOMAIN, f"{SMS_PREFIX}_illuminance"
+            )
+            is None
+        )
 
     voltage_entry = registry.async_get(voltage)
     assert voltage_entry.entity_category is EntityCategory.DIAGNOSTIC
@@ -128,7 +143,7 @@ async def test_new_sms_registers_voltage_diagnostic_and_whole_battery(
     assert async_rounded_state(hass, battery, battery_state) == "88"
 
     # Normal motion entities keep their metadata.
-    for entity_id in (illuminance, motion):
+    for entity_id in normal:
         entry = registry.async_get(entity_id)
         assert entry.entity_category is None
         assert entry.disabled_by is None

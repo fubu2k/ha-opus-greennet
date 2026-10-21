@@ -42,6 +42,8 @@ RUNTIME_FIELDS = {
     "last_update_dispatched_monotonic",
     "last_command_error",
     "channels",
+    # Gateway profile read at setup; dropped when the announced EEPs change.
+    "profile",
 }
 
 
@@ -237,8 +239,15 @@ def test_position_origin_follows_the_source(coord) -> None:
     assert coord.position_origin(COVER, 0) == "device list"
     _report(coord, 40)
     assert coord.position_origin(COVER, 0) == "reported"
-    # "unknown" changes neither the position nor its origin.
+    # A reported "unknown" clears the position and forgets its origin.
     _report(coord, "unknown")
+    assert coord.devices[COVER].channels[0].position is None
+    assert coord.position_origin(COVER, 0) is None
+    assert (COVER, 0) not in coord._position_origins  # noqa: SLF001
+    _report(coord, 40)
+    assert coord.position_origin(COVER, 0) == "reported"
+    # A command target of "unknown" is no report: position and origin stay.
+    _report(coord, "unknown", direction="to")
     assert coord.devices[COVER].channels[0].position == 40
     assert coord.position_origin(COVER, 0) == "reported"
 
@@ -305,8 +314,9 @@ async def test_rocker_then_unknown_then_end_position(
         await gateway.push(telegram(COVER, [{"key": "buttonA0", "value": action}]))
     await gateway.push(telegram(COVER, [{"key": "position", "value": "unknown"}]))
     await hass.async_block_till_done()
-    # Neither the rocker nor "unknown" changes or confirms the position.
-    assert hass.states.get(entity_id).attributes["current_position"] == 0
+    # The rocker changes nothing; the reported "unknown" makes the position
+    # unknown instead of showing the outdated value.
+    assert "current_position" not in hass.states.get(entity_id).attributes
     await gateway.push(telegram(COVER, [{"key": "position", "value": 0}]))
     await wait_until(
         lambda: hass.states.get(entity_id).attributes["current_position"] == 100

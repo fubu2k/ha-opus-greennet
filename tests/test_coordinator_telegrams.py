@@ -423,7 +423,13 @@ def test_outbound_command_keeps_only_target_state(coord, dispatch, call_later):
             direction="to",
         )
     )
-    assert applied == [[{"key": "dimValue", "value": "20"}]]
+    # The blind locking mode is a target state of D2-05 commands.
+    assert applied == [
+        [
+            {"key": "dimValue", "value": "20"},
+            {"key": "lockingMode", "value": "unblock"},
+        ]
+    ]
     assert device.channels[0].brightness == 20
 
 

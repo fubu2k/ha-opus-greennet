@@ -486,7 +486,11 @@ def test_outbound_state_functions_keep_state_selector_and_stop() -> None:
         {"key": "query", "value": "status"},
         {"key": "lockingMode", "value": "unblock"},
     ]
-    assert protocol.outbound_state_functions(functions) == functions[:3]
+    # The blind locking mode is a target state; a query is not.
+    assert protocol.outbound_state_functions(functions) == [
+        *functions[:3],
+        functions[4],
+    ]
 
 
 @pytest.mark.parametrize(

@@ -21,6 +21,7 @@ from homeassistant.exceptions import HomeAssistantError
 from custom_components.opus_greennet.coordinator import SIGNAL_DEVICE_STATE_UPDATE
 from custom_components.opus_greennet.cover import OpusGreenNetCover
 from custom_components.opus_greennet.enocean_device import (
+    DeviceProfile,
     EnOceanChannel,
     EnOceanDevice,
 )
@@ -64,6 +65,14 @@ async def coord(connected_coordinator, timers, dispatched):
 
 def add_device(coord, eep: str, channels: dict[int, dict] | None = None):
     device = EnOceanDevice("DEV1", "Device", [{"eep": eep}])
+    if eep == "D2-01-12":
+        # No EEP of the specification is a multi-channel dimmer; a gateway
+        # profile can declare one.
+        device.profile = DeviceProfile(
+            to_keys=frozenset({"channel", "dimValue", "rampingMode"}),
+            from_keys=frozenset({"channel", "dimValue"}),
+            channels=2,
+        )
     for channel_id, values in (channels or {}).items():
         device.channels[channel_id] = EnOceanChannel(channel_id=channel_id, **values)
     coord.devices["DEV1"] = device
@@ -141,7 +150,7 @@ SUCCESS_CASES = [
     (
         "multichannel-switch-channel-zero",
         OpusGreenNetSwitch,
-        "D2-01-04",
+        "D2-01-11",
         SWITCH_SEED,
         0,
         "async_turn_on",
@@ -152,7 +161,7 @@ SUCCESS_CASES = [
     (
         "multichannel-switch-channel-one",
         OpusGreenNetSwitch,
-        "D2-01-04",
+        "D2-01-11",
         SWITCH_SEED,
         1,
         "async_turn_off",
@@ -222,7 +231,8 @@ SUCCESS_CASES = [
     (
         "multichannel-dimmer-channel-zero",
         OpusGreenNetLight,
-        "D2-01-06",
+        # Two-channel dimmer from its gateway profile (see add_device).
+        "D2-01-12",
         DIMMER_SEED,
         0,
         "async_turn_on",
@@ -426,7 +436,7 @@ FAILURE_CASES = [
     ("timeout", None, "request_timeout"),
 ]
 FAILING_ACTIONS = [
-    (OpusGreenNetSwitch, "D2-01-04", SWITCH_SEED, "async_turn_on", {}),
+    (OpusGreenNetSwitch, "D2-01-11", SWITCH_SEED, "async_turn_on", {}),
     (OpusGreenNetLight, "D2-01-02", DIMMER_SEED, "async_turn_on", {}),
     (OpusGreenNetLight, "D2-01-02", DIMMER_SEED, "async_turn_off", {}),
     (
@@ -632,7 +642,7 @@ async def test_other_channel_feedback_during_ack_keeps_own_estimate(
     coord, radio, timers, dispatched
 ):
     radio.auto_respond = False
-    device = add_device(coord, "D2-01-04", SWITCH_SEED)
+    device = add_device(coord, "D2-01-11", SWITCH_SEED)
     entity = add_entity(coord, dispatched, OpusGreenNetSwitch, 0)
     sibling = add_entity(coord, dispatched, OpusGreenNetSwitch, 1)
 
@@ -700,7 +710,7 @@ def test_entity_layer_does_not_import_the_transport(module):
 # Domain layer: command estimates -------------------------------------------
 
 
-def _domain_device(eep: str = "D2-01-04") -> EnOceanDevice:
+def _domain_device(eep: str = "D2-01-11") -> EnOceanDevice:
     return EnOceanDevice("DEV1", "Device", [{"eep": eep}])
 
 
