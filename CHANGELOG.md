@@ -7,6 +7,10 @@ All notable changes to this project will be documented in this file.
 Alignment with the device profiles the OPUS gateway reports (`GET /devices/<id>/profile`), checked against an OPUS-IQ-DOT 1.21.30.
 
 ### Changed
+- **More robust reconnects.** After the event stream ends, the integration waits 1 second before reconnecting, doubling the pause after every failed attempt up to 60 seconds, plus a random share of up to 25 %. A stream that closes within 10 seconds counts as a failed attempt, so a gateway that drops every connection at once cannot cause a reconnect loop. Rejected credentials are never retried.
+- **Faster, consistent start-up.** Device states are taken from the first document of the event stream; if it does not arrive within 30 seconds, Home Assistant retries the setup later. The device list is read once more right after start-up for the cover movement times, which the stream does not carry.
+- A device list from the gateway now updates the known devices in place. Entities and running commands keep a valid device, so a command error can no longer get lost when a list arrives during the command.
+- The 30-minute device list keeps a newer signal strength and last-seen time reported by a telegram in the meantime.
 - **Switch or dimmer and the channel count of D2-01 actuators come from the gateway profile**, read once per EEP combination at setup (gateway data, no radio telegram). Without a profile, a corrected table following the EEP specification applies: the type number is no channel count. D2-01-04, -05 and -09 are single-channel dimmers; D2-01-06, -07, -08, -0A, -0B, -0D, -0E and -0F single-channel switches; D2-01-10, -11 and -12 two-channel switches. Diagnostics show which source decided.
 - Single-channel actuators that earlier releases created as channel 0 get their plain unique ID back; entity ID and settings are kept. Entities of channels or of a platform a device does not have are removed (with a log warning) only when the gateway profile confirmed its outputs. **Devices whose type changes (e.g. a former "light" D2-01-12) get new entities; update automations that used the old ones.**
 - A cover position or angle reported as `unknown` makes the value unknown instead of keeping the last one; its recorded origin is cleared as well. Command targets of `unknown` are ignored.
@@ -16,6 +20,9 @@ Alignment with the device profiles the OPUS gateway reports (`GET /devices/<id>/
 - The presence detector *Sensor error* and the F6-05-01 water sensor show *OK* / *dry* until something is reported, instead of *unknown*.
 
 ### Added
+- Diagnostics: `first_device_list_seconds` (time from opening the stream to its first device list), and per cover `last_vertical_movement_time` (the last run duration the gateway reports, if any) and `position_origin` per channel (`device list`, `reported`, `estimated` or `assumed`). Diagnostic values only; they never change state and cause no request.
+- Diagnostics also redact the HomeKit QR setup payload (`homekitQR`).
+- CI tests every change against a fixed Home Assistant 2026.10.2 (with hassfest built from the same core commit and an icon check) in addition to the latest stable release.
 - **Blinds (D2-05-00/02):** diagnostic *Blockage* switch (`lockingMode` block/unblock, a D2-05-00 `alarm` counts as blocked; attribute `locking_mode`) and diagnostic buttons *Reference run via top/bottom* (`repositioning`).
 - **Blinds:** diagnostic *Last run time* sensor with the measured seconds from a position command to the end report, with direction, start and end position and a full-travel flag; every measured run is logged at info level and listed in the diagnostics.
 - Action `opus_greennet.set_cover_position` with an optional reference run (`direct`, `first_up`, `first_down`).
@@ -26,9 +33,33 @@ Alignment with the device profiles the OPUS gateway reports (`GET /devices/<id>/
 - Diagnostic battery level sensor for HOPPE handles (D2-06-40, F6-10-00, D2-03-10); mains-powered actuators get none.
 
 ### Fixed
+- The first telegram after start-up no longer rewrites every entity of the device once.
+- HTTP errors and gateway errors are told apart: the HTTP status line and the gateway's own status are checked separately, and errors name both without exposing credentials.
+- Every streamed document is limited to 8 MB, also when it arrives in one chunk.
 - F6-10-00 handles report a tilted handle as `up`; it is now shown as *tilted* instead of *unknown*. The gateway's misspelt `unkown` stays unknown.
 - A5-07-01 presence detectors no longer get an illuminance entity that could never report.
 - Positive movement and rotation times from another controller's D2-05-00 "Set parameters" command (milliseconds) are no longer taken over as seconds.
+
+### Unchanged
+- No additional radio traffic, intervals or command repetitions; the 5-second grace period after a cover's travel time stays. Entity IDs, unique IDs and settings are unchanged.
+
+## [1.0.0b1] - 2026-10-20
+
+Second beta of 1.0 (REST). It is based on the final MQTT release v0.8.0, so v0.8.0 is now the stable release and the MQTT fallback, and an update from v0.8.0 works like one from v0.7.0 (enter the gateway address once).
+
+### Requirement
+- **Home Assistant 2026.10.1 or newer**, also for manual installs. HACS checks this; a manual copy does not, and on older versions setup fails with `ImportError: cannot import name 'ATTR_BRIGHTNESS'`.
+
+### Fixed
+- A command the gateway queues for a sleeping battery device (status 201, SoftSmartAck) no longer shows the commanded value in advance and starts no cover travel estimate; the entity keeps the reported state until the device reports (approach from @fubu2k's v0.8.0 work).
+
+### Changed
+- Rocker event entities use the `button` device class, so the frontend shows a button icon by default. Entity IDs, event types and automations are unchanged (from @fubu2k's v0.8.0 work).
+
+### Beta testing
+- Confirmed by beta testers on v1.0.0b0: migration with unchanged entity IDs, blinds (D2-05-02), switches and two-channel actuators, OPUS motion detectors, stand-alone rocker switches and recovery after a gateway restart. Thanks @drldm and @nlsrchtr!
+- **Not yet tested on hardware:** HeatArea climate, RWM smoke detectors, SMS presence detectors, HOPPE handles, contacts, A5-04 temperature sensors, blind tilt and commands from Apple Home or the OPUS app.
+- Please report in the pinned beta issue (#79).
 
 ## [1.0.0b1] - 2026-10-20
 
