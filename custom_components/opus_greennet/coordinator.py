@@ -155,6 +155,20 @@ def stream_retry_delay(failures: int, random_share: float | None = None) -> floa
     return nominal * (1.0 + STREAM_BACKOFF_JITTER * share)
 
 
+def _is_timed_parameter(function: WireFunction) -> bool:
+    """Return whether a command sets a cover movement or rotation duration.
+
+    The device list reports these times in seconds; the D2-05-00 "Set
+    parameters" command of another controller uses milliseconds. Only a
+    positive number has a unit; zero and ``noRotation`` mean no rotation in
+    both and stay usable.
+    """
+    if function.get("key") not in (KEY_ROTATION_TIME, KEY_VERTICAL_MOVEMENT_TIME):
+        return False
+    number = EnOceanDevice._parse_number(function.get("value"))
+    return number is not None and number > 0
+
+
 def request_error(key: str, device_id: str, reason: str = "") -> HomeAssistantError:
     """Create a translated request error without logging sensitive payloads."""
     return HomeAssistantError(
@@ -923,10 +937,7 @@ class OpusGreenNetCoordinator:
                     function.get("key") in (KEY_POSITION, KEY_ANGLE)
                     and function.get("value") == VALUE_UNKNOWN
                 )
-                # Movement and rotation times come from the device list in
-                # seconds; a "Set parameters" command (D2-05-00) uses ms.
-                and function.get("key")
-                not in (KEY_ROTATION_TIME, KEY_VERTICAL_MOVEMENT_TIME)
+                and not _is_timed_parameter(function)
             ]
         update: dict[str, object] = {"functions": applied}
         if not is_outbound:

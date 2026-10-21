@@ -633,8 +633,11 @@ def test_foreign_set_parameters_command_keeps_configured_times() -> None:
             {"key": "verticalMovementTime", "value": 30000},
             {"key": "lockingMode", "value": "block"},
         )
-    assert (channel.rotation_time, channel.vertical_movement_time) == (1.2, 30.0)
-    assert channel.locking_mode == "block"
+        assert (channel.rotation_time, channel.vertical_movement_time) == (1.2, 30.0)
+        assert channel.locking_mode == "block"
+        # Zero has no unit: no rotation, as before.
+        _outbound(coord, {"key": "rotationTime", "value": 0})
+    assert channel.rotation_time == 0
 
 
 @pytest.mark.parametrize(

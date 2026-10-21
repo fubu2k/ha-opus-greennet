@@ -42,6 +42,8 @@ RUNTIME_FIELDS = {
     "last_update_dispatched_monotonic",
     "last_command_error",
     "channels",
+    # Gateway profile read at setup; dropped when the announced EEPs change.
+    "profile",
 }
 
 
