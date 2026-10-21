@@ -42,7 +42,10 @@ from tests.ha_helpers import configure_bridge, setup_bridge, wait_for_entity, wa
             "D2-06-40",
             "lock",
             "autolock",
-            {"states": [{"key": "lock", "value": "locked"}]},
+            {
+                "states": [{"key": "lock", "value": "locked"}],
+                "targetState": [{"key": "unlock", "value": "notAllowed"}],
+            },
             "locked",
         ),
     ],

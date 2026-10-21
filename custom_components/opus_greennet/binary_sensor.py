@@ -38,6 +38,10 @@ BOOLEAN_CHANNEL_STATES: Final[dict[str, Callable[[EnOceanChannel], bool | None]]
     "mechanics_fault": lambda channel: channel.mechanics_fault,
     "smoke_alarm": lambda channel: channel.smoke_alarm,
     "battery_low": lambda channel: channel.battery_low,
+    # LOCK device class: on = unlocked.
+    "bolt_unlocked": lambda channel: (
+        None if channel.is_locked is None else not channel.is_locked
+    ),
 }
 
 
@@ -159,6 +163,20 @@ async def async_setup_entry(
                     )
                 )
             if device.has_autolock:
+                # Lock-bolt the handle reports; the lock entity is the stored
+                # answer to its unlock request.
+                entities.append(
+                    OpusGreenNetStateBinarySensor(
+                        coordinator,
+                        eag_id,
+                        gateway_device_id,
+                        device,
+                        "lock_bolt",
+                        "bolt_unlocked",
+                        BinarySensorDeviceClass.LOCK,
+                        entity_category=EntityCategory.DIAGNOSTIC,
+                    )
+                )
                 # Mechanics fault (Mechanik-Fehler) serves troubleshooting: a
                 # diagnostic entity, disabled only for NEW registry entries.
                 entities.append(

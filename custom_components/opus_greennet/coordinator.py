@@ -66,11 +66,14 @@ from .const import (
     KEY_REPOSITIONING,
     KEY_ROTATION_TIME,
     KEY_STOP,
+    KEY_UNLOCK,
     KEY_VERTICAL_MOVEMENT_TIME,
     RAMPING_MODE_FADE,
     RAMPING_MODE_SWITCH,
     REPOSITIONING_FIRST_DOWN,
     REPOSITIONING_FIRST_UP,
+    UNLOCK_ALLOWED,
+    UNLOCK_NOT_ALLOWED,
     VALUE_UNKNOWN,
 )
 from .enocean_device import DeviceProfile, EnOceanDevice
@@ -84,6 +87,9 @@ SIGNAL_DEVICE_DISCOVERED = f"{DOMAIN}_device_discovered"
 
 # Gateway answer to a state command.
 SOFT_SMART_ACK_STATUS = 201
+# The gateway stored the command as the device's target state; it answers the
+# device's next request with it (HOPPE SecureConnect unlock permission).
+TARGET_STATE_STATUS = 202
 
 
 class CommandDelivery(StrEnum):
@@ -91,7 +97,8 @@ class CommandDelivery(StrEnum):
 
     SENT = "sent"  # 200: the telegram went out over the radio.
     # 201 (SoftSmartAck): queued until the sleeping device wakes up and asks
-    # for it. The device has not received anything yet.
+    # for it; 202: stored as the device's target state for its next request.
+    # The device has not received anything yet.
     DEFERRED = "deferred"
 
 
@@ -1599,7 +1606,8 @@ class OpusGreenNetCoordinator:
                 raise
             delivery = (
                 CommandDelivery.DEFERRED
-                if response_status(response) == SOFT_SMART_ACK_STATUS
+                if response_status(response)
+                in (SOFT_SMART_ACK_STATUS, TARGET_STATE_STATUS)
                 else CommandDelivery.SENT
             )
             if delivery is CommandDelivery.DEFERRED:
@@ -1747,6 +1755,23 @@ class OpusGreenNetCoordinator:
         return await self.async_send_command(
             device_id, self._with_channel_if_needed(device_id, functions, channel)
         )
+
+    async def async_set_handle_unlock(
+        self, device_id: str, *, allowed: bool
+    ) -> CommandDelivery:
+        """Unlock (``allowed``) or lock (``notAllowed``) a HOPPE AutoLock handle.
+
+        The handle sleeps between uses; the gateway then queues the answer
+        (201, SoftSmartAck) until the handle wakes up, e.g. when its button
+        is pressed.
+        """
+        functions: list[WireFunction] = [
+            {
+                "key": KEY_UNLOCK,
+                "value": UNLOCK_ALLOWED if allowed else UNLOCK_NOT_ALLOWED,
+            }
+        ]
+        return await self.async_send_command(device_id, functions)
 
     async def async_set_cover_locking_mode(
         self,

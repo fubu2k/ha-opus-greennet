@@ -46,7 +46,7 @@ over IP REST API: no MQTT broker and no broker bridge are needed.
 | **Sensor** | A5-04-01, A5-04-02, A5-04-03, A5-07-01, A5-07-03, _(from climate devices)_ | Temperature and humidity (A5-04-01/02/03, including the OPUS motion detector), illuminance (A5-07-03 only), supply voltage, battery level, humidity, feed temperature, power consumption, signal strength |
 | **Binary Sensor** | D5-00-01, F6-05-01, F6-05-02, A5-07-01, A5-07-03, F6-02-01 + A5-04-01, D2-01 with local control, _(from climate devices)_ | Contact open/closed state, SMS motion detection and sensor error (diagnostic), OPUS motion detector (`buttonAI` = motion, `buttonA0` = no motion), water leak detection, RWM smoke alarm and low battery, window open, actuator errors, battery low, local control (diagnostic, disabled by default) |
 | **Handle sensors** | D2-06-40, F6-10-00, D2-03-10 | Handle position plus separate open, tilted and closed binary sensors, battery level (diagnostic) |
-| **Lock** | D2-06-40 | Read-only AutoLock status, unlock-request sensor and mechanics-fault binary sensor |
+| **Lock** | D2-06-40 | AutoLock: lock and unlock the handle, unlock-request sensor and mechanics-fault binary sensor |
 | **Event** | F6-02-01, F6-02-02, F6-02-03, F6-03-01, F6-03-02 | Rocker switch press/release events, per button (`buttonA0_pressed`, `buttonA0_released`, …, `multipleButtons_released`) with `button` and `action` event attributes; F6-03 rockers also report `buttonC0` … `buttonDI` |
 
 ### Switch or dimmer, and channel count (D2-01)
@@ -146,11 +146,20 @@ measurement of the window sash. For Cover Control Automation, assign the Open
 and Tilted binary sensors to its respective window-contact inputs.
 
 D2-06-40 also exposes the reported lock state independently of handle position,
-an unlock-request sensor, and a mechanics-fault sensor. AutoLock is read-only:
-lock/unlock actions raise an error without sending a command to the gateway. A
-reporter's tested write path disrupted the gateway, and control remains disabled
-pending manufacturer clarification. AutoLock configuration and
-reported lock state are separate; a closed handle does not imply a locked handle.
+an unlock-request sensor, a mechanics-fault sensor and a diagnostic **Lock
+bolt** binary sensor (the reported lock-bolt, on = unlocked). The **AutoLock**
+lock entity sets the answer the gateway gives the handle: when the handle's
+button is pressed, the handle asks whether it may be unlocked
+(`unlock = requested`, attribute `unlock_requested`). *Unlocked* stores
+`unlock = allowed`: the button lights green and the handle can be turned.
+*Locked* stores `notAllowed`: the button lights red and the handle stays
+locked. The gateway keeps this answer as the handle's target state (it
+acknowledges with status 202) and uses it at every request, also while the
+handle sleeps; the lock entity shows that stored answer, read from the device
+list at start-up. The attribute `bolt_locked` repeats the reported lock-bolt.
+Quick changes settle for 10 seconds (the entity shows *locking*/*unlocking*):
+only the last one is sent, because the gateway queues every answer for the
+sleeping handle and an earlier one could otherwise reach it first.
 
 ### Water sensors (F6-05-01)
 
@@ -364,7 +373,8 @@ zone does not by itself prove that it is currently heating.
   status query.
 - Cover positions during movement are estimates based on the reported travel
   time. The final position comes from the device report or status query.
-- The HOPPE AutoLock entity is read-only; lock and unlock actions are rejected.
+- A HOPPE AutoLock answer queued for the sleeping handle takes effect only when
+  the handle wakes up (e.g. at its next button press).
 - The gateway is not discovered automatically; its address is entered once.
   Give the gateway a fixed address, or update it with **Reconfigure**.
 - The gateway's API is plain HTTP with basic authentication, as provided by the
@@ -570,7 +580,7 @@ custom_components/opus_greennet/
 ├── enocean_device.py     # Device and channel data model
 ├── entity.py             # Shared entity and device-registry behavior
 ├── diagnostics.py        # Redacted integration diagnostics
-├── lock.py               # Read-only HOPPE AutoLock status
+├── lock.py               # HOPPE AutoLock lock entity (lock/unlock)
 ├── light.py              # Light entity platform
 ├── switch.py             # Switch entity platform
 ├── cover.py              # Cover entity platform
@@ -617,7 +627,8 @@ tests/
 ├── test_contact_sensor.py       # D5-00-01 states, live updates, and reload
 ├── test_opus_motion_detector.py # OPUS motion detector (F6-02-01 + A5-04-01)
 ├── test_scalar_telemetry.py     # Battery level and signal strength
-├── test_window_handles.py       # Handle positions and protected AutoLock actions
+├── test_window_handles.py       # Handle positions and AutoLock actions
+├── test_autolock_control.py     # AutoLock commands, transitions and unlock requests
 ├── test_device_removal.py       # Child removal, rediscovery and request isolation
 ├── test_cover_stop.py           # Stop command encoding and follow-up queries
 ├── test_cover_movement.py       # Estimated travel, feedback, timing and cleanup

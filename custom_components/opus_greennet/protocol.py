@@ -24,6 +24,7 @@ from .const import (
     KEY_STOP,
     KEY_SWITCH,
     KEY_TEMPERATURE_SETPOINT,
+    KEY_UNLOCK,
     KEY_VERTICAL_MOVEMENT_TIME,
     KNOWN_STATE_KEYS,
     LOCKING_MODES,
@@ -264,6 +265,17 @@ def device_state_functions(data: WireMapping) -> list[WireFunction]:
         )
     if "batteryLevel" in data:
         state_functions.append({"key": "batteryLevel", "value": data["batteryLevel"]})
+    # The answer the gateway stores for a sleeping device's next request
+    # (HOPPE unlock permission) is listed as ``targetState``.
+    targets = data.get("targetState")
+    if isinstance(targets, list):
+        state_functions.extend(
+            target
+            for target in targets
+            if isinstance(target, dict)
+            and target.get("key") == KEY_UNLOCK
+            and "value" in target
+        )
     return state_functions + configuration_state_functions(data)
 
 

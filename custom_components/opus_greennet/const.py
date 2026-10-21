@@ -195,6 +195,12 @@ KEY_CONTACT: Final = "contact"
 KEY_ILLUMINATION: Final = "illumination"
 VALUE_OVER_RANGE: Final = "overRange"
 KEY_ERROR_CODE: Final = "errorCode"
+# HOPPE SecureConnect (D2-06-40): the handle reports an unlock request
+# ("from": requested/notRequested); the controller answers ("to": allowed or
+# notAllowed), which unlocks or locks the handle.
+KEY_UNLOCK: Final = "unlock"
+UNLOCK_ALLOWED: Final = "allowed"
+UNLOCK_NOT_ALLOWED: Final = "notAllowed"
 ERROR_CODE_NONE: Final = "noError"
 
 # Climate function keys

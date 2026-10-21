@@ -29,7 +29,7 @@ PROFILES = [
     # Motion and the diagnostic sensor error (errorCode).
     ("A5-07-01", 2),
     ("A5-07-03", 2),
-    ("D2-06-40", 4),
+    ("D2-06-40", 5),
     ("F6-10-00", 3),
     ("D2-03-10", 3),
 ]
