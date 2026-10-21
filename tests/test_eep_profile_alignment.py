@@ -852,7 +852,7 @@ async def test_local_control_and_sensor_error_binary_sensors() -> None:
 
 
 @pytest.mark.parametrize(
-    ("code", "expected"), [(None, None), ("noError", False), ("252", True)]
+    ("code", "expected"), [(None, False), ("noError", False), ("252", True)]
 )
 def test_sensor_error_state(code, expected) -> None:
     device = _device("A5-07-03")

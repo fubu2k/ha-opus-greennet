@@ -40,11 +40,24 @@ def diagnostic_value(
     return None if value is None else value != "reset"
 
 
-def error_code_problem(device: EnOceanDevice) -> bool | None:
-    """Report a problem for an error code, none for ``noError``."""
+def error_code_problem(device: EnOceanDevice) -> bool:
+    """Report a problem only for a reported error code.
+
+    The detector sends an error code only when one occurs; without one the
+    sensor shows "OK" instead of "unknown".
+    """
     channel = device.channels.get(DEFAULT_CHANNEL)
     code = channel.error_code if channel is not None else None
-    return None if code is None else code != ERROR_CODE_NONE
+    return code is not None and code != ERROR_CODE_NONE
+
+
+def liquid_detected(device: EnOceanDevice) -> bool:
+    """Report water only after the sensor reported it.
+
+    F6-05-01 sends only on a change, and the gateway lists no state for it, so
+    without a report the sensor shows "dry" instead of "unknown".
+    """
+    return channel_boolean(device, lambda c: c.liquid_detected) is True
 
 
 BINARY_SENSOR_DESCRIPTIONS = (
@@ -52,7 +65,7 @@ BINARY_SENSOR_DESCRIPTIONS = (
         key="liquid_detected",
         translation_key="water_leak",
         applies_to=lambda device: device.primary_eep == "F6-05-01",
-        value_fn=lambda device: channel_boolean(device, lambda c: c.liquid_detected),
+        value_fn=liquid_detected,
         device_class=BinarySensorDeviceClass.MOISTURE,
     ),
     OpusBinarySensorDescription(

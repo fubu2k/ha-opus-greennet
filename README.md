@@ -85,7 +85,7 @@ the room is certainly empty; Home Assistant shows it as `off` (no motion). An
 illumination above the sensor range (`overRange`, above 1000 lx) is shown as the
 range maximum with the attribute `over_range: true`. The diagnostic *Sensor
 error* binary sensor is on while the detector reports an error code (251-255)
-and off for `noError`. A5-07-01 has no illumination sensor, so no illuminance
+and off (OK) otherwise, also while no error code has been reported. A5-07-01 has no illumination sensor, so no illuminance
 entity is created for it.
 
 D2-01 dimmers switch to the new brightness at once, like commands from Apple
@@ -151,6 +151,13 @@ lock/unlock actions raise an error without sending a command to the gateway. A
 reporter's tested write path disrupted the gateway, and control remains disabled
 pending manufacturer clarification. AutoLock configuration and
 reported lock state are separate; a closed handle does not imply a locked handle.
+
+### Water sensors (F6-05-01)
+
+The water leak sensor sends only when its state changes, and the gateway
+lists no state for it. Until it has reported water, the binary sensor shows
+*dry* instead of *unknown*; an outage of the gateway still shows
+*unavailable*.
 
 ### Single input contacts
 
