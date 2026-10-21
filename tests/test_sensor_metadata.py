@@ -99,7 +99,8 @@ def test_measurement_metadata_is_scoped(make_device) -> None:
         assert sensor.entity_registry_enabled_default is True
         assert sensor.device_class is SensorDeviceClass.BATTERY
     assert illuminance.entity_category is None
-    assert illuminance.suggested_display_precision is None
+    # Illuminance is shown in whole lux (display only).
+    assert illuminance.suggested_display_precision == 0
 
 
 @pytest.mark.parametrize("eep", ["A5-07-01", "A5-07-03"])

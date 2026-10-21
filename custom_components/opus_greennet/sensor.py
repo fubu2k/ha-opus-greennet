@@ -47,10 +47,14 @@ MEASUREMENT_READINGS: Final[dict[str, Callable[[EnOceanChannel], float | None]]]
     "battery_level": lambda channel: channel.battery_level,
 }
 
-# Battery levels are shown as whole percent for every OPUS device with a
-# battery level. Display only: the reported state and history are unchanged,
-# and a user-chosen display precision in the entity settings takes precedence.
-MEASUREMENT_DISPLAY_PRECISION: Final[dict[str, int]] = {"battery_level": 0}
+# Battery levels are shown as whole percent and the presence detector's
+# illuminance as whole lux. Display only: the reported state and history are
+# unchanged, and a user-chosen display precision in the entity settings takes
+# precedence.
+MEASUREMENT_DISPLAY_PRECISION: Final[dict[str, int]] = {
+    "battery_level": 0,
+    "illuminance": 0,
+}
 
 
 async def async_setup_entry(
