@@ -22,7 +22,9 @@ def _states(fields: dict) -> list[dict]:
     return [{"key": key, "value": value} for key, value in fields.items()]
 
 
-@pytest.mark.parametrize("eep", ["A5-07-01", "A5-07-03"])
+# A5-07-01 reports no illumination (EEP profile); test_detector_support covers
+# its other readings.
+@pytest.mark.parametrize("eep", ["A5-07-03"])
 async def test_presence_reported_payloads_reach_entities(
     hass: HomeAssistant, gateway: FakeGateway, eep: str
 ) -> None:

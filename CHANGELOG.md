@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+Alignment with the device profiles the OPUS gateway reports (`GET /devices/<id>/profile`), checked against an OPUS-IQ-DOT 1.21.30.
+
+### Changed
+- **Switch or dimmer and the channel count of D2-01 actuators come from the gateway profile**, read once per EEP combination at setup (gateway data, no radio telegram). Without a profile, a corrected table following the EEP specification applies: the type number is no channel count. D2-01-04, -05 and -09 are single-channel dimmers; D2-01-06, -07, -08, -0A, -0B, -0D, -0E and -0F single-channel switches; D2-01-10, -11 and -12 two-channel switches. Diagnostics show which source decided.
+- Single-channel actuators that earlier releases created as channel 0 get their plain unique ID back; entity ID and settings are kept. Entities of channels or of a platform a device does not have are removed (with a log warning) only when the gateway profile confirmed its outputs. **Devices whose type changes (e.g. a former "light" D2-01-12) get new entities; update automations that used the old ones.**
+- A cover position or angle reported as `unknown` makes the value unknown instead of keeping the last one; its recorded origin is cleared as well. Command targets of `unknown` are ignored.
+- Rocker and button event entities are enabled but hidden by default (new entities only).
+- HOPPE handle Open, Tilted and Closed binary sensors are diagnostic entities (enabled and visible).
+- Presence detector illuminance is shown in whole lux (display only).
+- The presence detector *Sensor error* and the F6-05-01 water sensor show *OK* / *dry* until something is reported, instead of *unknown*.
+
+### Added
+- **Blinds (D2-05-00/02):** diagnostic *Blockage* switch (`lockingMode` block/unblock, a D2-05-00 `alarm` counts as blocked; attribute `locking_mode`) and diagnostic buttons *Reference run via top/bottom* (`repositioning`).
+- **Blinds:** diagnostic *Last run time* sensor with the measured seconds from a position command to the end report, with direction, start and end position and a full-travel flag; every measured run is logged at info level and listed in the diagnostics.
+- Action `opus_greennet.set_cover_position` with an optional reference run (`direct`, `first_up`, `first_down`).
+- Event entity *Buttons* (unique ID suffix `_buttons`) for the buttons built into actuators (F6-02/F6-03 announced next to a switch, dimmer or blind); F6-03 rockers also report rockers C and D.
+- Diagnostic *Local control* binary sensor (disabled by default) for D2-01 actuators that report `localControl`.
+- Diagnostic *Sensor error* binary sensor for A5-07 presence detectors (`errorCode`).
+- Presence detector illumination above the sensor range (`overRange`) is shown as 1000 lx with the attribute `over_range`.
+- Diagnostic battery level sensor for HOPPE handles (D2-06-40, F6-10-00, D2-03-10); mains-powered actuators get none.
+
+### Fixed
+- F6-10-00 handles report a tilted handle as `up`; it is now shown as *tilted* instead of *unknown*. The gateway's misspelt `unkown` stays unknown.
+- A5-07-01 presence detectors no longer get an illuminance entity that could never report.
+- Positive movement and rotation times from another controller's D2-05-00 "Set parameters" command (milliseconds) are no longer taken over as seconds.
+
 ## [1.0.0b1] - 2026-10-20
 
 Second beta of 1.0 (REST). It is based on the final MQTT release v0.8.0, so v0.8.0 is now the stable release and the MQTT fallback, and an update from v0.8.0 works like one from v0.7.0 (enter the gateway address once).

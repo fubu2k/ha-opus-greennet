@@ -60,6 +60,8 @@ def _device_requests(gateway: FakeGateway, start: int = 0) -> list[str]:
         path
         for _method, path, _body in gateway.requests[start:]
         if path.startswith("/devices/HANDLE")
+        # The profile read at setup is gateway data, not radio traffic.
+        and not path.endswith("/profile")
     ]
 
 
@@ -113,9 +115,14 @@ def test_entity_metadata_is_limited_to_the_two_diagnostics(make_device) -> None:
     assert fault.unique_id == f"{PREFIX}_mechanics_fault"
     assert fault.device_class is BinarySensorDeviceClass.PROBLEM
     # Normal handle entities and other boolean sensors keep their defaults.
-    for normal in (position, motion, opened):
+    for normal in (position, motion):
         assert normal.entity_category is None
         assert normal.entity_registry_enabled_default is True
+    # Handle position binary sensors serve automations: diagnostic, enabled,
+    # visible.
+    assert opened.entity_category is EntityCategory.DIAGNOSTIC
+    assert opened.entity_registry_enabled_default is True
+    assert opened.entity_registry_visible_default is True
 
 
 @pytest.mark.parametrize("eep", ["D2-06-40", "F6-10-00", "D2-03-10"])
@@ -128,7 +135,10 @@ async def test_new_handle_registers_disabled_diagnostics(hass, gateway, eep):
         entity_id = await wait_for_entity(hass, domain, f"{PREFIX}_{suffix}")
         entry = registry.async_get(entity_id)
         assert entry.disabled_by is None
-        assert entry.entity_category is None
+        assert entry.hidden_by is None
+        assert entry.entity_category is (
+            EntityCategory.DIAGNOSTIC if domain == "binary_sensor" else None
+        )
         assert hass.states.get(entity_id).state == expected
 
     if eep == "D2-06-40":

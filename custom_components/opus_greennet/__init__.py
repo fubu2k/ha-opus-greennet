@@ -32,7 +32,15 @@ from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.typing import ConfigType
 
 from .api import OpusApiError, OpusAuthError, OpusGatewayClient
-from .const import CONF_EAG_ID, DEFAULT_PORT, DEFAULT_USERNAME, DOMAIN
+from .const import (
+    CONF_EAG_ID,
+    DEFAULT_PORT,
+    DEFAULT_USERNAME,
+    DOMAIN,
+    REPOSITIONING_DIRECT,
+    REPOSITIONING_FIRST_DOWN,
+    REPOSITIONING_FIRST_UP,
+)
 from .coordinator import GatewayMismatchError, OpusGreenNetCoordinator
 from .entity import async_delete_config_entry_issues
 
@@ -41,6 +49,7 @@ _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS: list[Platform] = [
+    Platform.BUTTON,
     Platform.LIGHT,
     Platform.SWITCH,
     Platform.COVER,
@@ -55,7 +64,17 @@ SERVICE_GET_DEVICE_CONFIG = "get_device_configuration"
 SERVICE_SET_DEVICE_CONFIG = "set_device_configuration"
 SERVICE_GET_DEVICE_PARAMS = "get_device_parameters"
 SERVICE_RELOAD_ENTRY = "reload_entry"
+SERVICE_SET_COVER_POSITION = "set_cover_position"
 ATTR_DEVICE_ID = "device_id"
+ATTR_POSITION = "position"
+ATTR_REPOSITIONING = "repositioning"
+ATTR_CHANNEL = "channel"
+# Service values (snake case for the selector translations) -> wire values.
+REPOSITIONING_OPTIONS: dict[str, str] = {
+    "direct": REPOSITIONING_DIRECT,
+    "first_up": REPOSITIONING_FIRST_UP,
+    "first_down": REPOSITIONING_FIRST_DOWN,
+}
 ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 ATTR_CONFIGURATION = "configuration"
 
@@ -70,6 +89,21 @@ SERVICE_SET_CONFIG_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Required(ATTR_CONFIGURATION): dict,
+        vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
+    }
+)
+
+
+SERVICE_SET_COVER_POSITION_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): cv.string,
+        vol.Required(ATTR_POSITION): vol.All(vol.Coerce(int), vol.Range(0, 100)),
+        vol.Optional(ATTR_REPOSITIONING, default="direct"): vol.In(
+            REPOSITIONING_OPTIONS
+        ),
+        vol.Optional(ATTR_CHANNEL, default=0): vol.All(
+            vol.Coerce(int), vol.Range(min=0)
+        ),
         vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
     }
 )
@@ -295,6 +329,37 @@ def _register_services(hass: HomeAssistant) -> None:
         _validate_service_device(coordinator, device_id)
         return await coordinator.async_get_device_parameters(device_id)
 
+    async def handle_set_cover_position(call: ServiceCall) -> None:
+        coordinator = _coordinator_for_call(hass, call)
+        device_id = call.data[ATTR_DEVICE_ID]
+        _validate_service_device(coordinator, device_id)
+        device = coordinator.get_device(device_id)
+        repositioning = REPOSITIONING_OPTIONS[call.data[ATTR_REPOSITIONING]]
+        channel = call.data[ATTR_CHANNEL]
+        if (
+            device is None
+            or not device.is_cover
+            or channel >= device.channel_count
+            or (
+                repositioning != REPOSITIONING_DIRECT
+                and not device.supports_repositioning
+            )
+        ):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="repositioning_not_supported",
+                translation_placeholders={"device_id": device_id},
+            )
+        # Home Assistant position (100 = open) -> OPUS position (0 = open).
+        await coordinator.async_set_cover_position(
+            device_id,
+            100 - call.data[ATTR_POSITION],
+            channel,
+            repositioning=(
+                None if repositioning == REPOSITIONING_DIRECT else repositioning
+            ),
+        )
+
     async def handle_reload_entry(call: ServiceCall) -> None:
         config_entry_id = call.data.get(ATTR_CONFIG_ENTRY_ID)
         if config_entry_id:
@@ -327,6 +392,12 @@ def _register_services(hass: HomeAssistant) -> None:
         handle_get_device_parameters,
         schema=SERVICE_DEVICE_SCHEMA,
         supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_COVER_POSITION,
+        handle_set_cover_position,
+        schema=SERVICE_SET_COVER_POSITION_SCHEMA,
     )
     async_register_admin_service(
         hass,

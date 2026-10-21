@@ -28,7 +28,7 @@ from .coordinator import (
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanDevice
-from .entity import OpusGreenNetEntity, migrate_legacy_multichannel_entity
+from .entity import OpusGreenNetEntity, migrate_output_entities
 
 # The coordinator serializes commands per device; entities receive pushed state.
 PARALLEL_UPDATES = 0
@@ -51,7 +51,7 @@ async def async_setup_entry(
         if device.entity_type != "light":
             return
 
-        migrate_legacy_multichannel_entity(
+        migrate_output_entities(
             entity_registry,
             LIGHT_DOMAIN,
             eag_id,

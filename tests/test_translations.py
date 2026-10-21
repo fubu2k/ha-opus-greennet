@@ -20,6 +20,7 @@ from homeassistant.config_entries import ConfigEntryState
 
 from custom_components.opus_greennet import (
     binary_sensor,
+    button,
     climate,
     cover,
     event,
@@ -39,6 +40,7 @@ TRANSLATIONS = {
 }
 PLATFORMS = {
     "binary_sensor": binary_sensor,
+    "button": button,
     "climate": climate,
     "cover": cover,
     "event": event,

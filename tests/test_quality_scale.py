@@ -28,6 +28,7 @@ from homeassistant.util.yaml import load_yaml_dict
 import custom_components.opus_greennet as integration_package
 from custom_components.opus_greennet import (
     binary_sensor,
+    button,
     climate,
     cover,
     diagnostics,
@@ -45,7 +46,17 @@ QUALITY_SCALE = INTEGRATION / "quality_scale.yaml"
 EVIDENCE = ROOT / "docs/quality/quality-scale-evidence.md"
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 MANIFEST = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
-PLATFORM_MODULES = [binary_sensor, climate, cover, event, light, lock, sensor, switch]
+PLATFORM_MODULES = [
+    binary_sensor,
+    button,
+    climate,
+    cover,
+    event,
+    light,
+    lock,
+    sensor,
+    switch,
+]
 
 # ALL_RULES of the official hassfest module, in its order and tiers.
 OFFICIAL_RULES: dict[str, list[str]] = {
