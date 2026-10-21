@@ -97,6 +97,10 @@ class OpusGreenNetEvent(OpusGreenNetEntity, EventEntity):
     # unique ID, event types, name and enablement stay unchanged, and a
     # user-chosen icon still takes precedence.
     _attr_device_class = EventDeviceClass.BUTTON
+    # Button events serve automations: enabled, but hidden from dashboards
+    # by default. Applies to new registry entries; a user's choice and
+    # existing entries are kept.
+    _attr_entity_registry_visible_default = False
 
     def __init__(
         self,

@@ -72,6 +72,12 @@ buttons. They get an event entity named *Buttons* with the unique ID suffix
 `_buttons`, so it never collides with the switch, light or cover entity of the
 same device. Plain rocker switches keep their previous event entity.
 
+All button event entities (rockers and actuator buttons) are meant for
+automations: they are enabled but hidden by default, so they do not appear in
+automatically generated dashboards. This applies to newly created entities;
+existing ones keep their visibility, and you can show or hide them in the
+entity settings.
+
 ### Presence detectors (A5-07)
 
 `motionDetected = false` means the detector is *uncertain of occupancy*, not that
@@ -125,7 +131,9 @@ behaviour. Existing entity IDs, tilt support, and Stop commands are unchanged.
 All three handle profiles provide a position sensor and separate Open, Tilted,
 and Closed binary sensors. `tilt` (D2-03-10) and `up` (F6-10-00) are normalized
 to `tilted`; missing or invalid positions, including the gateway's `unkown`, stay
-unknown. A diagnostic battery level sensor shows the level from the device list. These report handle position, not an independent
+unknown. A diagnostic battery level sensor shows the level from the device list. The
+Open, Tilted and Closed binary sensors are diagnostic entities for automations
+(enabled and visible); the handle position sensor stays the main entity. These report handle position, not an independent
 measurement of the window sash. For Cover Control Automation, assign the Open
 and Tilted binary sensors to its respective window-contact inputs.
 

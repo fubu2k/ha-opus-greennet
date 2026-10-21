@@ -310,6 +310,9 @@ class OpusGreenNetHandlePositionSensor(OpusGreenNetBaseBinarySensor):
         suffix = "handle_tilt" if position == "tilted" else f"handle_{position}"
         super().__init__(coordinator, eag_id, gateway_device_id, device, suffix, suffix)
         self._position = position
+        # The handle sensor shows the position; these binary sensors serve
+        # automations (e.g. window contacts): diagnostic, enabled and visible.
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         # WINDOW displays ON as open, so it must not be used for ON-means-closed.
         self._attr_device_class = (
             BinarySensorDeviceClass.WINDOW if position != "closed" else None

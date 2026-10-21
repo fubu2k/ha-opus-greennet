@@ -59,6 +59,8 @@ def test_rocker_event_is_a_button_with_unchanged_metadata(eep: str) -> None:
     assert entity.event_types == expected
     assert entity.entity_category is None
     assert entity.entity_registry_enabled_default is True
+    # Enabled for automations, hidden from dashboards by default.
+    assert entity.entity_registry_visible_default is False
 
 
 def test_event_types_cover_all_button_action_combinations():

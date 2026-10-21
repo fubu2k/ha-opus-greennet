@@ -1018,7 +1018,10 @@ async def test_blind_blockage_and_set_cover_position_action(
         er.async_get(hass).async_get(blockage).entity_category
         is EntityCategory.DIAGNOSTIC
     )
-    await wait_for_entity(hass, "event", f"{EAG_ID}_BLIND_buttons")
+    buttons = await wait_for_entity(hass, "event", f"{EAG_ID}_BLIND_buttons")
+    buttons_entry = er.async_get(hass).async_get(buttons)
+    assert buttons_entry.disabled_by is None
+    assert buttons_entry.hidden_by is er.RegistryEntryHider.INTEGRATION
     await wait_for_entity(hass, "button", f"{EAG_ID}_BLIND_reference_run_up")
 
     await hass.services.async_call(
