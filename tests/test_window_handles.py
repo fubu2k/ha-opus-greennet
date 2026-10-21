@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -16,6 +18,8 @@ async def test_handle_positions_and_lock_safety(
     hass: HomeAssistant, gateway: FakeGateway, eep: str
 ) -> None:
     gateway.devices = [device_object("HANDLE", eep)]
+    # Lock requests settle before they are sent; not needed in this test.
+    settle = patch("custom_components.opus_greennet.lock.LOCK_SETTLE_SECONDS", 0)
     entry = await setup_bridge(hass, gateway)
     state = await wait_for_entity(hass, "sensor", "AABB0011_HANDLE_handle_state")
     positions = {}
@@ -74,6 +78,7 @@ async def test_handle_positions_and_lock_safety(
         assert hass.states.get(lock).state == "unknown"
         # The gateway stores the answer for the sleeping handle (status 202).
         gateway.responses["/devices/HANDLE/state"] = {"header": {"httpStatus": 202}}
+        settle.start()
         await hass.services.async_call(
             "lock", "unlock", {"entity_id": lock}, blocking=True
         )
@@ -95,6 +100,7 @@ async def test_handle_positions_and_lock_safety(
             telegram("HANDLE", [{"key": "unlock", "value": "allowed"}], direction="to")
         )
         await wait_until(lambda: hass.states.get(lock).state == "unlocked")
+        settle.stop()
     else:
         assert (
             er.async_get(hass).async_get_entity_id(

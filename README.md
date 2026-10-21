@@ -157,6 +157,9 @@ locked. The gateway keeps this answer as the handle's target state (it
 acknowledges with status 202) and uses it at every request, also while the
 handle sleeps; the lock entity shows that stored answer, read from the device
 list at start-up. The attribute `bolt_locked` repeats the reported lock-bolt.
+Quick changes settle for 2 seconds (the entity shows *locking*/*unlocking*):
+only the last one is sent, because the gateway queues every answer for the
+sleeping handle and an earlier one could otherwise reach it first.
 
 ### Water sensors (F6-05-01)
 

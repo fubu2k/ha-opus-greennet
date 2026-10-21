@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+import asyncio
+from collections.abc import Iterator
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.opus_greennet import api, protocol
 from custom_components.opus_greennet.binary_sensor import BOOLEAN_CHANNEL_STATES
 from custom_components.opus_greennet.coordinator import CommandDelivery
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
 from custom_components.opus_greennet.lock import OpusGreenNetAutoLock
+
+LOCK_MODULE = "custom_components.opus_greennet.lock"
+
+
+@pytest.fixture(autouse=True)
+def no_settling() -> Iterator[None]:
+    """Send lock requests without the settle delay unless a test sets one."""
+    with patch(f"{LOCK_MODULE}.LOCK_SETTLE_SECONDS", 0):
+        yield
 
 
 def _handle() -> EnOceanDevice:
@@ -43,7 +55,8 @@ async def test_lock_and_unlock_set_the_stored_answer(delivery) -> None:
         {"allowed": False},
     ]
     assert device.channels[0].unlock_allowed is False
-    assert entity.async_write_ha_state.call_count == 2
+    # Each request: once when it starts settling, once when it is sent.
+    assert entity.async_write_ha_state.call_count == 4
 
 
 async def test_newer_report_wins_over_the_command() -> None:
@@ -56,7 +69,31 @@ async def test_newer_report_wins_over_the_command() -> None:
     coordinator.async_set_handle_unlock = AsyncMock(side_effect=answer)
     await entity.async_lock()
     assert entity.is_locked is False
-    entity.async_write_ha_state.assert_not_called()
+
+
+async def test_quick_changes_send_only_the_last_request() -> None:
+    entity, coordinator, _ = _lock()
+    with patch(f"{LOCK_MODULE}.LOCK_SETTLE_SECONDS", 0.05):
+        first = asyncio.create_task(entity.async_lock())
+        await asyncio.sleep(0)
+        assert (entity.is_locking, entity.is_unlocking) == (True, False)
+        second = asyncio.create_task(entity.async_unlock())
+        await asyncio.sleep(0)
+        assert (entity.is_locking, entity.is_unlocking) == (False, True)
+        await asyncio.gather(first, second)
+    coordinator.async_set_handle_unlock.assert_awaited_once_with("HANDLE", allowed=True)
+    assert (entity.is_locked, entity.is_unlocking) == (False, False)
+
+
+async def test_failed_request_ends_settling() -> None:
+    entity, coordinator, _ = _lock()
+    coordinator.async_set_handle_unlock = AsyncMock(
+        side_effect=HomeAssistantError("rejected")
+    )
+    with pytest.raises(HomeAssistantError):
+        await entity.async_unlock()
+    assert entity.is_unlocking is False
+    assert entity.is_locked is None
 
 
 def test_lock_follows_the_answer_not_the_bolt() -> None:
