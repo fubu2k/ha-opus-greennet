@@ -37,7 +37,7 @@ rules:
     comment: The integration has no Python requirements (manifest requirements is empty).
   docs-actions:
     status: done
-    comment: README section Services.
+    comment: docs/devices.md section Actions.
   docs-conditions:
     status: exempt
     comment: The integration provides no conditions.
@@ -46,7 +46,7 @@ rules:
     comment: README introduction and Features.
   docs-installation-instructions:
     status: done
-    comment: README Prerequisites and Installation.
+    comment: README Compatibility and Installation; docs/upgrading.md.
   docs-removal-instructions:
     status: done
     comment: README section Removing the integration.
@@ -109,22 +109,22 @@ rules:
       is entered through the reconfigure flow, or by adding the gateway again.
   docs-data-update:
     status: done
-    comment: README section Availability and command behavior.
+    comment: docs/how-it-works.md section Updates and availability.
   docs-examples:
     status: todo
     comment: No automation or dashboard examples are documented yet.
   docs-known-limitations:
     status: done
-    comment: README section Known limitations.
+    comment: README and docs/how-it-works.md section Known limitations.
   docs-supported-devices:
     status: done
-    comment: README section Supported Device Types.
+    comment: README section Supported devices; docs/devices.md.
   docs-supported-functions:
     status: done
-    comment: README sections Features, Supported Device Types and Services.
+    comment: README sections Features and Supported devices; docs/devices.md.
   docs-troubleshooting:
     status: done
-    comment: README section Troubleshooting.
+    comment: README section Troubleshooting; docs/troubleshooting.md.
   docs-use-cases:
     status: todo
     comment: No use-case section is documented yet.

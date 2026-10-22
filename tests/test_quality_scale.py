@@ -456,23 +456,33 @@ def test_actions_are_set_up_in_async_setup() -> None:
 
 
 @pytest.mark.parametrize(
-    ("rule", "heading"),
+    ("rule", "document", "heading"),
     [
-        ("docs-actions", "## Services"),
-        ("docs-high-level-description", "## Features"),
-        ("docs-installation-instructions", "## Installation"),
-        ("docs-removal-instructions", "## Removing the integration"),
-        ("docs-installation-parameters", "## Configuration"),
-        ("docs-data-update", "## Availability and command behavior"),
-        ("docs-known-limitations", "## Known limitations"),
-        ("docs-supported-devices", "## Supported Device Types"),
-        ("docs-supported-functions", "## Features"),
-        ("docs-troubleshooting", "## Troubleshooting"),
+        ("docs-actions", "docs/devices.md", "## Actions"),
+        ("docs-high-level-description", "README.md", "## Features"),
+        ("docs-installation-instructions", "README.md", "## Installation"),
+        ("docs-removal-instructions", "README.md", "## Removing the integration"),
+        ("docs-installation-parameters", "README.md", "## Configuration"),
+        ("docs-data-update", "docs/how-it-works.md", "## Updates and availability"),
+        ("docs-known-limitations", "README.md", "## Known limitations"),
+        ("docs-known-limitations", "docs/how-it-works.md", "## Known limitations"),
+        ("docs-supported-devices", "README.md", "## Supported devices"),
+        ("docs-supported-functions", "README.md", "## Features"),
+        ("docs-troubleshooting", "README.md", "## Troubleshooting"),
+        ("docs-troubleshooting", "docs/troubleshooting.md", "# Troubleshooting"),
     ],
 )
-def test_documentation_rules_point_to_existing_sections(rule, heading) -> None:
+def test_documentation_rules_point_to_existing_sections(
+    rule, document, heading
+) -> None:
     assert STATUS[rule] == "done"
-    assert re.search(rf"^{re.escape(heading)}$", README, re.M), heading
+    text = (ROOT / document).read_text(encoding="utf-8")
+    assert re.search(rf"^{re.escape(heading)}$", text, re.M), heading
+
+
+def test_readme_links_to_existing_documents() -> None:
+    for target in re.findall(r"\]\((docs/[^)#]+)", README):
+        assert (ROOT / target).is_file(), target
 
 
 def test_ci_enforces_the_promised_gates() -> None:

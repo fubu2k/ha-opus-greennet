@@ -4,8 +4,8 @@
 
 # Opus GreenNet Bridge
 
-Home Assistant integration for the **Opus GreenNet Bridge**, controlling
-**EnOcean** devices through the gateway's EnOcean over IP REST API.
+Local Home Assistant integration for **OPUS greenNet** EnOcean smart homes,
+connected directly to the OPUS gateway's EnOcean over IP REST API.
 
 [![HACS Custom][hacs-shield]][hacs]
 [![GitHub Release][release-shield]][releases]
@@ -16,703 +16,205 @@ Home Assistant integration for the **Opus GreenNet Bridge**, controlling
 
 </div>
 
-A custom Home Assistant integration for the Opus GreenNet Bridge, enabling control
-of EnOcean devices. Home Assistant talks to the gateway directly over its EnOcean
-over IP REST API: no MQTT broker and no broker bridge are needed.
+> [!NOTE]
+> **Version 1.0 is in beta.** It replaces the MQTT connection with the
+> gateway's REST API. Feedback is collected in the
+> [beta issue](https://github.com/kegelmeier/ha-opus-greennet/issues/79).
+> v0.8.0 is the last stable MQTT release.
 
 ## Features
 
-- **Auto-discovery**: Automatically discovers EnOcean devices connected to your Opus GreenNet Bridge
-- **Real-time updates**: One persistent event stream from the gateway delivers every telegram as it happens, typically within a few hundredths of a second, including local switch operation, rocker presses and commands from other controllers such as HomeKit
-- **Connection recovery**: Checks that the gateway responds, marks entities unavailable during outages, and resynchronises every device after reconnection or a gateway restart
-- **Command feedback**: Waits for gateway acknowledgements, reports rejected or timed-out commands, and follows accepted commands with channel-specific status checks
-- **Bidirectional control**: Send commands to actuators (lights, switches, covers, thermostats)
-- **Climate control**: HeatArea thermostat support for Valve, CosiTherm, and Electro Heating areas
-- **Sensors**: Humidity, temperature, power consumption, and signal strength monitoring
-- **Binary sensors**: Water leak detection, window open detection, actuator error states, battery monitoring
-- **Events**: Per-button rocker switch press/release events (`buttonA0` … `buttonDI`, `multipleButtons`), also for the buttons built into actuators
-- **Gateway profiles**: Switch or dimmer and the channel count of D2-01 actuators follow the profile the gateway reports for each device
-- **Device services**: ReCom API access for advanced device configuration and diagnostics
-- **UI Configuration**: Set up via Home Assistant's Integrations page
+- **Local and fast.** One event stream from the gateway delivers every telegram
+  within a fraction of a second, including wall switches, rocker presses and
+  commands from the OPUS app or HomeKit. No cloud, no MQTT broker.
+- **Automatic discovery** of all devices paired with the gateway; newly paired
+  devices appear without a restart.
+- **Lights, switches, blinds, heating areas, sensors and window handles**, with
+  per-button rocker events for automations.
+- **Reliable commands.** Every command waits for the gateway's acknowledgement
+  and is confirmed with status checks.
+- **Recovers on its own** after network outages or gateway restarts and
+  resynchronises every device.
+- **Diagnostics** with redacted downloads, plus actions for device
+  configuration (ReCom).
+- **UI setup** with re-authentication and reconfiguration; English and German.
 
-## Supported Device Types
+## Supported devices
 
-| Entity Type | EEP Profiles | Description |
-|-------------|--------------|-------------|
-| **Light** | D2-01-02, D2-01-03, D2-01-04, D2-01-05, D2-01-09, A5-38-08, A5-38-09 | Dimmers (1 channel) and gateway switching |
-| **Switch** | D2-01-00, D2-01-01, D2-01-06, D2-01-07, D2-01-08, D2-01-0A, D2-01-0B, D2-01-0C, D2-01-0D, D2-01-0E, D2-01-0F (1 channel); D2-01-10, D2-01-11, D2-01-12 (2 channels) | On/Off switches and actuators |
-| **Cover** | D2-05-00, D2-05-01, D2-05-02 | Blinds, shades, and shutters; D2-05-00/02 also a Blockage switch and reference-run buttons (diagnostic) |
-| **Climate** | D1-4B-05, D1-4B-06, D1-4B-07 | OPUS HeatArea thermostats (Valve, CosiTherm, Electro Heating) |
-| **Sensor** | A5-04-01, A5-04-02, A5-04-03, A5-07-01, A5-07-03, _(from climate devices)_ | Temperature and humidity (A5-04-01/02/03, including the OPUS motion detector), illuminance (A5-07-03 only), supply voltage, battery level, humidity, feed temperature, power consumption, signal strength |
-| **Binary Sensor** | D5-00-01, F6-05-01, F6-05-02, A5-07-01, A5-07-03, F6-02-01 + A5-04-01, D2-01 with local control, _(from climate devices)_ | Contact open/closed state, SMS motion detection and sensor error (diagnostic), OPUS motion detector (`buttonAI` = motion, `buttonA0` = no motion), water leak detection, RWM smoke alarm and low battery, window open, actuator errors, battery low, local control (diagnostic, disabled by default) |
-| **Handle sensors** | D2-06-40, F6-10-00, D2-03-10 | Handle position plus separate open, tilted and closed binary sensors, battery level (diagnostic) |
-| **Lock** | D2-06-40 | AutoLock: lock and unlock the handle, unlock-request sensor and mechanics-fault binary sensor |
-| **Event** | F6-02-01, F6-02-02, F6-02-03, F6-03-01, F6-03-02 | Rocker switch press/release events, per button (`buttonA0_pressed`, `buttonA0_released`, …, `multipleButtons_released`) with `button` and `action` event attributes; F6-03 rockers also report `buttonC0` … `buttonDI` |
+| Device | EEP | Home Assistant entities |
+|--------|-----|-------------------------|
+| Switch actuators | D2-01-00, -01, -06 … -0F (1 channel); D2-01-10, -11, -12 (2 channels) | Switch per channel, actuator buttons |
+| Dimmers | D2-01-02 … -05, -09; A5-38-08 | Light |
+| Gateway switching | A5-38-09 | Light |
+| Blinds and shutters | D2-05-00, -01, -02 | Cover with position and tilt; blockage, reference run, last run time |
+| Heating areas | D1-4B-05, -06, -07 (Valve, CosiTherm, Electro) | Climate, feed temperature, power, humidity, window open, errors, battery |
+| Temperature and humidity sensors | A5-04-01, -02, -03 | Temperature, humidity |
+| Presence detectors (SMS) | A5-07-01, A5-07-03 | Motion, illuminance (A5-07-03), supply voltage, sensor error |
+| OPUS motion detector | F6-02-01 + A5-04-01 | Motion, temperature, humidity |
+| Smoke detectors (RWM) | F6-05-02 | Smoke alarm, low battery |
+| Water sensors | F6-05-01 | Moisture |
+| Contacts | D5-00-01 | Contact |
+| HOPPE window handles | D2-06-40, F6-10-00, D2-03-10 | Handle position, open / tilted / closed, battery; AutoLock lock (D2-06-40) |
+| Rocker switches | F6-02-01, -02, -03; F6-03-01, -02 | Button events |
 
-### Switch or dimmer, and channel count (D2-01)
+Signal strength and battery level are available where the gateway reports them.
+Details per device type: [docs/devices.md](docs/devices.md).
 
-At setup the integration reads one gateway profile per EEP combination
-(`GET /devices/<id>/profile`, gateway data without a radio telegram). A D2-01
-actuator whose profile accepts `dimValue` becomes a light, one that accepts
-`switch` a switch; a `channel` key in the profile gives the channel count.
-When a profile cannot be read, the table above (EEP specification) decides.
-Devices paired later use a profile already read for the same EEPs, otherwise the
-table until the next reload. Diagnostics show the source per device.
+## Compatibility
 
-Earlier releases derived type and channel count from the EEP number. A
-single-channel actuator that was created as channel 0 keeps its entity ID and
-settings. Entities of channels or of a platform the device does not have are
-removed (with a log warning) only when the gateway profile confirmed the
-outputs; update dashboards and automations that used them.
-
-### Buttons built into actuators
-
-Many OPUS actuators also announce a rocker profile (F6-03-01) for their own
-buttons. They get an event entity named *Buttons* with the unique ID suffix
-`_buttons`, so it never collides with the switch, light or cover entity of the
-same device. Plain rocker switches keep their previous event entity.
-
-All button event entities (rockers and actuator buttons) are meant for
-automations: they are enabled but hidden by default, so they do not appear in
-automatically generated dashboards. This applies to newly created entities;
-existing ones keep their visibility, and you can show or hide them in the
-entity settings.
-
-### Presence detectors (A5-07)
-
-`motionDetected = false` means the detector is *uncertain of occupancy*, not that
-the room is certainly empty; Home Assistant shows it as `off` (no motion). An
-illumination above the sensor range (`overRange`, above 1000 lx) is shown as the
-range maximum with the attribute `over_range: true`. The diagnostic *Sensor
-error* binary sensor is on while the detector reports an error code (251-255)
-and off (OK) otherwise, also while no error code has been reported. A5-07-01 has no illumination sensor, so no illuminance
-entity is created for it.
-
-D2-01 dimmers switch to the new brightness at once, like commands from Apple
-Home. An action with a `transition` (any duration) uses the dimmer's own
-configured fade instead; the requested duration itself cannot be passed to the
-device.
-
-Cover tilt controls are hidden when the bridge reports `rotationTime` as `0` or
-`noRotation`, as used for plain roller shutters. The integration uses the existing
-device discovery and state updates, without extra configuration queries. When no
-valid rotation time is available, tilt support follows the device's EEP profile.
-
-Blinds report position and angle as `unknown` while they move; Home Assistant
-keeps the last known value until the end report arrives. Command targets of
-`unknown` are ignored.
-
-D2-05-00 and D2-05-02 blinds have a diagnostic **Blockage** switch for automations
-(e.g. wind protection or a door that is open). It is disabled by default because
-it stops the blind; enable it per blind when you need it. On sends `lockingMode = block`, off
-sends `unblock`. A D2-05-00 `alarm` counts as blocked; the reported mode is the
-`locking_mode` attribute. The diagnostic buttons **Reference run via top** and
-**Reference run via bottom** drive the blind to an end position first
-(`repositioning = firstUp`/`firstDown`) and then back to its last known position,
-which recalibrates the blind's position tracking. Every blind also has a diagnostic
-**Last run time** sensor: the seconds from a position command (from Home
-Assistant, another controller or a reference run) to the blind's report at the
-target. Attributes give the direction (`up`, `down`, `reference_up`,
-`reference_down`), start and end position (100 = open) and whether the run
-covered the full height (`full_travel`), which is the value to compare with the
-configured `verticalMovementTime`. Runs ended by Stop, without an end report or
-only confirmed by a status query record no time. Each measured run is also
-logged at info level. Movement and rotation times of
-a D2-05-00 "Set parameters" command from another controller (milliseconds) are
-not taken over; they come from the device list (seconds).
-
-Covers with a positive configured `verticalMovementTime` show estimated
-`opening` / `closing` while travelling, instead of immediately showing the target
-position. The estimate uses the distance from the last known position, or a full
-travel when the starting position is unknown, plus five seconds of grace. This
-is an estimate, not a physical movement sensor; an incorrect configured time or
-a stalled motor can make it inaccurate. A new target replaces the estimate.
-Numeric position feedback, Stop, or a rejected command ends it immediately.
-
-Status checks for these movements wait until 10 and 20 seconds after the estimate
-ends, to avoid early cached target responses. For a 25-second full travel, the UI
-shows movement for up to 30 seconds and checks status at 40 and 50 seconds.
-Without feedback, the target becomes the assumed position when the movement
-timer expires. Covers without a configured travel time retain their existing
-behaviour. Existing entity IDs, tilt support, and Stop commands are unchanged.
-
-### HOPPE window handles
-
-All three handle profiles provide a position sensor and separate Open, Tilted,
-and Closed binary sensors. `tilt` (D2-03-10) and `up` (F6-10-00) are normalized
-to `tilted`; missing or invalid positions, including the gateway's `unkown`, stay
-unknown. A diagnostic battery level sensor shows the level from the device list. The
-Open, Tilted and Closed binary sensors are diagnostic entities for automations
-(enabled and visible); the handle position sensor stays the main entity. These report handle position, not an independent
-measurement of the window sash. For Cover Control Automation, assign the Open
-and Tilted binary sensors to its respective window-contact inputs.
-
-D2-06-40 also exposes the reported lock state independently of handle position,
-an unlock-request sensor, a mechanics-fault sensor and a diagnostic **Lock
-bolt** binary sensor (the reported lock-bolt, on = unlocked). The **AutoLock**
-lock entity sets the answer the gateway gives the handle: when the handle's
-button is pressed, the handle asks whether it may be unlocked
-(`unlock = requested`, attribute `unlock_requested`). *Unlocked* stores
-`unlock = allowed`: the button lights green and the handle can be turned.
-*Locked* stores `notAllowed`: the button lights red and the handle stays
-locked. The gateway keeps this answer as the handle's target state (it
-acknowledges with status 202) and uses it at every request, also while the
-handle sleeps; the lock entity shows that stored answer, read from the device
-list at start-up. The attribute `bolt_locked` repeats the reported lock-bolt.
-Quick changes settle for 10 seconds (the entity shows *locking*/*unlocking*):
-only the last one is sent, because the gateway queues every answer for the
-sleeping handle and an earlier one could otherwise reach it first.
-
-### Water sensors (F6-05-01)
-
-The water leak sensor sends only when its state changes, and the gateway
-lists no state for it. Until it has reported water, the binary sensor shows
-*dry* instead of *unknown*; an outage of the gateway still shows
-*unavailable*.
-
-### Single input contacts
-
-D5-00-01 contacts expose a Contact binary sensor with the opening device class.
-The gateway values `open` and `closed` appear as `on` and `off`. Missing or
-unrecognized contact values remain `unknown`; a gateway outage makes the entity
-`unavailable`. No battery percentage is inferred when the gateway publishes none.
-
-## Removing or replacing a device
-
-Use **Settings → Devices & services → Opus GreenNet Bridge → Devices**, open the
-child device, and choose **Delete**. The gateway itself cannot be removed this
-way; remove its integration entry to remove the gateway.
-
-This only removes the Home Assistant device and its entities. It sends no unpair
-or deletion command to OPUS. If the gateway reports the device again, it may be
-rediscovered, including after a reload or reconnection. There is no persistent
-ignore list, and quiet devices are never automatically deleted.
-
-When replacing a smoke detector or other device, first remove the old device
-from the gateway's configuration where supported, then delete its stale Home
-Assistant device. The replacement and other devices stay operational. Review
-and update automations referencing the old entities; references are not migrated
-automatically.
-
-Binary-sensor discovery submits each entity ID once per loaded gateway. Repeated
-discovery can still add newly discovered sensor types. Removing a device releases
-its IDs after its live entities finish removal, so rediscovery and reload can
-create them again without duplicate submissions.
-
-### Upgrading from community test versions
-
-German translations include “Beleuchtungsstärke” for illuminance and readable
-HOPPE unlock-request states. Custom entity names remain unchanged.
-The unlock-request sensor uses `requested` / `not_requested`; update automations
-that previously compared its state with boolean text.
-
-The integration migrates the community fork's `_illumination` and
-`_window_handle_lock` unique IDs to the upstream equivalents while preserving
-the existing Home Assistant entity IDs, custom names, and settings. If both the
-fork and beta entries exist for the same device and gateway, the older fork
-entity is preserved and the duplicate beta entry is removed. References to the
-removed beta entity must be updated manually; the integration logs both entity
-IDs. Entries belonging to another gateway or device are left untouched.
-
-### Gateway payload compatibility
-
-Detector feedback accepts both the beta's descriptive keys and the gateway keys
-reported on OPUS IQ-DOT firmware 1.21.30: `alarm` (on/off), boolean `batteryLow`,
-`motionDetected` (boolean), `illumination`, and HOPPE `handle`, `unlock`
-(requested/notRequested), and `mechanics` (error/ok). The existing key/value
-formats remain supported. Battery percentages accept an optional `%` suffix
-(the gateway reports for example `96%`), with finite 0–100 validation. Unknown values are never interpreted as no alarm or a closed handle.
-
-### Large installations and gateway recovery
-
-Gateway requests that use the radio share one queue across devices: exactly one
-is in flight at a time. Control commands take priority over status queries, and
-delayed background status checks wait behind both. Large batches can take
-longer to finish because requests are sent one at a time. A missing
-acknowledgement fails that action; gateway availability is determined by the
-event stream and the independent health probe. An outage cancels the
-integration's queued commands rather than replaying them after recovery.
-
-F6-05-01 leak sensors remain `unknown` until a valid `liquidDetected` reading is
-received. Missing data does not imply that a sensor is dry. Invalid updates and
-rediscovery preserve a previously received alarm state.
-
-## Prerequisites
-
-1. **Home Assistant** 2026.10.1 or newer
-2. **Opus GreenNet Bridge** reachable from Home Assistant in your network. Give it
-   a fixed IP address (DHCP reservation) so the configured address stays valid.
-3. **EnOcean devices** paired with the gateway
-4. The gateway's **API credentials**: user `admin`, password = the gateway's
-   EURID in capital letters (printed on the gateway; fictional example:
-   `A1B2C3D4`), unless you changed them
+| | Requirement |
+|---|---|
+| Home Assistant | 2026.10.1 or newer |
+| Gateway | OPUS greenNet gateway with the REST API on port 8080 (tested with firmware OPUS-GW v1.21.31) |
+| Network | Home Assistant reaches the gateway on the local network; a fixed IP address (DHCP reservation) is recommended |
+| Devices | Paired with the gateway in the OPUS app |
 
 No MQTT broker, MQTT integration or Mosquitto bridge is needed.
 
-## Upgrading from an MQTT version (0.x)
-
-Versions up to 0.7 reached the gateway through a Mosquitto bridge and the Home
-Assistant MQTT integration. From 1.0 on the integration connects to the gateway
-directly. v0.7.0 is the last MQTT release; you can return to it at any time
-(entities keep their IDs in both directions). Your devices, entities, entity IDs, names, areas, dashboards and
-automations are kept; only the connection changes.
-
-1. Update the integration and restart Home Assistant.
-2. The gateway entry reports **Re-authentication required** (it does not know
-   the gateway's address yet). Open the repair notification or **Settings →
-   Devices & services → Opus GreenNet Bridge → Reconfigure** and enter the
-   gateway's IP address. Port (`8080`), user (`admin`) and password (the EURID)
-   are prefilled with the vendor defaults.
-3. The entry loads again with all existing entities.
-4. Optional cleanup once everything works: remove the OPUS connection block
-   from your Mosquitto configuration (for example
-   `/share/mosquitto/opus_bridge.conf`) and restart the broker. Keep the MQTT
-   broker and integration only if other devices use them.
-
-The integration checks that the address answers as the configured gateway
-(same EURID) and rejects a different gateway.
-
 ## Installation
 
-### HACS (Recommended)
+### HACS (recommended)
 
-1. Make sure [HACS](https://hacs.xyz) is installed.
-2. Add this repository as a **custom repository** (category **Integration**):
+1. Install [HACS](https://hacs.xyz) if you haven't yet.
+2. Add this repository as a custom repository of type **Integration**:
 
    [![Open in HACS][hacs-repo-badge]][hacs-repo]
 
-   …or in HACS go to **⋮ → Custom repositories**, paste
-   `https://github.com/kegelmeier/ha-opus-greennet`, choose **Integration**, and add it.
-3. Search for **Opus GreenNet Bridge**, install, and **restart Home Assistant**.
+   …or in HACS open **⋮ → Custom repositories**, paste
+   `https://github.com/kegelmeier/ha-opus-greennet` and choose **Integration**.
+3. Search for **Opus GreenNet Bridge**, download it and restart Home Assistant.
 
-Home Assistant 2026.10.1 or newer is required. To test a beta, enable pre-release
-versions for this repository in HACS before selecting the beta version.
+To try a beta, enable pre-release versions for this repository in HACS first.
 
-### Manual Installation
+### Manual
 
-> **Home Assistant 2026.10.1 or newer is required, also for manual installs.**
-> HACS checks this for you; a manual copy does not. On an older version, setup
-> fails with `ImportError: cannot import name 'ATTR_BRIGHTNESS' from
-> 'homeassistant.components.light.const'`. Update Home Assistant first.
+1. Copy `custom_components/opus_greennet` into the `custom_components` folder of
+   your Home Assistant configuration.
+2. Restart Home Assistant.
 
-1. Copy the `custom_components/opus_greennet` folder to your Home Assistant's `custom_components` directory
-2. Restart Home Assistant
+> [!IMPORTANT]
+> A manual copy does not check the Home Assistant version. On a version older
+> than 2026.10.1 setup fails with `ImportError: cannot import name
+> 'ATTR_BRIGHTNESS'`.
 
 ## Configuration
 
-After installing, add the integration:
-
 [![Add Integration][config-flow-badge]][config-flow]
 
-…or go to **Settings → Devices & Services → Add Integration → “Opus GreenNet Bridge”**, then enter:
+…or go to **Settings → Devices & services → Add integration → Opus GreenNet
+Bridge** and enter:
 
 | Field | Description |
 |-------|-------------|
 | **Host** | IP address or host name of the gateway |
 | **Port** | Port of the REST API, `8080` by default |
 | **Username** | API user, `admin` by default |
-| **Password** | API password, by default the gateway's EURID in capital letters |
+| **Password** | API password, by default the gateway's EURID in capital letters (printed on the gateway; fictional example: `A1B2C3D4`) |
 
-Setup reads the gateway's system information and uses its EURID as the stable
-identifier of the entry, its devices and entities. If setup fails, check the
-address, the credentials and that Home Assistant can reach port 8080 of the
-gateway. Existing entries automatically retry when the gateway is unavailable
-during startup. To change the address or credentials later, use **Reconfigure**
-on the integration entry; rejected credentials start a re-authentication.
+The gateway's EURID becomes the stable identifier of the entry, its devices and
+entities. To change the address or credentials later, use **Reconfigure** on
+the entry.
 
-## Availability and command behavior
-
-The integration keeps one HTTP event stream to the gateway open
-(`GET /devices/stream`). Every stream starts with the complete device list,
-which resynchronises all state, and then delivers each telegram as the gateway
-handles it. At startup this first list is the setup snapshot; if it does not
-arrive within 30 seconds, Home Assistant retries the setup later. Because the
-streamed list does not contain the cover movement times, the device list is
-read once more right after startup for these settings; it never changes live
-state.
-
-If the stream ends, it is reopened after a short pause; if the gateway cannot
-be reached, entities become unavailable. The pause starts at 1 second, doubles
-after every attempt up to 60 seconds and is lengthened by a random share of up
-to 25 %. A stream that closes within 10 seconds of connecting counts as a
-failed attempt, so a gateway that closes every connection at once cannot cause
-a reconnect loop; a stream that stayed open longer starts the pauses again at
-1 second. Rejected credentials are not retried.
-
-A health check reads the gateway uptime about every 60 seconds. It marks
-entities unavailable when the gateway stops answering, and reopens the stream
-after a gateway restart. Every 30 minutes the device list is read again to
-refresh slowly changing values that the stream does not carry (battery level,
-signal strength, cover movement times) and to add newly paired devices. A
-telegram that arrives while the list is being read keeps its newer signal
-strength and last-seen time.
-Batteryless EnOcean devices are not marked offline just because they are quiet.
-
-Commands are HTTP requests; the gateway's response is the acknowledgement.
-Status `200` means the gateway sent the telegram; `201` means it accepted
-deferred delivery. Neither confirms that the physical actuator has completed the
-operation. Device reports and subsequent channel-specific status queries
-reconcile the state. Requests fail when the gateway is known to be unavailable
-and are cancelled during reload. Interim `unknown`/`invalid` readings and
-unrelated metadata do not cancel the 5- and 20-second checks. Confirmation must
-report a valid value for the requested field on its channel. Cover Stop sends
-the profile's dedicated stop command and then checks the reported position and,
-when supported, tilt; it does not assume a new position.
-
-Commands sent to a device by another controller (for example Apple HomeKit or
-the gateway's own logic) also appear on the event stream. They are shown
-immediately and verified by the same status checks.
-
-Measurements explicitly reported as `notAvailable` become unknown. Lights and
-switches remain unknown until their state is reported or a command is accepted.
-Climate activity uses actuator feedback where available; enabling a heating
-zone does not by itself prove that it is currently heating.
-
-## Known limitations
-
-- An acknowledgement (`200` or `201`) confirms the gateway, not the radio
-  actuator. Physical completion is only known from device feedback or a later
-  status query.
-- Cover positions during movement are estimates based on the reported travel
-  time. The final position comes from the device report or status query.
-- A HOPPE AutoLock answer queued for the sleeping handle takes effect only when
-  the handle wakes up (e.g. at its next button press).
-- The gateway is not discovered automatically; its address is entered once.
-  Give the gateway a fixed address, or update it with **Reconfigure**.
-- The gateway's API is plain HTTP with basic authentication, as provided by the
-  manufacturer. Keep the gateway in a trusted network.
-- Battery level and signal strength are refreshed from the device list every
-  30 minutes; the event stream does not carry them.
-- Quiet or batteryless devices are never removed automatically, because the
-  gateway cannot confirm that a device is gone (see
-  [Removing or replacing a device](#removing-or-replacing-a-device)).
-- Commands and configuration writes are never retried automatically after a
-  timeout or an outage.
-- Automated tests run against a simulated gateway. They do not verify physical
-  hardware.
-
-## Services
-
-The integration exposes the following administrator-only actions for advanced
-device management, accessible via **Developer Tools** → **Actions**:
-
-| Service | Parameters | Description |
-|---------|-----------|-------------|
-| `opus_greennet.get_device_configuration` | `device_id` | Retrieve the stored configuration for an EnOcean device via ReCom API |
-| `opus_greennet.set_device_configuration` | `device_id`, `configuration` | Write configuration to an EnOcean device via ReCom API |
-| `opus_greennet.get_device_parameters` | `device_id` | Retrieve DDF parameters for an EnOcean device via ReCom API |
-| `opus_greennet.reload_entry` | _(optional)_ `config_entry_id` | Re-run integration setup/teardown without restarting HA |
-
-One further action is available to every user:
-
-| Service | Parameters | Description |
-|---------|-----------|-------------|
-| `opus_greennet.set_cover_position` | `device_id`, `position` (100 = open), _(optional)_ `repositioning` (`direct`, `first_up`, `first_down`), `channel`, `config_entry_id` | Move a D2-05 blind, optionally after a reference run to an end position |
-
-The `device_id` is the EURID of the target device (fictional example: `AABB1122`). Select a
-gateway when more than one Opus GreenNet config entry is loaded. The two read
-actions return their response data directly in Home Assistant.
-
-## REST API
-
-The integration uses these endpoints of the gateway's EnOcean over IP REST API
-(basic authentication, JSON documents with a `header.httpStatus`):
-
-```
-GET  /system/info                      # Gateway identity (EURID) and version
-GET  /system/uptime                    # Health check
-GET  /devices                          # Device list with current state
-GET  /devices/stream                   # Event stream: device list, then telegrams
-GET  /devices/{Device-Identifier}      # One device (late discovery)
-PUT  /devices/{Device-Identifier}/state          # Commands and status queries
-GET  /devices/{Device-Identifier}/configuration  # ReCom: stored configuration
-PUT  /devices/{Device-Identifier}/configuration  # ReCom: write configuration
-GET  /devices/{Device-Identifier}/parameters     # ReCom: supported parameters
-```
-
-## Telegram Payload Format
-
-Each telegram on the event stream is one JSON document. The identifiers and
-values below are fictional examples.
-
-```json
-{
-  "header": {"content": "telegram"},
-  "telegram": {
-    "deviceId": "AABB1122",
-    "friendlyId": "Example_Light",
-    "timestamp": "2024-01-15T10:30:00.000+0100",
-    "direction": "from",
-    "functions": [
-      {"key": "switch", "value": "on"},
-      {"key": "dimValue", "value": "75"}
-    ],
-    "telegramInfo": {
-      "data": "0000000A",
-      "dbm": -65,
-      "rorg": "A5"
-    }
-  }
-}
-```
+**Upgrading from an MQTT version (0.x):** after the update the entry asks for
+re-authentication; enter the gateway's IP address and all entities are kept.
+See [docs/upgrading.md](docs/upgrading.md).
 
 ## Troubleshooting
 
-### Devices not appearing
+- **All entities unavailable:** the gateway is not reachable. Check its power
+  and address; `http://<gateway>:8080/system/uptime` must answer.
+- **Entities available, but a device does not react:** a radio problem (range,
+  power, pairing). The debug log shows the status checks after each command.
+- **A new device is missing:** it appears within 30 minutes; reloading the
+  entry adds it at once.
 
-1. Check that the integration entry is loaded and the gateway is available
-2. Verify that the device is paired with the gateway and listed in the
-   gateway's own app
-3. Check the Home Assistant log for messages from `custom_components.opus_greennet`
-4. Newly paired devices appear on the next stream start or device list refresh
-   (at the latest after 30 minutes); reloading the entry adds them at once
+Before reporting a problem, download the redacted diagnostics (**⋮ → Download
+diagnostics** on the integration entry). More in
+[docs/troubleshooting.md](docs/troubleshooting.md).
 
-### Network, gateway or radio actuator
+## Known limitations
 
-Independent links are involved. Identify which one fails before changing the
-configuration:
+- An acknowledgement confirms the gateway, not the actuator; the actual state
+  follows from the device's report or a status check.
+- Cover positions during movement are estimated from the configured travel
+  time.
+- The gateway is not discovered automatically, and its API is plain HTTP with
+  basic authentication. Keep it in a trusted network.
+- Devices cannot be added to or removed from the gateway yet, and device
+  settings are only available as actions (see [Roadmap](#roadmap)).
 
-| Link | Symptom | Check |
-|------|---------|-------|
-| Network to the OPUS gateway | All entities unavailable; actions fail with "The OPUS gateway is unavailable" | Gateway power and address; `http://<gateway>:8080/system/uptime` must answer (with the API credentials); the health check runs about every 60 seconds |
-| Gateway credentials | Entry asks for re-authentication | User and password of the gateway API |
-| EnOcean radio actuator | Entities available, but the physical device does not follow | Range, power and pairing of the actuator; the debug log of the follow-up status queries |
+All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 
-A gateway outage makes the entities unavailable and cancels queued commands.
-They are not replayed after recovery. A quiet radio device does not make any
-entity unavailable.
+## Roadmap
 
-### Acknowledgements 200 and 201
+| Status | Topic |
+|--------|-------|
+| 🧪 Beta | 1.0 with the REST API: collecting feedback in [#79](https://github.com/kegelmeier/ha-opus-greennet/issues/79) |
+| 📋 Planned | Device settings as Home Assistant entities |
+| 🔍 Investigating | Adding and removing devices from Home Assistant |
+| 💡 Idea | Gateway discovery, HTTPS if the gateway offers it |
 
-Every command is answered by the gateway's HTTP response. `200` means the gateway
-sent the telegram; `201` means it accepted the command for deferred delivery.
-Both count as an accepted command. Neither proves that the actuator executed
-it. The integration then shows the expected state and checks it with status
-queries 5 and 20 seconds later; for covers, 10 and 20 seconds after the
-estimated end of the movement. Any other status fails the action.
+### Device settings
 
-### Estimated values
+The OPUS app configures every actuator and the gateway. The gateway already
+reports the current values, and the integration can read and write them with
+the ReCom actions. The plan is to offer them as configuration entities
+(select, number, switch) on each device, so they can be changed in the UI and
+in automations:
 
-Cover position and tilt during a movement are estimated from the reported
-travel time plus a 5-second grace period. After an accepted command the
-expected state is shown until a device report or status query confirms or
-corrects it.
+| Device | Settings |
+|--------|----------|
+| Switch actuators (D2-01-00/-01, 2-channel D2-01-11) | Operation mode of the wall rocker (e.g. toggle or timer), timer duration for short and long press, switch-off warning and its signal duration, illumination threshold for linked light sensors, function of rocker A and B and of the external input (channel assignment), LED colour and LED channel, ViNET routing time |
+| Dimmers (D2-01-03) | Ramping time on/off, short-press and long-press time |
+| Blinds (D2-05-02) | Maximum holding time, vertical movement and rotation time, function of rocker A and B, ViNET routing time |
+| All actuators | Repeater mode; linked wall switches and their role (link tables, e.g. central on/off or up/down) |
+| Gateway | Firmware, app and API version; services such as HomeKit, Alexa, MQTT, InfluxDB, scheduler and heating zones; received telegrams and average signal strength |
 
-### Timeouts
+Settings are written over the radio, so a change can take several seconds and
+needs the actuator to answer.
 
-If an action is not acknowledged within 10 seconds, the gateway may still
-execute it. Check the physical state before repeating the command. The
-integration does not retry automatically. ReCom configuration requests travel
-over the radio and may take several seconds; they wait up to 45 seconds.
+### Adding and removing devices
 
-### Recovery
+Today new devices are taught in with the OPUS app, and deleting a device in Home
+Assistant does not remove it from the gateway. The EnOcean over IP REST API
+standard has no endpoints for this. The gateway advertises additional methods,
+and OPUS's own web tools use vendor extensions of the local REST API. The next
+step is to record what the OPUS app sends to the gateway when it teaches in and
+removes a device. If that turns out to be local and repeatable, the integration
+could offer:
 
-- If the gateway does not answer at startup, Home Assistant retries the setup
-  automatically.
-- After a connection loss or a gateway restart, the event stream is reopened
-  and every device is resynchronised from the gateway's device list.
-- Run the `opus_greennet.reload_entry` action to restart the integration
-  without restarting Home Assistant. Pending requests are cancelled.
-- Download diagnostics (see below) before reporting a problem.
+- **Add device:** a 60-second learn mode (press the learn button on the
+  device), or manual entry of EURID and EEP for sensors and wall switches.
+- **Remove device:** the existing **Delete** also removes the device from the
+  gateway after a confirmation, and clears the actuator's link to it.
 
-### Enable debug logging
+## Documentation
 
-For temporary troubleshooting, open **Settings → Devices & services →
-Opus GreenNet Bridge → three-dot menu → Enable debug logging**. Disable it
-after reproducing the problem and save the downloaded log.
-
-For persistent logging, add to `configuration.yaml`:
-
-```yaml
-logger:
-  default: info
-  logs:
-    custom_components.opus_greennet: debug
-```
-
-### Debug update lag
-
-When debug logging is enabled, every applied telegram is logged as
-`OPUS telegram/from <device> ... gateway_to_ha_ms=<n>`: the time from the
-gateway's telegram timestamp until Home Assistant received it (clock offsets
-between gateway and Home Assistant affect this value). Entity writes are logged
-as `OPUS update latency entity_write` with the time since the telegram was
-received.
-
-Download a redacted diagnostic report from **Settings → Devices & services →
-Opus GreenNet Bridge → three-dot menu → Download diagnostics**. It includes the
-gateway status, discovered devices, channel state, last update source, and the
-latest command error without adding volatile diagnostic fields to every entity
-state. Addresses, credentials, identifiers and the gateway's HomeKit setup code
-(also as its QR setup payload) are redacted. The gateway section shows
-`first_device_list_seconds`, the time from opening the event stream to its
-first device list at startup. For covers each device shows
-`last_vertical_movement_time` (the last run duration the gateway reports, if
-any) and `position_origin` per channel: `device list`, `reported`,
-`estimated` or `assumed` (the travel estimate ended without a report).
-
-For local switch tests, press the physical control and compare
-`gateway_to_ha_ms` with the `entity_write` timing. If the gateway latency is
-already high, the delay is in the gateway or the network.
+| Page | Contents |
+|------|----------|
+| [Devices](docs/devices.md) | Behaviour per device type, removing devices, actions |
+| [How it works](docs/how-it-works.md) | Updates, availability, commands, all known limitations, REST API |
+| [Troubleshooting](docs/troubleshooting.md) | Diagnosis, diagnostics, debug logging, update lag |
+| [Upgrading](docs/upgrading.md) | From the MQTT versions and the community test versions |
+| [Development](docs/development.md) | Project structure, tests, CI, beta testing, contributing |
+| [Changelog](CHANGELOG.md) | Changes per release |
 
 ## Removing the integration
 
-1. Go to **Settings → Devices & services → Opus GreenNet Bridge**, open the
-   three-dot menu of the entry and select **Delete**. Home Assistant removes the
-   entry, its devices and entities. The gateway and the pairing of the EnOcean
-   devices are not changed.
-2. Remove the integration in HACS, or delete
-   `custom_components/opus_greennet` for a manual installation, and restart
-   Home Assistant.
+1. **Settings → Devices & services → Opus GreenNet Bridge → ⋮ → Delete** removes
+   the entry, its devices and entities. The gateway and the pairing of the
+   EnOcean devices are not changed.
+2. Remove the integration in HACS (or delete `custom_components/opus_greennet`)
+   and restart Home Assistant.
 
-## Development
+## Contributing
 
-### Project Structure
+Bug reports, test results from real devices and pull requests are welcome. See
+[docs/development.md](docs/development.md#contributing) before opening a pull
+request.
 
-```
-custom_components/opus_greennet/
-├── __init__.py           # Integration setup and service registration
-├── manifest.json         # Integration metadata and version
-├── config_flow.py        # UI configuration, reauthentication and reconfiguration
-├── api.py                # REST client: requests, error mapping, event stream splitting
-├── protocol.py           # Pure helpers that read gateway documents
-├── coordinator.py        # Event stream, health check, device state and commands
-├── const.py              # Constants and EEP mappings
-├── wire.py               # Typed JSON boundary helpers
-├── enocean_device.py     # Device and channel data model
-├── entity.py             # Shared entity and device-registry behavior
-├── diagnostics.py        # Redacted integration diagnostics
-├── lock.py               # HOPPE AutoLock lock entity (lock/unlock)
-├── light.py              # Light entity platform
-├── switch.py             # Switch entity platform
-├── cover.py              # Cover entity platform
-├── climate.py            # Climate entity platform (HeatArea)
-├── sensor.py             # Sensor entity platform
-├── binary_sensor.py      # Binary sensor entity platform
-├── binary_sensor_descriptions.py # Moisture and HeatArea sensor definitions
-├── event.py              # Event entity platform (rocker switches and actuator buttons)
-├── button.py             # Reference-run buttons for D2-05 blinds (diagnostic)
-├── services.yaml         # HA service definitions
-├── strings.json          # UI, service, and exception translation source
-└── translations/
-    ├── en.json           # English translations
-    └── de.json           # German translations
-tests/
-├── conftest.py                  # Shared fixtures (real HA core, fake gateway)
-├── fake_gateway.py              # In-process OPUS gateway serving the REST API over HTTP
-├── ha_helpers.py                # Config flow and waiting helpers for real HA tests
-├── test_api.py                  # REST client, error mapping, stream splitter, priority lock
-├── test_protocol.py             # Pure protocol helpers
-├── test_coordinator_stream.py   # Setup, event stream, availability, health check, refresh
-├── test_coordinator_stream_backoff.py # Stream backoff with jitter, short-lived streams, connection generation
-├── test_coordinator_stream_first.py   # Stream-first setup, first device list deadline, fresh list metadata
-├── test_coordinator_status_checks.py  # HTTP vs. gateway status as seen by commands and the health probe
-├── test_api_hardening.py        # HTTP vs. gateway status, no retries, no credentials in errors
-├── test_coordinator_devices.py  # Device lists: discovery, resync and metadata refresh
-├── test_coordinator_domain_model.py # In-place device update, last run duration, position origin, rocker and cover regression cases
-├── test_coordinator_telegrams.py # Device reports, outbound commands and their effects
-├── test_coordinator_requests.py # Request queue, acknowledgements and error mapping
-├── test_coordinator_commands.py # Command acknowledgements, outages and unload
-├── test_coordinator_edge_cases.py # Malformed answers, failures and lifecycle
-├── test_rest_lifecycle.py       # End-to-end smoke test over real HTTP
-├── test_enocean_device.py       # Device model tests
-├── test_gateway_payload_compatibility.py # Reported IQ-DOT payload regression tests
-├── test_state_ownership.py      # State ownership between reports and commands
-├── test_strict_typing_boundaries.py # Typed wire-value boundaries
-├── test_release_transport_safety.py # Outage and queue fault recovery
-├── test_background_efficiency.py # Superseded background work and redundant writes
-├── test_beta_entity_migration.py # Fork IDs, duplicate cleanup, and translations
-├── test_binary_sensor_discovery.py # Repeated discovery and removal ordering
-├── test_binary_sensor_descriptions.py # Stable sensor inventory and metadata
-├── test_detector_support.py     # RWM and presence detectors end to end
-├── test_temperature_humidity_sensor.py # A5-04-03 readings, ranges, and HA entities
-├── test_contact_sensor.py       # D5-00-01 states, live updates, and reload
-├── test_opus_motion_detector.py # OPUS motion detector (F6-02-01 + A5-04-01)
-├── test_scalar_telemetry.py     # Battery level and signal strength
-├── test_window_handles.py       # Handle positions and AutoLock actions
-├── test_autolock_control.py     # AutoLock commands, transitions and unlock requests
-├── test_device_removal.py       # Child removal, rediscovery and request isolation
-├── test_cover_stop.py           # Stop command encoding and follow-up queries
-├── test_cover_movement.py       # Estimated travel, feedback, timing and cleanup
-├── test_reconciliation_feedback.py # Valid feedback, channels, and command timing
-├── test_event_entity.py         # Rocker switch event entity tests
-├── test_event_lifecycle.py      # Transient button fields are never replayed
-├── test_eep_profile_alignment.py # Gateway profiles, D2-01 table, blockage, reference runs, new sensors
-├── test_entities.py             # Entity state and Home Assistant service tests
-├── test_platform_edge_cases.py  # Platform setup and entity edge cases
-├── test_init.py                 # Entry setup, migration errors, unloading, services
-├── test_service_actions.py      # Actions through the real Home Assistant service registry
-├── test_diagnostics.py          # Diagnostic redaction tests
-├── test_diagnostics_edge_cases.py # Diagnostics for partial and missing data
-├── test_ha_lifecycle.py         # Real Home Assistant lifecycle against the fake gateway
-├── test_config_flow.py          # User, reauth (MQTT migration) and reconfigure flows
-├── test_translations.py         # Translation, exception key and service consistency
-├── test_quality_scale.py        # quality_scale.yaml schema and rule evidence
-└── test_coverage_gate.py        # Per-module coverage gate
-script/
-└── check_coverage.py            # Per-module coverage gate used by CI
-```
-
-### Testing
-
-```bash
-python -m pip install -r requirements_test.txt
-ruff check .
-ruff format --check .
-python -m mypy
-pytest -v --cov --cov-report=json:coverage.json
-python script/check_coverage.py coverage.json
-```
-
-Use Python 3.14 for development. Tests cover device properties, telegram parsing,
-ordered multi-channel commands, gateway errors, entity behavior, rocker events,
-diagnostic redaction, and real Home Assistant configuration and lifecycle paths.
-The v0.5.0 release validation covers 852 tests on Home Assistant 2026.8.2,
-2026.9.4, and 2026.10.1, including interrupted startup and queue fault recovery.
-The v0.6.0b0 candidate adds 24 A5-04-03 tests and 33 D5-00-01 tests, for 909 total
-tests validated on Home Assistant 2026.8.2 and 2026.10.1.
-Thirteen additional regression cases cover retained answers at startup and
-reconnect, message ordering, missing state, and retained device-stream discovery.
-The stable v0.6.0 release has 922 tests validated on Home Assistant 2026.9.4.
-The v0.7.0b0 motion-detector beta adds 20 cases, for 942 tests on HA 2026.9.4.
-Motion starts unknown until a valid telegram arrives after restart.
-The v0.7.0b1 quality beta requires HA 2026.10.1 or newer, including for manual installation.
-Its combined suite contains 1,315 tests, with strict typing and per-module coverage gates.
-Users on older HA versions should keep stable v0.6.0 or upgrade HA first.
-Version 1.0 replaces the MQTT transport with the gateway's REST API. Its suite
-contains 1,770 tests that run against an in-process gateway serving the REST API
-and its event stream over real HTTP (`tests/fake_gateway.py`).
-CI resolves the latest stable Home Assistant release from PyPI on each run and
-tests that exact version, recorded in the workflow summary. It runs on pull
-requests, pushes to main, every Monday at 06:17 UTC, and manual dispatch. Beta
-releases and older HA versions are excluded from the test matrix. If a future
-stable release requires a newer Python version, CI fails explicitly until the
-runner is updated rather than silently testing an older HA release. CI enforces
-Ruff, dependency compatibility, strict mypy typing, Hassfest, a total coverage of
-at least 97 %, more than 95 % for every integration module and 100 % for the
-config flow (`script/check_coverage.py`). Lifecycle and race regression suites
-run three more times. `quality_scale.yaml` is validated against the official
-rule keys and schema by `tests/test_quality_scale.py`; it is a self-assessment,
-not an official quality scale rating (see
-[the evidence matrix](docs/quality/quality-scale-evidence.md)). The gateway is
-simulated; physical-device verification remains part of beta testing.
-
-### Beta testing
-
-Enable pre-release versions for this repository in HACS, select the beta, and
-restart Home Assistant. Existing entity IDs and rocker event names are preserved.
-Check physical controls, low brightness, both actuator channels, cover position
-and tilt, climate activity, and rapid rocker presses. Also test a gateway outage
-(power cycle) and reconnection, then reload the integration during a pending
-request. Report
-your gateway firmware, device EEP, and the observed result with redacted
-diagnostics.
-
-## References
-
-- [EnOcean over IP Specification (REST API)](https://www.enocean-alliance.org/ip/)
-- [EnOcean Equipment Profiles (EEP)](https://www.enocean-alliance.org/eep/)
-- [Home Assistant Developer Documentation](https://developers.home-assistant.io/)
+This is a community project. It is not affiliated with or endorsed by OPUS
+greenNet, Jaeger Direkt or the EnOcean Alliance.
 
 ## License
 

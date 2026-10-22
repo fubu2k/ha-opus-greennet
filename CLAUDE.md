@@ -46,7 +46,7 @@ Examples:
 1. Create branch from main (`feat/` or `fix/`). Direct push to main is OK for minor changes.
 2. Make changes
 3. Run `pytest -v` — all tests must pass before proceeding
-4. Update README.md if the change affects supported devices, features, services, or project structure
+4. Update README.md (features, supported devices, compatibility, roadmap) and the matching page in docs/ (device behaviour, actions, project structure)
 5. Push branch → create PR (see PR Guidelines below)
 6. Merge to main
 7. **Version & release are done separately** (see Versioning & HACS Release below)
@@ -80,7 +80,7 @@ Examples:
 ## PR Checklist (before pushing the branch)
 
 1. **Tests pass** — Run `pytest -v`. All tests must pass. Add tests for new functionality.
-2. **README.md** — Update if the change affects supported devices, features, services, project structure, or test count.
+2. **README.md / docs/** — Update README.md for features, supported devices, compatibility or roadmap; docs/devices.md for device behaviour and actions; docs/development.md for project structure or test count.
 3. **Translation files** — If new entity types or UI strings are added:
    - `strings.json` — add entity names under `"entity"` block
    - `translations/en.json` — mirror the same entries
