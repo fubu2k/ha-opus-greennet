@@ -13,12 +13,19 @@ release, and you can return to it at any time (entities keep their IDs in both
 directions).
 
 1. Update the integration and restart Home Assistant.
-2. The gateway entry reports **Re-authentication required**, because it does
-   not know the gateway's address yet. Open the repair notification or
-   **Settings → Devices & services → Opus GreenNet Bridge → Reconfigure** and
-   enter the gateway's IP address. Port (`8080`), user (`admin`) and password
-   (the EURID) are prefilled with the vendor defaults.
-3. The entry loads again with all existing entities.
+2. At the first start the entry looks for its gateway in the local network
+   (mDNS, a few seconds). It tests every OPUS gateway it finds with the vendor
+   default credentials (user `admin`, password = the EURID the entry already
+   knows) and takes the one that reports the same EURID. The entry then loads
+   with all existing entities; there is nothing to enter.
+3. Only if that fails, the entry reports **Re-authentication required**:
+   - **Gateway not found** (for example Docker without host networking):
+     enter its IP address. Port (`8080`), user (`admin`) and password (the
+     EURID) are prefilled.
+   - **Password changed:** the address is filled in; enter the password.
+
+   If the gateway is announced later, discovery completes the entry on its own
+   and the re-authentication disappears.
 4. Optional, once everything works: remove the OPUS connection block from your
    Mosquitto configuration (for example `/share/mosquitto/opus_bridge.conf`)
    and restart the broker. Keep the MQTT broker and integration only if other

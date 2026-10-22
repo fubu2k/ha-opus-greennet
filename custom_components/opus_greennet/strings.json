@@ -1,9 +1,10 @@
 {
   "config": {
+    "flow_title": "{host}",
     "step": {
       "user": {
         "title": "Opus GreenNet Bridge",
-        "description": "Connect to the OPUS gateway in your network. Home Assistant talks to it directly over its REST API; no MQTT broker is needed.",
+        "description": "Connect to the OPUS gateway in your network. Home Assistant talks to it directly over its REST API; no MQTT broker is needed. A gateway found in the local network is filled in automatically.",
         "data": {
           "host": "Host",
           "port": "Port",
@@ -19,7 +20,7 @@
       },
       "reauth_confirm": {
         "title": "Connect to gateway {eag_id}",
-        "description": "Enter the address and API credentials of gateway {eag_id}. Gateways set up with an earlier version of this integration were connected through MQTT; this version connects to the gateway directly, so it needs the gateway's address once. All devices and entities are kept.",
+        "description": "Enter the address and API credentials of gateway {eag_id}. Gateways set up with an earlier version of this integration were connected through MQTT; this version connects to the gateway directly. The gateway could not be found in the local network with its default credentials, so enter its address once, or the password if you changed it. All devices and entities are kept.",
         "data": {
           "host": "Host",
           "port": "Port",
@@ -60,7 +61,8 @@
     "abort": {
       "already_configured": "This gateway is already configured. Its connection settings were updated.",
       "reauth_successful": "The gateway connection was updated.",
-      "reconfigure_successful": "The gateway connection was updated."
+      "reconfigure_successful": "The gateway connection was updated.",
+      "not_ipv4_address": "Only gateways with an IPv4 address are supported."
     }
   },
   "entity": {

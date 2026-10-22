@@ -12,7 +12,8 @@
 custom_components/opus_greennet/
 ├── __init__.py           # Integration setup and action registration
 ├── manifest.json         # Integration metadata and version
-├── config_flow.py        # Setup, re-authentication and reconfiguration
+├── config_flow.py        # Setup, discovery, re-authentication and reconfiguration
+├── discovery.py          # mDNS search and gateway identification by EURID
 ├── api.py                # REST client: requests, error mapping, event stream splitting
 ├── protocol.py           # Pure helpers that read gateway documents
 ├── coordinator.py        # Event stream, health check, device state and commands
@@ -53,7 +54,7 @@ pytest -v --cov --cov-report=json:coverage.json
 python script/check_coverage.py coverage.json
 ```
 
-The suite has 1,773 tests. They run against real Home Assistant core and an
+The suite has 1,787 tests. They run against real Home Assistant core and an
 in-process gateway that serves the REST API and its event stream over real HTTP
 (`tests/fake_gateway.py`).
 

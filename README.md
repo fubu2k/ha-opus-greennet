@@ -27,8 +27,9 @@ connected directly to the OPUS gateway's EnOcean over IP REST API.
 - **Local and fast.** One event stream from the gateway delivers every telegram
   within a fraction of a second, including wall switches, rocker presses and
   commands from the OPUS app or HomeKit. No cloud, no MQTT broker.
-- **Automatic discovery** of all devices paired with the gateway; newly paired
-  devices appear without a restart.
+- **Automatic discovery** of the gateway in the local network and of all
+  devices paired with it; newly paired devices appear without a restart.
+  Upgrades from the MQTT versions find the gateway on their own.
 - **Lights, switches, blinds, heating areas, sensors and window handles**, with
   per-button rocker events for automations.
 - **Reliable commands.** Every command waits for the gateway's acknowledgement
@@ -66,7 +67,7 @@ Details per device type: [docs/devices.md](docs/devices.md).
 |---|---|
 | Home Assistant | 2026.10.1 or newer |
 | Gateway | OPUS greenNet gateway with the REST API on port 8080 (tested with firmware OPUS-GW v1.21.31) |
-| Network | Home Assistant reaches the gateway on the local network; a fixed IP address (DHCP reservation) is recommended |
+| Network | Home Assistant and the gateway in the same local network. Discovery uses mDNS; without it (for example Docker without host networking) enter the address once |
 | Devices | Paired with the gateway in the OPUS app |
 
 No MQTT broker, MQTT integration or Mosquitto bridge is needed.
@@ -99,10 +100,13 @@ To try a beta, enable pre-release versions for this repository in HACS first.
 
 ## Configuration
 
+Home Assistant discovers the gateway in the local network: it appears under
+**Settings → Devices & services → Discovered** with its address filled in, and
+you only enter the password. To add it by hand, use
+
 [![Add Integration][config-flow-badge]][config-flow]
 
-…or go to **Settings → Devices & services → Add integration → Opus GreenNet
-Bridge** and enter:
+…or **Settings → Devices & services → Add integration → Opus GreenNet Bridge**:
 
 | Field | Description |
 |-------|-------------|
@@ -112,12 +116,14 @@ Bridge** and enter:
 | **Password** | API password, by default the gateway's EURID in capital letters (printed on the gateway; fictional example: `A1B2C3D4`) |
 
 The gateway's EURID becomes the stable identifier of the entry, its devices and
-entities. To change the address or credentials later, use **Reconfigure** on
-the entry.
+entities. If the gateway gets a new IP address, discovery updates the entry
+automatically. To change the credentials, use **Reconfigure** on the entry.
 
-**Upgrading from an MQTT version (0.x):** after the update the entry asks for
-re-authentication; enter the gateway's IP address and all entities are kept.
-See [docs/upgrading.md](docs/upgrading.md).
+**Upgrading from an MQTT version (0.x):** nothing to enter in most cases. At the
+first start the integration finds the gateway in the local network and
+connects with the default credentials; all entities are kept. It asks only if
+the gateway cannot be found or its password was changed. See
+[docs/upgrading.md](docs/upgrading.md).
 
 ## Troubleshooting
 
@@ -138,8 +144,8 @@ diagnostics** on the integration entry). More in
   follows from the device's report or a status check.
 - Cover positions during movement are estimated from the configured travel
   time.
-- The gateway is not discovered automatically, and its API is plain HTTP with
-  basic authentication. Keep it in a trusted network.
+- The gateway API is plain HTTP with basic authentication. Keep the gateway in
+  a trusted network.
 - Devices cannot be added to or removed from the gateway yet, and device
   settings are only available as actions (see [Roadmap](#roadmap)).
 
@@ -152,7 +158,7 @@ All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 | 🧪 Beta | 1.0 with the REST API: collecting feedback in [#79](https://github.com/kegelmeier/ha-opus-greennet/issues/79) |
 | 📋 Planned | Device settings as Home Assistant entities |
 | 🔍 Investigating | Adding and removing devices from Home Assistant |
-| 💡 Idea | Gateway discovery, HTTPS if the gateway offers it |
+| 💡 Idea | HTTPS if the gateway offers it |
 
 ### Device settings
 

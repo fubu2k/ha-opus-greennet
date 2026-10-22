@@ -1,9 +1,10 @@
 {
   "config": {
+    "flow_title": "{host}",
     "step": {
       "user": {
         "title": "Opus GreenNet Bridge",
-        "description": "Verbinde das OPUS-Gateway in deinem Netzwerk. Home Assistant spricht direkt über die REST-API mit dem Gateway; ein MQTT-Broker ist nicht nötig.",
+        "description": "Verbinde das OPUS-Gateway in deinem Netzwerk. Home Assistant spricht direkt über die REST-API mit dem Gateway; ein MQTT-Broker ist nicht nötig. Ein im lokalen Netzwerk gefundenes Gateway wird automatisch eingetragen.",
         "data": {
           "host": "Host",
           "port": "Port",
@@ -19,7 +20,7 @@
       },
       "reauth_confirm": {
         "title": "Mit Gateway {eag_id} verbinden",
-        "description": "Gib die Adresse und die API-Zugangsdaten von Gateway {eag_id} ein. Mit einer früheren Version dieser Integration eingerichtete Gateways waren über MQTT verbunden; diese Version verbindet sich direkt mit dem Gateway und benötigt dafür einmalig seine Adresse. Alle Geräte und Entitäten bleiben erhalten.",
+        "description": "Gib die Adresse und die API-Zugangsdaten von Gateway {eag_id} ein. Mit einer früheren Version dieser Integration eingerichtete Gateways waren über MQTT verbunden; diese Version verbindet sich direkt mit dem Gateway. Mit seinen Standard-Zugangsdaten wurde es im lokalen Netzwerk nicht gefunden. Gib deshalb einmalig seine Adresse ein, oder das Passwort, falls du es geändert hast. Alle Geräte und Entitäten bleiben erhalten.",
         "data": {
           "host": "Host",
           "port": "Port",
@@ -60,7 +61,8 @@
     "abort": {
       "already_configured": "Dieses Gateway ist bereits eingerichtet. Seine Verbindungseinstellungen wurden aktualisiert.",
       "reauth_successful": "Die Verbindung zum Gateway wurde aktualisiert.",
-      "reconfigure_successful": "Die Verbindung zum Gateway wurde aktualisiert."
+      "reconfigure_successful": "Die Verbindung zum Gateway wurde aktualisiert.",
+      "not_ipv4_address": "Es werden nur Gateways mit einer IPv4-Adresse unterstützt."
     }
   },
   "entity": {

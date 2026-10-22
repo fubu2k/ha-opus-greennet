@@ -1,6 +1,7 @@
 {
   "domain": "opus_greennet",
   "name": "Opus GreenNet Bridge",
+  "after_dependencies": ["zeroconf"],
   "codeowners": ["@kegelmeier"],
   "config_flow": true,
   "documentation": "https://github.com/kegelmeier/ha-opus-greennet",
@@ -8,5 +9,6 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/kegelmeier/ha-opus-greennet/issues",
   "requirements": [],
-  "version": "0.8.0"
+  "version": "0.8.0",
+  "zeroconf": [{ "type": "_enocean._tcp.local.", "name": "opusshgw*" }]
 }

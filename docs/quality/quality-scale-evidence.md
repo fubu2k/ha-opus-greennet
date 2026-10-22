@@ -19,7 +19,7 @@ Rule -> implementation -> tests -> documentation for every rule in
   official rule keys, the applicable official validators (`config-flow`,
   `runtime-data`, `strict-typing`, `test-before-setup`, `unique-config-entry`,
   `discovery`) and checks that this table matches the YAML.
-- Summary: 45 done, 6 exempt, 3 todo. All open items stay visible as `todo`.
+- Summary: 47 done, 5 exempt, 2 todo. All open items stay visible as `todo`.
   Because bronze, silver and gold each contain open or exempt items that an
   official review would have to accept, no tier is claimed.
 
@@ -71,8 +71,8 @@ Rule -> implementation -> tests -> documentation for every rule in
 |------|--------|----------------|-------|---------------|
 | `devices` | done | Gateway device in `__init__.py`, EnOcean devices via `device_info` with `via_device_id` (`entity.py`) | `test_init.py::test_setup_creates_gateway_registry_device`; `test_binary_sensor_discovery.py::test_gateway_discovery_and_tracking_are_isolated` | – |
 | `diagnostics` | done | `diagnostics.py` (config entry and device diagnostics, `TO_REDACT`, identifier redaction in text) | `test_diagnostics.py`, `test_diagnostics_edge_cases.py`; QS `test_stale_devices_and_diagnostics_entry_points` | README Troubleshooting, docs/troubleshooting.md |
-| `discovery` | todo | Not implemented (no manifest discovery key, no discovery step) | QS `test_discovery_todo_matches_the_code` | README Known limitations, docs/how-it-works.md |
-| `discovery-update-info` | exempt | No discovery; a changed address is entered with the reconfigure flow | – | README Configuration |
+| `discovery` | done | `manifest.json` `zeroconf` (`_enocean._tcp.local.`, `opusshgw*`); `config_flow.py` `async_step_zeroconf`; `discovery.py` search for entries of the former MQTT setup | `test_discovery.py`; QS `test_discovery_status_matches_the_code` | README Configuration, docs/upgrading.md |
+| `discovery-update-info` | done | `config_flow.py` `_async_adopt_address`: a configured gateway announced at another address is updated after its EURID is confirmed | `test_discovery.py::test_discovery_updates_a_changed_address`, `::test_discovery_completes_a_legacy_entry_and_ends_its_reauth` | README Configuration |
 | `docs-data-update` | done | – | QS `test_documentation_rules_point_to_existing_sections` | docs/how-it-works.md Updates and availability |
 | `docs-examples` | todo | – | – | – |
 | `docs-known-limitations` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Known limitations, docs/how-it-works.md |

@@ -1,6 +1,7 @@
 # Troubleshooting
 
 - [Find the failing link](#find-the-failing-link)
+- [Gateway not discovered](#gateway-not-discovered)
 - [Devices not appearing](#devices-not-appearing)
 - [Recovery](#recovery)
 - [Diagnostics](#diagnostics)
@@ -21,6 +22,17 @@ the configuration:
 A gateway outage makes the entities unavailable and cancels queued commands;
 they are not replayed afterwards. A quiet radio device never makes an entity
 unavailable.
+
+## Gateway not discovered
+
+Discovery relies on mDNS (`_enocean._tcp`). It does not work when Home
+Assistant cannot receive multicast from the gateway, for example in Docker
+without host networking, across VLANs without an mDNS repeater, or when the
+gateway's announcement is blocked. Add the gateway by its address instead; the
+integration works the same.
+
+A gateway that was ignored under **Discovered** stays ignored; remove the
+ignored entry to see it again.
 
 ## Devices not appearing
 

@@ -144,7 +144,8 @@ def test_config_flow_errors_and_aborts_are_translated() -> None:
         for node in ast.walk(tree)
         if isinstance(node, ast.AsyncFunctionDef)
         and node.name.startswith("async_step_")
-        and node.name != "async_step_reauth"
+        # These steps only route to a step with a form.
+        and node.name not in {"async_step_reauth", "async_step_zeroconf"}
     }
     assert steps == set(STRINGS["config"]["step"])
     for step in steps:

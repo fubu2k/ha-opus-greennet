@@ -295,8 +295,8 @@ def test_unique_config_entry_validator() -> None:
     assert _calls(flow, "_abort_if_unique_id_configured")
 
 
-def test_discovery_todo_matches_the_code() -> None:
-    """The official discovery validator fails, so the rule must stay todo."""
+def test_discovery_status_matches_the_code() -> None:
+    """discovery is done exactly when a manifest matcher or step exists."""
     manifest_keys = {
         "bluetooth",
         "dhcp",
@@ -379,11 +379,18 @@ def test_no_requirements_and_injected_websession() -> None:
                 assert path.name == "api.py", path.name
         # Never create an own session; use Home Assistant's shared one.
         assert not _calls(tree, "ClientSession"), path.name
-    for module in ("__init__", "config_flow"):
-        source = (INTEGRATION / f"{module}.py").read_text(encoding="utf-8")
+    clients = [
+        path
+        for path in INTEGRATION.glob("*.py")
+        if "OpusGatewayClient(" in path.read_text(encoding="utf-8")
+        and path.name != "api.py"
+    ]
+    assert {path.stem for path in clients} == {"__init__", "discovery"}
+    for path in clients:
+        source = path.read_text(encoding="utf-8")
         assert "async_get_clientsession(hass" in source or (
             "async_get_clientsession(self.hass" in source
-        ), module
+        ), path.stem
 
 
 def test_integration_owner() -> None:

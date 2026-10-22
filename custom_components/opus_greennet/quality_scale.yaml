@@ -97,16 +97,17 @@ rules:
   devices: done
   diagnostics: done
   discovery:
-    status: todo
+    status: done
     comment: >-
-      Not implemented. The gateway documents no discovery mechanism of its own;
-      its HomeKit announcement could be used, but cannot provide the API
-      credentials.
+      Zeroconf: the gateway announces _enocean._tcp (instance opusshgw). The
+      discovery step identifies configured gateways by their EURID; a new
+      gateway is offered with its address filled in (credentials are not
+      announced). Entries of the former MQTT setup search the network at setup.
   discovery-update-info:
-    status: exempt
+    status: done
     comment: >-
-      There is no discovery that could report a new address. A changed address
-      is entered through the reconfigure flow, or by adding the gateway again.
+      A configured gateway announced at another address is updated and
+      reloaded once its REST API reports the entry's EURID.
   docs-data-update:
     status: done
     comment: docs/how-it-works.md section Updates and availability.

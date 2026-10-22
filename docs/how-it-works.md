@@ -1,10 +1,30 @@
 # How it works
 
+- [Discovery](#discovery)
 - [Updates and availability](#updates-and-availability)
 - [Commands and acknowledgements](#commands-and-acknowledgements)
 - [Large installations](#large-installations)
 - [Known limitations](#known-limitations)
 - [Gateway REST API](#gateway-rest-api)
+
+## Discovery
+
+OPUS gateways announce the service `_enocean._tcp` (instance `opusshgw`) over
+mDNS. The announcement contains no EURID and no credentials, so the
+integration reads `/system/info` of each announced gateway:
+
+- **Configured gateway at a new address:** the entry's credentials are tried
+  at the announced address. If the gateway reports the entry's EURID, the
+  address is updated and the entry reloads.
+- **Entry of the former MQTT setup** (EURID only): the vendor default
+  credentials (`admin`, password = EURID) are tried. On a match the entry gets
+  address and credentials and loads without any input. The same search also
+  runs once when such an entry is set up.
+- **New gateway:** offered under **Discovered** with its address; the user
+  enters the password.
+
+Discovery only reads `/system/info`; it sends no radio telegram. IPv6-only
+announcements are ignored.
 
 ## Updates and availability
 
@@ -77,8 +97,8 @@ cancels the queued commands instead of replaying them after recovery.
   time.
 - A HOPPE AutoLock answer queued for the sleeping handle takes effect when the
   handle wakes up (for example at its next button press).
-- The gateway is not discovered automatically; give it a fixed address or
-  update it with **Reconfigure**.
+- Discovery needs mDNS between Home Assistant and the gateway. Without it, a
+  changed gateway address has to be entered with **Reconfigure**.
 - The gateway API is plain HTTP with basic authentication, as provided by the
   manufacturer. Keep the gateway in a trusted network.
 - Battery level and signal strength are refreshed every 30 minutes.

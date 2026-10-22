@@ -42,6 +42,7 @@ from .const import (
     REPOSITIONING_FIRST_UP,
 )
 from .coordinator import GatewayMismatchError, OpusGreenNetCoordinator
+from .discovery import async_locate_gateway, default_connection
 from .entity import async_delete_config_entry_issues
 
 _LOGGER = logging.getLogger(__name__)
@@ -181,6 +182,32 @@ def _validate_service_device(
         )
 
 
+async def _async_locate_legacy_gateway(
+    hass: HomeAssistant, entry: OpusGreenNetConfigEntry
+) -> None:
+    """Store the address of a former MQTT entry's gateway if it can be found.
+
+    A gateway that only rejected the default credentials is stored as well, so
+    the reauthentication form shows its address and only asks for the password.
+    """
+    eag_id = entry.data[CONF_EAG_ID]
+    located = await async_locate_gateway(hass, eag_id)
+    if located is None:
+        _LOGGER.info("OPUS gateway %s was not found in the local network", eag_id)
+        return
+    if located.verified:
+        _LOGGER.info("OPUS gateway %s found in the local network", eag_id)
+    else:
+        _LOGGER.info(
+            "OPUS gateway %s probably found in the local network; it rejected "
+            "the default credentials",
+            eag_id,
+        )
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, **default_connection(located.host, eag_id)}
+    )
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: OpusGreenNetConfigEntry
 ) -> bool:
@@ -188,7 +215,10 @@ async def async_setup_entry(
     eag_id = entry.data[CONF_EAG_ID]
     if CONF_HOST not in entry.data:
         # Entries created for the former MQTT transport only know the EAG
-        # identifier. The reauthentication flow asks for the gateway address.
+        # identifier. Look for the gateway in the local network first; the
+        # reauthentication flow asks for the address only if it is not found.
+        await _async_locate_legacy_gateway(hass, entry)
+    if CONF_HOST not in entry.data:
         raise ConfigEntryAuthFailed(
             translation_domain=DOMAIN, translation_key="gateway_address_required"
         )
