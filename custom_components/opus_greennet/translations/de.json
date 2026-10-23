@@ -53,6 +53,7 @@
     },
     "error": {
       "cannot_connect": "Verbindung zum Gateway fehlgeschlagen. Prüfe Host und Port.",
+      "invalid_host": "Gib nur die IP-Adresse oder den Hostnamen des Gateways ein, ohne http://, Port oder Pfad.",
       "invalid_auth": "Das Gateway hat Benutzername oder Passwort abgelehnt.",
       "unsupported_gateway": "Das Gerät unter dieser Adresse hat nicht wie ein OPUS-Gateway geantwortet.",
       "wrong_gateway": "Diese Adresse gehört zu einem anderen Gateway als {eag_id}.",

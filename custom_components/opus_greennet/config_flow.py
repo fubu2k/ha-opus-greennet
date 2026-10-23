@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -29,6 +31,25 @@ from .discovery import async_read_gateway_id, default_connection
 _LOGGER = logging.getLogger(__name__)
 
 PASSWORD_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+
+_HOSTNAME_LABEL = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
+
+
+def _is_host(host: str) -> bool:
+    """Return whether ``host`` is a bare IP address or host name.
+
+    URLs, paths, credentials and ports are rejected: they would end up in the
+    request URL instead of selecting the gateway.
+    """
+    literal = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    try:
+        ipaddress.ip_address(literal)
+    except ValueError:
+        pass
+    else:
+        return True
+    labels = host.removesuffix(".").split(".")
+    return len(host) <= 253 and all(_HOSTNAME_LABEL.match(label) for label in labels)
 
 
 def _connection_schema(defaults: Mapping[str, Any]) -> vol.Schema:
@@ -72,6 +93,9 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: Mapping[str, Any], errors: dict[str, str]
     ) -> str | None:
         """Return the gateway's EAG identifier, or None with ``errors`` set."""
+        if not _is_host(user_input[CONF_HOST].strip()):
+            errors[CONF_HOST] = "invalid_host"
+            return None
         try:
             return await async_read_gateway_id(self.hass, user_input)
         except OpusAuthError:

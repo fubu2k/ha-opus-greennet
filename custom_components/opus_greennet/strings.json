@@ -53,6 +53,7 @@
     },
     "error": {
       "cannot_connect": "Failed to connect to the gateway. Check the host and port.",
+      "invalid_host": "Enter only the gateway's IP address or host name, without http://, port or path.",
       "invalid_auth": "The gateway rejected the username or password.",
       "unsupported_gateway": "The device at this address did not answer like an OPUS gateway.",
       "wrong_gateway": "This address belongs to a different gateway than {eag_id}.",

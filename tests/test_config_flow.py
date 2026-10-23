@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
+from custom_components.opus_greennet.config_flow import _is_host
 from custom_components.opus_greennet.const import DOMAIN
 from tests.fake_gateway import FakeGateway, device_object
 from tests.ha_helpers import configure_bridge, setup_bridge
@@ -197,3 +199,50 @@ async def test_reconfigure_rejects_a_different_gateway(
         result["flow_id"], gateway.config
     )
     assert result["errors"] == {"base": "wrong_gateway"}
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "http://192.168.1.10",
+        "192.168.1.10:8080",
+        "192.168.1.10/api",
+        "admin:pw@192.168.1.10",
+        "bad host",
+        "-gateway.local",
+        "a" * 64 + ".local",
+        "[not-an-ip]",
+    ],
+)
+async def test_user_flow_rejects_a_url_instead_of_a_host(
+    hass: HomeAssistant, gateway: FakeGateway, host: str
+) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**gateway.config, "host": host}
+    )
+    assert result["errors"] == {"host": "invalid_host"}
+    assert gateway.requests == []
+
+
+@pytest.mark.parametrize("host", ["::1", "[::1]", "localhost"])
+async def test_user_flow_accepts_host_names_and_ipv6(
+    hass: HomeAssistant, gateway: FakeGateway, host: str
+) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**gateway.config, "host": host, "port": 1}
+    )
+    # Valid hosts reach the connection attempt (nothing listens on port 1).
+    assert result["errors"] == {"base": "cannot_connect"}
+
+
+@pytest.mark.parametrize(
+    "host", ["192.168.1.10", "opusshgw.local", "opusshgw.local.", "gw-1.example.org"]
+)
+def test_host_names_are_accepted(host: str) -> None:
+    assert _is_host(host)

@@ -42,6 +42,9 @@ STREAM_IDLE_TIMEOUT: Final = 900.0
 # Upper bound for one streamed JSON document (the full device list of a large
 # installation is a few hundred kilobytes).
 MAX_DOCUMENT_SIZE: Final = 8 * 1024 * 1024
+# Upper bound for the body of one ordinary (non-stream) response.
+MAX_RESPONSE_SIZE: Final = MAX_DOCUMENT_SIZE
+_READ_CHUNK_SIZE: Final = 64 * 1024
 
 # Queue priorities: lower values are dispatched first. User-initiated control
 # commands must never wait behind status queries, and delayed (background)
@@ -362,10 +365,13 @@ class OpusGatewayClient:
                 f"{self._base_url}{path}",
                 headers=self._headers,
                 json=body,
+                # The gateway never redirects. Following one could send the
+                # Authorization header to another host.
+                allow_redirects=False,
                 timeout=aiohttp.ClientTimeout(total=timeout, connect=CONNECT_TIMEOUT),
             ) as response:
                 _raise_for_auth(response)
-                text = await response.text(errors="replace")
+                text = await _read_bounded_text(response)
         except TimeoutError as err:
             raise OpusTimeoutError(f"{method} {path} timed out") from err
         except aiohttp.ClientError as err:
@@ -391,6 +397,7 @@ class OpusGatewayClient:
             async with self._session.get(
                 f"{self._base_url}/devices/stream",
                 headers=self._headers,
+                allow_redirects=False,
                 timeout=aiohttp.ClientTimeout(
                     total=None,
                     connect=CONNECT_TIMEOUT,
@@ -416,6 +423,19 @@ class OpusGatewayClient:
             raise OpusConnectionError(f"The event stream failed: {err}") from err
         except ValueError as err:
             raise OpusResponseError("The event stream contains invalid JSON") from err
+
+
+async def _read_bounded_text(response: aiohttp.ClientResponse) -> str:
+    """Read a response body, refusing more than ``MAX_RESPONSE_SIZE`` bytes."""
+    declared = response.content_length
+    if declared is not None and declared > MAX_RESPONSE_SIZE:
+        raise OpusResponseError("The gateway response is too large")
+    body = bytearray()
+    async for chunk in response.content.iter_chunked(_READ_CHUNK_SIZE):
+        body.extend(chunk)
+        if len(body) > MAX_RESPONSE_SIZE:
+            raise OpusResponseError("The gateway response is too large")
+    return body.decode("utf-8", errors="replace")
 
 
 def _raise_for_auth(response: aiohttp.ClientResponse) -> None:

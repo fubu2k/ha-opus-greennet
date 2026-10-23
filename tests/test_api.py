@@ -8,6 +8,7 @@ import json
 import aiohttp
 import pytest
 
+from custom_components.opus_greennet import api
 from custom_components.opus_greennet.api import (
     MAX_DOCUMENT_SIZE,
     PRIORITY_BACKGROUND,
@@ -354,6 +355,15 @@ async def test_stream_invalid_json_raises_response_error(
             pass  # pragma: no cover
 
 
+async def test_stream_with_too_deep_nesting_raises_response_error(
+    session: aiohttp.ClientSession, gateway: FakeGateway
+) -> None:
+    gateway.stream_preamble = ['{"a": ' + "[" * 200_000 + "]" * 200_000 + "}"]
+    with pytest.raises(OpusResponseError, match="invalid JSON"):
+        async for _ in _client(session, gateway).async_stream():
+            pass
+
+
 async def test_stream_read_timeout_raises_timeout_error(
     session: aiohttp.ClientSession,
     gateway: FakeGateway,
@@ -364,3 +374,61 @@ async def test_stream_read_timeout_raises_timeout_error(
     with pytest.raises(OpusTimeoutError, match="silent"):
         async for _ in client.async_stream():
             pass
+
+
+# ── redirects and response size ────────────────────────────────────────────
+
+
+async def test_requests_do_not_follow_redirects(
+    session: aiohttp.ClientSession, gateway: FakeGateway
+) -> None:
+    gateway.redirects["/system/info"] = "/elsewhere"
+    with pytest.raises(OpusResponseError) as err:
+        await _client(session, gateway).async_get("/system/info")
+    assert err.value.http_status == 302
+    assert gateway.requests_to("GET", "/elsewhere") == []
+
+
+async def test_stream_does_not_follow_redirects(
+    session: aiohttp.ClientSession, gateway: FakeGateway
+) -> None:
+    gateway.redirects["/devices/stream"] = "/elsewhere"
+    with pytest.raises(OpusResponseError, match="status 302"):
+        async for _document in _client(session, gateway).async_stream():
+            pass
+    assert gateway.requests_to("GET", "/elsewhere") == []
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+async def test_oversized_response_is_refused(
+    session: aiohttp.ClientSession,
+    gateway: FakeGateway,
+    monkeypatch: pytest.MonkeyPatch,
+    chunked: bool,
+) -> None:
+    monkeypatch.setattr(api, "MAX_RESPONSE_SIZE", 1024)
+    monkeypatch.setattr(api, "_READ_CHUNK_SIZE", 256)
+    gateway.responses["/system/info"] = {
+        "header": {"httpStatus": 200},
+        "padding": "x" * 2048,
+    }
+    if chunked:
+        gateway.chunked.add("/system/info")
+    with pytest.raises(OpusResponseError, match="too large"):
+        await _client(session, gateway).async_get("/system/info")
+
+
+async def test_response_up_to_the_limit_is_read(
+    session: aiohttp.ClientSession,
+    gateway: FakeGateway,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(api, "MAX_RESPONSE_SIZE", 4096)
+    monkeypatch.setattr(api, "_READ_CHUNK_SIZE", 256)
+    # Multi-byte characters split across chunks decode as a whole.
+    gateway.responses["/system/info"] = json.dumps(
+        {"header": {"httpStatus": 200}, "padding": "ä" * 1000}, ensure_ascii=False
+    )
+    gateway.chunked.add("/system/info")
+    document = await _client(session, gateway).async_get("/system/info")
+    assert document["padding"] == "ä" * 1000

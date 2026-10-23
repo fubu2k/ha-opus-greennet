@@ -27,9 +27,14 @@ def parse_json(text: str | bytes | bytearray) -> JsonValue:
     ``json.loads`` only produces ``dict``/``list``/``str``/``int``/``float``/
     ``bool``/``None``, so its untyped result is a ``JsonValue`` by
     construction. NaN and Infinity literals are accepted here; the domain
-    parsers reject non-finite numbers per field.
+    parsers reject non-finite numbers per field. A document nested too
+    deeply for the decoder is reported as ``ValueError`` like any other
+    invalid document.
     """
-    value: JsonValue = json.loads(text)
+    try:
+        value: JsonValue = json.loads(text)
+    except RecursionError as err:
+        raise ValueError("The JSON document is nested too deeply") from err
     return value
 
 

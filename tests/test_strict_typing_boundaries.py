@@ -94,6 +94,12 @@ def test_parse_json_keeps_non_finite_literals_for_field_validation():
         parse_json("{")
 
 
+def test_parse_json_reports_deep_nesting_as_invalid_json():
+    # The decoder raises RecursionError; callers only map ValueError.
+    with pytest.raises(ValueError, match="nested too deeply"):
+        parse_json("[" * 200_000 + "]" * 200_000)
+
+
 def test_container_helpers_reject_wrong_container_types():
     assert as_object({"a": 1}) == {"a": 1}
     assert as_object([("a", 1)]) is None

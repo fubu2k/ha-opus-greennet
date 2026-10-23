@@ -66,8 +66,10 @@ class FakeGateway:
     ``close_after_snapshot`` (end every event stream right after its device
     list), ``stream_without_configuration`` (stream the device list without
     the ``configuration`` block, like real gateways), ``snapshot_delay``
-    (seconds between opening a stream and writing its device list) and
-    ``accept_auth`` (reject every request with 401 when False).
+    (seconds between opening a stream and writing its device list),
+    ``redirects`` (per path, the target of a 302 answer), ``chunked`` (paths
+    answered without a Content-Length) and ``accept_auth`` (reject every
+    request with 401 when False).
     """
 
     def __init__(self, eurid: str = EURID, password: str = PASSWORD) -> None:
@@ -85,6 +87,8 @@ class FakeGateway:
         self.delays: dict[str, float] = {}
         self.responses: dict[str, Any] = {}
         self.http_status: dict[str, int] = {}
+        self.redirects: dict[str, str] = {}
+        self.chunked: set[str] = set()
         self.requests: list[tuple[str, str, Any]] = []
         self.on_request: Callable[[str, str, Any], Awaitable[None]] | None = None
         self.stream_preamble: list[str] = []
@@ -204,6 +208,8 @@ class FakeGateway:
             await self.on_request(request.method, path, body)
         if not self._authorized(request):
             return web.Response(status=401)
+        if (target := self.redirects.get(path)) is not None:
+            return web.Response(status=302, headers={"Location": target})
         if (delay := self.delays.get(path)) is not None:
             await asyncio.sleep(delay)
         if (status := self.status.get(path)) is not None:
@@ -218,8 +224,12 @@ class FakeGateway:
         if path in self.responses:
             response = self.responses[path]
             if isinstance(response, str):
-                return web.Response(text=response, content_type="application/json")
-            return web.json_response(response)
+                answer = web.Response(text=response, content_type="application/json")
+            else:
+                answer = web.json_response(response)
+            if path in self.chunked:
+                answer.enable_chunked_encoding()
+            return answer
         return web.json_response(self._answer(request.method, path))
 
     def _answer(self, method: str, path: str) -> dict[str, Any]:
