@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Final
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
@@ -38,6 +39,15 @@ from .entity import OpusGreenNetEntity, migrate_legacy_entity_suffix
 # Sensor state is pushed by the coordinator.
 PARALLEL_UPDATES = 0
 
+
+# Attributes of the run time sensor, restored with its value.
+RUN_ATTRIBUTES: Final = (
+    "direction",
+    "start_position",
+    "end_position",
+    "full_travel",
+    "finished_at",
+)
 
 # Numeric channel readings exposed by OpusGreenNetMeasurementSensor.
 MEASUREMENT_READINGS: Final[dict[str, Callable[[EnOceanChannel], float | None]]] = {
@@ -504,7 +514,7 @@ class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
         return None
 
 
-class OpusGreenNetCoverRunSensor(OpusGreenNetEntity, SensorEntity):
+class OpusGreenNetCoverRunSensor(OpusGreenNetEntity, RestoreSensor):
     """Seconds from a position command to the blind's report at the target.
 
     Measured by the integration for commands from Home Assistant and from
@@ -512,6 +522,9 @@ class OpusGreenNetCoverRunSensor(OpusGreenNetEntity, SensorEntity):
     an end report or confirmed only by a status query records no time. The
     attributes tell the direction, start and end (Home Assistant scale,
     100 = open) and whether the run covered the full height.
+
+    No device reports this value, so the last one is restored after a restart
+    and shown until the next run completes.
     """
 
     _attr_has_entity_name = True
@@ -536,6 +549,24 @@ class OpusGreenNetCoverRunSensor(OpusGreenNetEntity, SensorEntity):
         self._attr_unique_id = (
             f"{eag_id}_{device.device_id}_last_run_time{channel_suffix}"
         )
+        self._restored_value: float | None = None
+        self._restored_attributes: dict[str, object] | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last measured run from before the restart."""
+        await super().async_added_to_hass()
+        sensor_data = await self.async_get_last_sensor_data()
+        if sensor_data is None or not isinstance(
+            sensor_data.native_value, (int, float)
+        ):
+            return
+        self._restored_value = float(sensor_data.native_value)
+        if (last_state := await self.async_get_last_state()) is not None:
+            self._restored_attributes = {
+                key: last_state.attributes[key]
+                for key in RUN_ATTRIBUTES
+                if key in last_state.attributes
+            } or None
 
     def _run(self) -> CoverRun | None:
         return self._coordinator.last_cover_runs.get(
@@ -546,14 +577,14 @@ class OpusGreenNetCoverRunSensor(OpusGreenNetEntity, SensorEntity):
     def native_value(self) -> float | None:
         """Return the measured seconds of the last completed run."""
         run = self._run()
-        return run.seconds if run is not None else None
+        return run.seconds if run is not None else self._restored_value
 
     @property
     def extra_state_attributes(self) -> dict[str, object] | None:
         """Describe the last run (positions in Home Assistant scale)."""
         run = self._run()
         if run is None:
-            return None
+            return self._restored_attributes
         return {
             "direction": run.direction,
             "start_position": (

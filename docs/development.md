@@ -54,7 +54,7 @@ pytest -v --cov --cov-report=json:coverage.json
 python script/check_coverage.py coverage.json
 ```
 
-The suite has 1,787 tests. They run against real Home Assistant core and an
+The suite has 1,790 tests. They run against real Home Assistant core and an
 in-process gateway that serves the REST API and its event stream over real HTTP
 (`tests/fake_gateway.py`).
 

@@ -93,7 +93,7 @@ and, where supported, tilt. It does not assume a new position.
 |--------|--------------|
 | **Blockage** switch | For automations such as wind protection or an open door. On sends `lockingMode = block`, off sends `unblock`. A D2-05-00 `alarm` counts as blocked; the reported mode is the `locking_mode` attribute. **Disabled by default** because it stops the blind. |
 | **Reference run via top / bottom** buttons | Drive the blind to an end position first (`repositioning = firstUp` / `firstDown`) and then back to its last known position. This recalibrates the blind's position tracking. |
-| **Last run time** sensor (every blind) | Seconds from a position command (from HA, another controller or a reference run) to the blind's report at the target. Attributes: `direction` (`up`, `down`, `reference_up`, `reference_down`), start and end position (100 = open) and `full_travel`, the value to compare with the configured `verticalMovementTime`. Runs ended by Stop, without an end report or only confirmed by a status query record no time. |
+| **Last run time** sensor (every blind) | Seconds from a position command (from HA, another controller or a reference run) to the blind's report at the target. Attributes: `direction` (`up`, `down`, `reference_up`, `reference_down`), start and end position (100 = open) and `full_travel`, the value to compare with the configured `verticalMovementTime`. Runs ended by Stop, without an end report or only confirmed by a status query record no time. The last value is kept across Home Assistant restarts. |
 
 Movement and rotation times always come from the device list (seconds). The
 milliseconds of a D2-05-00 "Set parameters" command sent by another controller
