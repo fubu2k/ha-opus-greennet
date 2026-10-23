@@ -34,7 +34,7 @@ directions).
 The integration checks that the address answers as the configured gateway
 (same EURID) and rejects a different gateway.
 
-**Check after updating to 1.0.0b2 or later:** some D2-01 actuator types now
+**Check after updating:** some D2-01 actuator types now
 follow the gateway profile. An actuator that changes from switch to light, or
 whose channel count changes, gets new entities; update the dashboards and
 automations that used the old ones. See

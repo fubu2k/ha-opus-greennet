@@ -17,10 +17,10 @@ connected directly to the OPUS gateway's EnOcean over IP REST API.
 </div>
 
 > [!NOTE]
-> **Version 1.0 is in beta.** It replaces the MQTT connection with the
-> gateway's REST API. Feedback is collected in the
-> [beta issue](https://github.com/kegelmeier/ha-opus-greennet/issues/79).
-> v0.8.0 is the last stable MQTT release.
+> **Version 1.0 connects to the gateway directly over its REST API** instead of
+> MQTT. Updating from 0.x keeps all devices and entities; see
+> [Upgrading](docs/upgrading.md). v0.8.0 stays available as the last MQTT
+> release.
 
 ## Features
 
@@ -155,7 +155,7 @@ All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 
 | Status | Topic |
 |--------|-------|
-| 🧪 Beta | 1.0 with the REST API: collecting feedback in [#79](https://github.com/kegelmeier/ha-opus-greennet/issues/79) |
+| ✅ Released | 1.0 with the REST API instead of MQTT |
 | 📋 Planned | Device settings as Home Assistant entities |
 | 🔍 Investigating | Adding and removing devices from Home Assistant |
 | 💡 Idea | HTTPS if the gateway offers it |

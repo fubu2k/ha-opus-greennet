@@ -83,12 +83,11 @@ Please check physical controls, low brightness, both channels of 2-channel
 actuators, cover position and tilt, climate activity and rapid rocker presses.
 Also power-cycle the gateway and reload the integration during a pending
 request. Report your gateway firmware, the device EEP and what you observed,
-with redacted diagnostics, in the beta issue.
+with redacted diagnostics, in the pinned beta issue or a new issue.
 
 ## Contributing
 
-- Open pull requests against the current development branch (during the 1.0
-  beta: `feat/rest-transport`), one topic per pull request.
+- Open pull requests against `main`, one topic per pull request.
 - Pull requests contain no version bump and no CHANGELOG entry; both are part
   of the release.
 - Add tests for every behaviour change and keep all CI gates green.
