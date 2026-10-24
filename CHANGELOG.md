@@ -2,6 +2,239 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.0] - 2026-10-24
+
+**This is a big one.** 1.0 is the largest change since the integration started, and the step from an experimental bridge setup to a stable integration you can rely on every day.
+
+**1.0 talks to the OPUS gateway directly over its EnOcean over IP REST API.** The MQTT broker and the Mosquitto bridge are no longer needed. State changes reach Home Assistant in about 5–20 ms instead of seconds, also while Apple Home or the OPUS app use the gateway. Devices, entities, entity IDs, names, areas, dashboards and automations are kept.
+
+v0.8.0 stays available as the last MQTT release; you can go back to it at any time.
+
+### Before you update
+- **Home Assistant 2026.10.1 or newer**, also for manual installs. HACS checks this; a manual copy does not.
+- **Home Assistant must reach the gateway on port 8080** in the local network, the gateway's REST API. It uses the vendor login: user `admin`, password = the gateway's EURID, unless you changed it.
+- **D2-01 actuators other than D2-01-00 to -03 and -11:** switch or dimmer and the number of channels now come from the gateway's device profile. Earlier versions treated many of these as multi-channel devices. A device whose type changes gets new entities. Update the automations and dashboards that used the old ones. D2-01-00 to -03 and -11 keep their entities.
+- **Check automations that rely on:**
+  - **Dimmer fades.** Dimmers now switch to the new brightness at once, like Apple Home. Use `transition` for a fade.
+  - **Rocker and button events.** New event entities are hidden by default. Existing ones and the automations using them are unchanged.
+
+### Updating from an MQTT version (0.x)
+1. Update in HACS and restart Home Assistant.
+2. The entry finds its gateway in the local network by itself (mDNS, a few seconds), checks that it is the same gateway (EURID) and loads with all entities. There is nothing to enter.
+3. Only if the gateway isn't found (for example Docker without host networking) or you changed its password, the entry asks for the address or the password. Port, user and password are prefilled.
+4. Once everything works, you can remove the OPUS block from your Mosquitto configuration (for example `/share/mosquitto/opus_bridge.conf`).
+
+**Going back:** install v0.8.0 in HACS and restart. This needs the Mosquitto bridge to still be configured. Entities keep their IDs in both directions.
+
+Details: [upgrading guide](https://github.com/kegelmeier/ha-opus-greennet/blob/v1.0.0/docs/upgrading.md).
+
+### What's new
+- **Fast and reliable updates:** one persistent event stream from the gateway instead of MQTT messages.
+  - Every reconnect brings all devices up to date.
+  - A gateway restart is detected and recovered automatically, including nightly gateway reboots.
+  - Reconnects wait longer after each failed attempt (1 s up to 60 s).
+- **Commands are confirmed by the gateway directly.** A command for a sleeping battery device is shown only once the device reports it.
+- **Gateway discovery:** a new gateway appears under *Settings → Devices & services → Discovered*. Address changes are picked up automatically, so a fixed IP address is no longer required.
+- **Reconfigure** the address or login from the entry's menu. A different gateway at the address is rejected.
+- **HOPPE SecureConnect AutoLock (D2-06-40)** can be locked and unlocked, with a new *Lock bolt* sensor.
+- **Blinds:**
+  - *Last run time* sensor, which keeps its value after a restart;
+  - *Reference run* buttons;
+  - *Blockage* switch (disabled by default);
+  - action `opus_greennet.set_cover_position` with an optional reference run.
+- **More entities:**
+  - *Buttons* events for push buttons built into actuators;
+  - F6-03 rockers C and D;
+  - *Local control* for D2-01 actuators (disabled by default);
+  - *Sensor error* for presence detectors;
+  - battery level for HOPPE handles.
+
+### Fixed
+- Dimmers no longer use the gateway's slow default fade.
+- Commands from Apple Home or other controllers no longer reset a device's signal strength to 0 dBm.
+- Commands queued during a gateway outage aren't sent after it recovers.
+- F6-10-00 handles show *tilted* instead of *unknown*.
+- A5-07-01 presence detectors no longer get an illuminance entity that could never report.
+- Blind movement times set by another controller are no longer read as seconds instead of milliseconds.
+- The address field rejects URLs (`http://…`, ports, paths) with a clear message.
+
+### Security
+- The gateway login is only ever sent to the configured gateway: redirects are not followed.
+- Every answer from the gateway is size-limited, and malformed data can't crash the integration.
+- Diagnostics redact addresses, credentials, identifiers and the HomeKit code.
+
+### Tested
+Beta-tested on six installations with up to 65 devices (OPUS-GW firmware 1.21.30 to 1.21.34), over several days and nightly gateway restarts, including the automatic upgrade from v0.8.0 without entering anything:
+- switches and two-channel actuators;
+- dimmers;
+- blinds;
+- leak sensors;
+- window contacts (D5-00-01);
+- temperature and humidity sensors (A5-04);
+- RWM smoke detectors;
+- SMS presence detectors;
+- HOPPE handles;
+- OPUS motion detectors;
+- stand-alone rocker switches;
+- commands from Apple Home.
+
+**Not yet confirmed on hardware:**
+- HeatArea climate;
+- D2-01 types other than -01, -03 and -11;
+- AutoLock control;
+- blind tilt.
+
+Please report in a new issue if something doesn't work.
+
+### Thanks
+- @fubu2k for the hardening, the D2-01 profile alignment, AutoLock control and the MQTT quality series.
+- @drldm, @nlsrchtr, @haxx-voyager and @florian-hartung for testing the betas (#79).
+
+## [1.0.0b5] - 2026-10-23
+
+Sixth beta of 1.0 (REST): fixes from the beta reports and @fubu2k's hardening of the gateway client (#86, #87). v0.8.0 stays the stable release and the MQTT fallback.
+
+### Requirement
+- **Home Assistant 2026.10.1 or newer**, also for manual installs. HACS checks this; a manual copy does not.
+
+### Fixed
+- **Last run time of blinds survives a restart:** the sensor keeps its last value and attributes after a Home Assistant restart instead of showing `unknown` until the blind moves again (reported in #79). Live readings such as temperature or signal strength are still not restored, so a stale value is never shown as current.
+- **Clear error for a URL as the gateway address:** the setup, re-authentication and reconfiguration forms accept only an IP address or host name. `http://…`, a port, a path or credentials in the address field now show "Enter only the gateway's IP address or host name" instead of "Failed to connect".
+
+### Security
+- The gateway client no longer follows redirects, so the gateway login can't be sent to another host.
+- Gateway answers are limited to 8 MB, like stream documents already were.
+- JSON nested too deeply is treated as invalid JSON (the event stream reconnects) instead of causing an unhandled error.
+
+### Unchanged
+- Entities, unique IDs, radio traffic and intervals are the same as in 1.0.0b4. Discovery and the automatic move from MQTT work as in 1.0.0b4.
+- **Coming from an older version than 1.0.0b2:** the "Check before updating" note of 1.0.0b2 still applies (D2-01 actuator types).
+
+### Beta testing
+- **Please test:** restart Home Assistant and check that the *Last run time* sensors of your blinds keep their value. The upgrade from v0.8.0 (or v0.7.x) without re-authentication is still open for testing (see #79).
+
+## [1.0.0b4] - 2026-10-22
+
+Fifth beta of 1.0 (REST): the gateway is discovered in the local network, so the move from MQTT needs no input in most installations. v0.8.0 stays the stable release and the MQTT fallback.
+
+### Requirement
+- **Home Assistant 2026.10.1 or newer**, also for manual installs. HACS checks this; a manual copy does not.
+
+### Added
+- **Upgrade from MQTT without entering anything:** at the first start an entry of an MQTT version (0.x) searches the local network for its gateway (mDNS, a few seconds), tests each OPUS gateway it finds with the default credentials (user `admin`, password = the EURID the entry already knows) and takes the one that reports the same EURID. All entities are kept. It asks only when no gateway is found (then for the address) or the password was changed (then only for the password).
+- **Gateway discovery:** a new gateway appears under *Settings → Devices & services → Discovered* with its address filled in; only the password has to be entered.
+- **Address changes are picked up automatically:** when a configured gateway is announced at another IP address, the entry is updated and reloaded after the gateway confirms its EURID. A fixed IP address is no longer required.
+
+### Unchanged
+- Discovery only reads `/system/info`; no radio telegrams, intervals or entity changes. Installations without mDNS between Home Assistant and the gateway (for example Docker without host networking) enter the address as before.
+- **Coming from an older version than 1.0.0b2:** the "Check before updating" note of 1.0.0b2 still applies (D2-01 actuator types).
+
+### Beta testing
+- **Please test:** the upgrade from v0.8.0 (or v0.7.x) to this beta. Does the entry load on its own, without a re-authentication? Is the gateway listed under *Discovered* on a fresh installation?
+
+## [1.0.0b3] - 2026-10-22
+
+Documentation beta of 1.0 (REST). No change to the integration's behaviour compared with 1.0.0b2.
+
+### Requirement
+- **Home Assistant 2026.10.1 or newer**, also for manual installs. HACS checks this; a manual copy does not.
+
+### Changed
+- **Shorter README** with features, supported devices, compatibility, installation, configuration, troubleshooting, known limitations and a new roadmap. Details moved to `docs/`: [devices and actions](docs/devices.md), [how it works](docs/how-it-works.md), [troubleshooting](docs/troubleshooting.md), [upgrading](docs/upgrading.md) and [development](docs/development.md).
+
+### Added
+- **Roadmap** in the README: device settings of switches, dimmers, blinds and the gateway as Home Assistant entities, and adding and removing devices from Home Assistant (under investigation).
+
+### Unchanged
+- Code, entities, unique IDs, radio traffic and intervals are the same as in 1.0.0b2. Updating from 1.0.0b2 is optional; the "Check before updating" note of 1.0.0b2 still applies when you come from an older version.
+
+## [1.0.0b2] - 2026-10-21
+
+Third beta of 1.0 (REST) with @fubu2k's hardening, the D2-01 profile alignment and HOPPE AutoLock control (#83, #85). v0.8.0 stays the stable release and the MQTT fallback.
+
+### Requirement
+- **Home Assistant 2026.10.1 or newer**, also for manual installs. HACS checks this; a manual copy does not.
+
+### Check before updating
+- **D2-01 actuators other than D2-01-00 to -03 and -11:** switch or dimmer and the number of channels now come from the gateway's device profile; without a profile, a corrected table following the EEP specification applies (D2-01-04, -05 and -09 are single-channel dimmers; -06 to -0F single-channel switches; -10 to -12 two-channel switches). Previous versions treated many of these as multi-channel devices. **A device whose type changes gets new entities; update automations and dashboards that used the old ones.** Entities of channels or platforms a device does not have are removed only when the gateway profile confirmed it. D2-01-00 to -03 and -11 keep their entities.
+
+### Changed
+- **More robust reconnects:** the pause after the event stream ends starts at 1 second and doubles up to 60 seconds, plus up to 25 % at random. A stream that closes within 10 seconds counts as a failed attempt, so a gateway that drops every connection cannot cause a reconnect loop. Rejected credentials are never retried.
+- **Start-up** takes the device states from the stream's first device list (retried later if it does not arrive within 30 seconds) and reads the blind movement times once more right after it. The first telegram after start-up no longer rewrites every entity.
+- Device lists update the known devices in place, so a command error can no longer get lost when a list arrives during the command. The 30-minute list keeps a newer signal strength and last-seen time from a telegram.
+- Rocker and button event entities are enabled but hidden by default (new entities only; automations work as before).
+- HOPPE handle Open, Tilted and Closed binary sensors are diagnostic entities; presence detector illuminance is shown in whole lux; the presence detector *Sensor error* and the F6-05-01 water sensor show *OK* / *dry* until something is reported.
+
+### Added
+- **HOPPE SecureConnect AutoLock (D2-06-40) can be locked and unlocked.** The lock entity sets the answer the gateway stores for the handle's next unlock request and shows the stored answer; the gateway's status 202 is accepted. Quick changes settle for 10 seconds and only the last one is sent. New diagnostic *Lock bolt* binary sensor.
+- **Blinds (D2-05-00/02):** diagnostic *Blockage* switch (disabled by default, because it stops the blind), diagnostic buttons *Reference run via top/bottom* and a diagnostic *Last run time* sensor. New action `opus_greennet.set_cover_position` with an optional reference run.
+- *Buttons* event entity for push buttons built into actuators; F6-03 rockers also report rockers C and D.
+- Diagnostic *Local control* binary sensor (disabled by default) for D2-01 actuators, *Sensor error* for A5-07 presence detectors, battery level for HOPPE handles; presence illuminance above the sensor range is shown as 1000 lx.
+- Diagnostics: time to the first device list, and per blind the last run duration and where the shown position came from. The HomeKit QR setup payload is redacted.
+
+### Fixed
+- HTTP errors and gateway errors are told apart, every streamed document is limited to 8 MB, and errors never contain credentials.
+- F6-10-00 handles show a tilted handle as *tilted* instead of *unknown*.
+- A5-07-01 presence detectors no longer get an illuminance entity that could never report.
+- Movement and rotation times from another controller's D2-05-00 "Set parameters" command (milliseconds) are no longer taken over as seconds.
+
+### Unchanged
+- No additional radio traffic, intervals or command repetitions. Blinds keep their last known position while they report `unknown` during a run. Entity IDs, unique IDs and settings of existing entities are unchanged, except for the D2-01 type corrections above.
+
+### Beta testing
+- Thanks @fubu2k for #83 and #85!
+- **Please test:** HOPPE AutoLock (D2-06-40), D2-01 actuators other than -00 to -03 and -11, blind reference runs and the blockage switch, actuator push buttons.
+- **Not yet tested on hardware:** HeatArea climate, RWM smoke detectors, SMS presence detectors, contacts, A5-04 temperature sensors, blind tilt and commands from Apple Home or the OPUS app.
+- Please report in the pinned beta issue (#79).
+
+## [1.0.0b1] - 2026-10-20
+
+Second beta of 1.0 (REST). It is based on the final MQTT release v0.8.0, so v0.8.0 is now the stable release and the MQTT fallback, and an update from v0.8.0 works like one from v0.7.0 (enter the gateway address once).
+
+### Requirement
+- **Home Assistant 2026.10.1 or newer**, also for manual installs. HACS checks this; a manual copy does not, and on older versions setup fails with `ImportError: cannot import name 'ATTR_BRIGHTNESS'`.
+
+### Fixed
+- A command the gateway queues for a sleeping battery device (status 201, SoftSmartAck) no longer shows the commanded value in advance and starts no cover travel estimate; the entity keeps the reported state until the device reports (approach from @fubu2k's v0.8.0 work).
+
+### Changed
+- Rocker event entities use the `button` device class, so the frontend shows a button icon by default. Entity IDs, event types and automations are unchanged (from @fubu2k's v0.8.0 work).
+
+### Beta testing
+- Confirmed by beta testers on v1.0.0b0: migration with unchanged entity IDs, blinds (D2-05-02), switches and two-channel actuators, OPUS motion detectors, stand-alone rocker switches and recovery after a gateway restart. Thanks @drldm and @nlsrchtr!
+- **Not yet tested on hardware:** HeatArea climate, RWM smoke detectors, SMS presence detectors, HOPPE handles, contacts, A5-04 temperature sensors, blind tilt and commands from Apple Home or the OPUS app.
+- Please report in the pinned beta issue (#79).
+
+## [1.0.0b0] - 2026-10-19
+
+First beta of 1.0. The integration now talks to the OPUS gateway **directly over its EnOcean over IP REST API**. The MQTT broker bridge is no longer needed. v0.7.0 remains the stable release and the MQTT fallback.
+
+### Breaking change
+- **The gateway's address is needed once.** After updating, the existing entry reports *Re-authentication required*: enter the gateway's IP address. Port (`8080`), user (`admin`) and password (the gateway's EURID in capital letters) are prefilled with the vendor defaults. All devices, entities, entity IDs, names, areas, dashboards and automations are kept.
+- The Mosquitto bridge configuration for OPUS (e.g. `/share/mosquitto/opus_bridge.conf`) is no longer used and can be removed once everything works.
+
+### Changed
+- One persistent event stream delivers every telegram as the gateway handles it (median ~20 ms from gateway to Home Assistant on a 65-device installation, previously seconds). Every reconnect resynchronises all devices; a health check runs every minute and also detects gateway restarts; battery level, signal strength and cover movement times refresh every 30 minutes.
+- Commands are acknowledged directly by the gateway's HTTP answer.
+- New **Reconfigure** option to change address or credentials; rejected credentials and a different gateway at the configured address start a re-authentication.
+
+### Added
+- Icons for HOPPE handle and lock entities and for the service actions (thanks @fubu2k, #74).
+- A repair notice when the unique-ID migration had to remove a duplicate beta entity (thanks @fubu2k, #74).
+
+### Fixed
+- **Dimmers switch to the new brightness at once** (like Apple Home); a `transition` uses the dimmer's own configured fade. Previously the gateway applied its slow default fade.
+- Commands from HomeKit or other controllers no longer reset a device's signal strength to 0 dBm.
+- Commands queued before a gateway outage are not sent after it recovers.
+
+### Changed entity defaults (new entities only)
+- HOPPE unlock request and mechanics fault are diagnostic entities and disabled by default; SMS supply voltage is a diagnostic entity; battery levels are shown in whole percent (thanks @fubu2k, #74). Existing entities keep their settings.
+
+### Beta testing
+- Enable pre-releases for this repository in HACS, install v1.0.0b0, restart Home Assistant and enter the gateway address when asked.
+- Tested on hardware: switches, dimmers, two-channel actuators, blinds and leak sensors (OPUS-GW v1.21.31). **Not yet tested on hardware:** HeatArea climate, RWM smoke detectors, SMS presence detectors, HOPPE handles, contacts, A5-04 temperature sensors, motion detectors and stand-alone rocker switches.
+- Please report in the pinned beta issue with your gateway firmware, the device EEPs and redacted diagnostics.
+
 ## [0.8.0] - 2026-10-20
 
 Final MQTT release: @fubu2k's quality series on top of v0.7.0. It is the stable fallback for anyone who keeps the Mosquitto bridge; new features go into 1.0, which talks to the gateway directly over its REST API.
