@@ -313,6 +313,25 @@ def test_authoritative_list_replaces_state_refresh_keeps_it(coord, dispatch) -> 
     assert device.channels[0].brightness == 70
 
 
+def test_authoritative_list_restarts_the_latency_clock(coord, dispatch) -> None:
+    original = _apply(coord, {"eeps": [{"eep": "D2-01-01"}]})
+    original.last_update_source = "telegram/from"
+    original.last_update_received_monotonic = 1.0
+    original.last_update_dispatched_monotonic = 2.0
+
+    refreshed = _apply(
+        coord,
+        {"eeps": [{"eep": "D2-01-01"}], "states": [{"key": "switch", "value": 1}]},
+    )
+    assert refreshed.last_update_source == "device list"
+    # Measured from the list, not from the telegram hours ago.
+    assert refreshed.last_update_received_monotonic > 2.0
+    assert (
+        refreshed.last_update_dispatched_monotonic
+        == refreshed.last_update_received_monotonic
+    )
+
+
 def test_known_device_keeps_runtime_metadata(coord, dispatch) -> None:
     original = _apply(
         coord,

@@ -780,7 +780,13 @@ class OpusGreenNetCoordinator:
         if functions:
             device.update_from_telegram({"functions": functions})
             if authoritative or existing is None:
+                # The latency log measures from here, not from the device's
+                # last telegram.
                 device.last_update_source = "device list"
+                device.last_update_received_monotonic = monotonic()
+                device.last_update_dispatched_monotonic = (
+                    device.last_update_received_monotonic
+                )
                 self._note_position_origin(device, functions, position_origin)
         self.devices[device_id] = device
         if not was_known:
