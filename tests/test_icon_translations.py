@@ -199,13 +199,10 @@ def test_no_python_icon_overrides() -> None:
                 assert node.arg != "icon", path.name
 
 
-async def test_home_assistant_loads_the_icons(
-    hass: HomeAssistant, mqtt_transport
-) -> None:
-    """Loading icons is a local file read and publishes nothing."""
+async def test_home_assistant_loads_the_icons(hass: HomeAssistant, gateway) -> None:
+    """Loading icons is a local file read and sends nothing to the gateway."""
     entity_icons = await async_get_icons(hass, "entity", integrations=[DOMAIN])
     assert entity_icons[DOMAIN] == ENTITY_ICONS
     service_icons = await async_get_icons(hass, "services", integrations=[DOMAIN])
     assert service_icons[DOMAIN] == ICONS["services"]
-    assert mqtt_transport.published == []
-    assert mqtt_transport.subscriptions == []
+    assert gateway.requests == []

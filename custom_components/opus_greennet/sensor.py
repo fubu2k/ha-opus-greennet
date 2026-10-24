@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Final
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
@@ -18,6 +19,7 @@ from homeassistant.const import (
     UnitOfPower,
     UnitOfRatio,
     UnitOfTemperature,
+    UnitOfTime,
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -28,6 +30,7 @@ from .const import CONF_EAG_ID, DEFAULT_CHANNEL
 from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
     SIGNAL_DEVICE_REMOVED,
+    CoverRun,
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanChannel, EnOceanDevice
@@ -37,6 +40,15 @@ from .entity import OpusGreenNetEntity, migrate_legacy_entity_suffix
 PARALLEL_UPDATES = 0
 
 
+# Attributes of the run time sensor, restored with its value.
+RUN_ATTRIBUTES: Final = (
+    "direction",
+    "start_position",
+    "end_position",
+    "full_travel",
+    "finished_at",
+)
+
 # Numeric channel readings exposed by OpusGreenNetMeasurementSensor.
 MEASUREMENT_READINGS: Final[dict[str, Callable[[EnOceanChannel], float | None]]] = {
     "temperature": lambda channel: channel.temperature,
@@ -45,10 +57,14 @@ MEASUREMENT_READINGS: Final[dict[str, Callable[[EnOceanChannel], float | None]]]
     "battery_level": lambda channel: channel.battery_level,
 }
 
-# Battery levels are shown as whole percent for every OPUS device with a
-# battery level. Display only: the reported state and history are unchanged,
-# and a user-chosen display precision in the entity settings takes precedence.
-MEASUREMENT_DISPLAY_PRECISION: Final[dict[str, int]] = {"battery_level": 0}
+# Battery levels are shown as whole percent and the presence detector's
+# illuminance as whole lux. Display only: the reported state and history are
+# unchanged, and a user-chosen display precision in the entity settings takes
+# precedence.
+MEASUREMENT_DISPLAY_PRECISION: Final[dict[str, int]] = {
+    "battery_level": 0,
+    "illuminance": 0,
+}
 
 
 async def async_setup_entry(
@@ -113,8 +129,15 @@ async def async_setup_entry(
                 )
             # The SMS supply voltage is device telemetry, so it is a diagnostic
             # entity. It stays enabled; existing entries keep their settings.
-            for suffix, device_class, unit, category in (
-                ("illuminance", SensorDeviceClass.ILLUMINANCE, LIGHT_LUX, None),
+            # Only A5-07-03 reports illumination (A5-07-01 has no sensor).
+            readings: list[
+                tuple[str, SensorDeviceClass, str, EntityCategory | None]
+            ] = []
+            if device.reports_illuminance:
+                readings.append(
+                    ("illuminance", SensorDeviceClass.ILLUMINANCE, LIGHT_LUX, None)
+                )
+            readings += [
                 (
                     "supply_voltage",
                     SensorDeviceClass.VOLTAGE,
@@ -127,7 +150,8 @@ async def async_setup_entry(
                     UnitOfRatio.PERCENTAGE,
                     None,
                 ),
-            ):
+            ]
+            for suffix, device_class, unit, category in readings:
                 entities.append(
                     OpusGreenNetMeasurementSensor(
                         coordinator,
@@ -179,12 +203,35 @@ async def async_setup_entry(
                     coordinator, eag_id, gateway_device_id, device, "handle_state"
                 )
             )
+            # Battery-powered handles: the device list reports the level.
+            # Mains-powered actuators get no battery sensor.
+            entities.append(
+                OpusGreenNetMeasurementSensor(
+                    coordinator,
+                    eag_id,
+                    gateway_device_id,
+                    device,
+                    "battery_level",
+                    SensorDeviceClass.BATTERY,
+                    UnitOfRatio.PERCENTAGE,
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                )
+            )
             if device.has_autolock:
                 entities.append(
                     OpusGreenNetHandleSensor(
                         coordinator, eag_id, gateway_device_id, device, "unlock_request"
                     )
                 )
+
+        if device.is_cover:
+            # Measured travel of the last command (diagnostic).
+            entities.extend(
+                OpusGreenNetCoverRunSensor(
+                    coordinator, eag_id, gateway_device_id, device, channel_id
+                )
+                for channel_id in range(device.channel_count)
+            )
 
         # Signal strength sensor (all devices with dbm data)
         entities.append(
@@ -397,6 +444,7 @@ class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
         entity_category: EntityCategory | None = None,
     ) -> None:
         super().__init__(coordinator, eag_id, gateway_device_id, device, suffix, suffix)
+        self._suffix = suffix
         # Typed accessor instead of getattr(); an unknown suffix fails at setup.
         self._read_value = MEASUREMENT_READINGS[suffix]
         self._attr_device_class = device_class
@@ -410,6 +458,15 @@ class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
         """Return the parsed value, or unknown before the first valid reading."""
         channel = self._device.channels.get(DEFAULT_CHANNEL)
         return self._read_value(channel) if channel is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, bool] | None:
+        """Mark an illuminance above the sensor range (shown as its maximum)."""
+        if self._suffix != "illuminance":
+            return None
+        channel = self._device.channels.get(DEFAULT_CHANNEL)
+        over_range = channel.illuminance_over_range if channel else None
+        return None if over_range is None else {"over_range": over_range}
 
 
 class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
@@ -455,3 +512,85 @@ class OpusGreenNetHandleSensor(OpusGreenNetBaseSensor):
         if self._suffix == "handle_state":
             return channel.handle_state
         return None
+
+
+class OpusGreenNetCoverRunSensor(OpusGreenNetEntity, RestoreSensor):
+    """Seconds from a position command to the blind's report at the target.
+
+    Measured by the integration for commands from Home Assistant and from
+    other controllers, including reference runs. A run ended by Stop, without
+    an end report or confirmed only by a status query records no time. The
+    attributes tell the direction, start and end (Home Assistant scale,
+    100 = open) and whether the run covered the full height.
+
+    No device reports this value, so the last one is restored after a restart
+    and shown until the next run completes.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "last_run_time"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_suggested_display_precision = 1
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        channel_id: int = DEFAULT_CHANNEL,
+    ) -> None:
+        """Initialize the run time sensor."""
+        super().__init__(coordinator, eag_id, gateway_device_id, device, channel_id)
+        channel_suffix = f"_ch{channel_id}" if device.channel_count > 1 else ""
+        self._attr_unique_id = (
+            f"{eag_id}_{device.device_id}_last_run_time{channel_suffix}"
+        )
+        self._restored_value: float | None = None
+        self._restored_attributes: dict[str, object] | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last measured run from before the restart."""
+        await super().async_added_to_hass()
+        sensor_data = await self.async_get_last_sensor_data()
+        if sensor_data is None or not isinstance(
+            sensor_data.native_value, (int, float)
+        ):
+            return
+        self._restored_value = float(sensor_data.native_value)
+        if (last_state := await self.async_get_last_state()) is not None:
+            self._restored_attributes = {
+                key: last_state.attributes[key]
+                for key in RUN_ATTRIBUTES
+                if key in last_state.attributes
+            } or None
+
+    def _run(self) -> CoverRun | None:
+        return self._coordinator.last_cover_runs.get(
+            (self._device.device_id, self._channel_id)
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the measured seconds of the last completed run."""
+        run = self._run()
+        return run.seconds if run is not None else self._restored_value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object] | None:
+        """Describe the last run (positions in Home Assistant scale)."""
+        run = self._run()
+        if run is None:
+            return self._restored_attributes
+        return {
+            "direction": run.direction,
+            "start_position": (
+                None if run.start_position is None else 100 - run.start_position
+            ),
+            "end_position": 100 - run.target,
+            "full_travel": run.full_travel,
+            "finished_at": run.finished_at,
+        }

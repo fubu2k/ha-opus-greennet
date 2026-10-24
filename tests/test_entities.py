@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,6 +13,7 @@ from homeassistant.components.climate import ClimateEntityFeature, HVACAction, H
 from homeassistant.components.cover import CoverEntityFeature
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import UnitOfPower
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.opus_greennet import OpusGreenNetRuntimeData
 from custom_components.opus_greennet.binary_sensor import (
@@ -38,6 +38,7 @@ from custom_components.opus_greennet.cover import (
     async_setup_entry as async_setup_covers,
 )
 from custom_components.opus_greennet.enocean_device import (
+    DeviceProfile,
     EnOceanChannel,
     EnOceanDevice,
 )
@@ -68,7 +69,8 @@ from custom_components.opus_greennet.switch import (
 from custom_components.opus_greennet.switch import (
     async_setup_entry as async_setup_switches,
 )
-from tests.ha_helpers import configure_bridge, wait_for_entity
+from tests.fake_gateway import FakeGateway, device_object, telegram
+from tests.ha_helpers import setup_bridge, wait_for_entity, wait_until
 
 EAG_ID = "AABB0011"
 GATEWAY_DEVICE_ID = "gateway-registry-id"
@@ -81,6 +83,17 @@ def _device(eep: str, *, device_id: str = "DEV1") -> EnOceanDevice:
         manufacturer="OPUS",
         eeps=[{"eep": eep}],
     )
+
+
+def _two_channel_dimmer() -> EnOceanDevice:
+    """A two-channel D2-01 dimmer as its gateway profile declares it."""
+    device = _device("D2-01-12")
+    device.profile = DeviceProfile(
+        to_keys=frozenset({"channel", "dimValue", "rampingMode"}),
+        from_keys=frozenset({"channel", "dimValue"}),
+        channels=2,
+    )
+    return device
 
 
 def _coordinator() -> MagicMock:
@@ -110,7 +123,7 @@ def _entry(coordinator: MagicMock) -> SimpleNamespace:
 @pytest.mark.asyncio
 async def test_light_properties_and_commands() -> None:
     coordinator = _coordinator()
-    device = _device("D2-01-06")
+    device = _two_channel_dimmer()
     device.channels[1] = EnOceanChannel(channel_id=1, is_on=True, brightness=50)
     entity = OpusGreenNetLight(
         coordinator, EAG_ID, GATEWAY_DEVICE_ID, device, channel_id=1
@@ -124,9 +137,13 @@ async def test_light_properties_and_commands() -> None:
     assert entity.available is True
 
     await entity.async_turn_on(brightness=128)
-    coordinator.async_turn_on.assert_awaited_once_with("DEV1", 1, 50, is_dimmable=True)
+    coordinator.async_turn_on.assert_awaited_once_with(
+        "DEV1", 1, 50, is_dimmable=True, transition=False
+    )
     await entity.async_turn_off()
-    coordinator.async_turn_off.assert_awaited_once_with("DEV1", 1, is_dimmable=True)
+    coordinator.async_turn_off.assert_awaited_once_with(
+        "DEV1", 1, is_dimmable=True, transition=False
+    )
     assert device.channels[1].is_on is False
 
 
@@ -376,7 +393,8 @@ def test_moisture_sensor_values_and_metadata() -> None:
         coordinator, EAG_ID, GATEWAY_DEVICE_ID, device, BINARY_SENSOR_DESCRIPTIONS[0]
     )
 
-    assert moisture.is_on is None
+    # Dry until the sensor reports water (it sends only on a change).
+    assert moisture.is_on is False
     assert moisture.device_class is BinarySensorDeviceClass.MOISTURE
     assert moisture.unique_id == f"{EAG_ID}_DEV1_liquid_detected"
 
@@ -442,7 +460,7 @@ def test_keeps_single_channel_registry_entity() -> None:
 @pytest.mark.parametrize(
     ("setup", "eep", "expected_count"),
     [
-        (async_setup_lights, "D2-01-06", 2),
+        (async_setup_lights, "D2-01-12", 2),
         (async_setup_switches, "D2-01-11", 2),
         (async_setup_covers, "D2-05-00", 1),
         (async_setup_climate, "D1-4B-06", 1),
@@ -456,7 +474,9 @@ async def test_platform_setup_adds_expected_entities(
     setup, eep: str, expected_count: int
 ) -> None:
     coordinator = _coordinator()
-    coordinator.devices = {"DEV1": _device(eep)}
+    coordinator.devices = {
+        "DEV1": _two_channel_dimmer() if eep == "D2-01-12" else _device(eep)
+    }
     entry = _entry(coordinator)
     async_add_entities = MagicMock()
 
@@ -528,12 +548,10 @@ async def test_sensor_setup_adds_new_types_after_profile_discovery() -> None:
     ],
 )
 async def test_unreported_state_is_unknown_in_home_assistant(
-    hass, mqtt_transport, entity_class, eep, domain
+    hass, gateway: FakeGateway, entity_class, eep, domain
 ):
-    mqtt_transport.devices = [
-        {"deviceId": "DEV1", "friendlyId": "Test", "eeps": [{"eep": eep}]}
-    ]
-    await configure_bridge(hass)
+    gateway.devices = [device_object("DEV1", eep, friendly_id="Test")]
+    await setup_bridge(hass, gateway)
     entity_id = await wait_for_entity(hass, domain, f"{EAG_ID}_DEV1")
 
     assert hass.states.get(entity_id).state == "unknown"
@@ -552,7 +570,7 @@ async def test_light_nonzero_brightness_never_turns_off(brightness, expected):
     await entity.async_turn_on(brightness=brightness)
 
     coordinator.async_turn_on.assert_awaited_once_with(
-        "DEV1", 0, expected, is_dimmable=True
+        "DEV1", 0, expected, is_dimmable=True, transition=False
     )
     assert entity.is_on is True
     assert entity.brightness >= 1
@@ -568,7 +586,9 @@ async def test_light_zero_brightness_uses_off_command():
     await entity.async_turn_on(brightness=0)
 
     coordinator.async_turn_on.assert_not_awaited()
-    coordinator.async_turn_off.assert_awaited_once_with("DEV1", 0, is_dimmable=True)
+    coordinator.async_turn_off.assert_awaited_once_with(
+        "DEV1", 0, is_dimmable=True, transition=False
+    )
     assert entity.is_on is False
 
 
@@ -581,14 +601,12 @@ async def test_light_zero_brightness_uses_off_command():
     ],
 )
 async def test_climate_standard_actions_in_home_assistant(
-    hass, mqtt_transport, eep, enabled_mode, command_mode
+    hass, gateway: FakeGateway, eep, enabled_mode, command_mode
 ):
-    mqtt_transport.devices = [
-        {"deviceId": "DEV1", "friendlyId": "Test", "eeps": [{"eep": eep}]}
-    ]
-    result = await configure_bridge(hass)
+    gateway.devices = [device_object("DEV1", eep, friendly_id="Test")]
+    entry = await setup_bridge(hass, gateway)
     entity_id = await wait_for_entity(hass, "climate", f"{EAG_ID}_DEV1")
-    coordinator = result["result"].runtime_data.coordinator
+    coordinator = entry.runtime_data.coordinator
     device = coordinator.get_device("DEV1")
     channel = device.get_or_create_channel()
     entity = hass.data[climate.DATA_COMPONENT].get_entity(entity_id)
@@ -606,11 +624,7 @@ async def test_climate_standard_actions_in_home_assistant(
         await hass.services.async_call(
             "climate", action, {"entity_id": entity.entity_id}, blocking=True
         )
-        command_payloads = [
-            json.loads(payload)
-            for topic, payload in mqtt_transport.published
-            if topic.endswith("/put/devices/DEV1/state")
-        ]
+        command_payloads = gateway.requests_to("PUT", "/devices/DEV1/state")
         assert command_payloads[-1]["state"]["functions"] == [
             {"key": "heaterMode", "value": expected_command}
         ]
@@ -781,7 +795,7 @@ async def test_feedback_during_command_ack_wins_over_optimistic_state(
 
 async def test_other_channel_feedback_does_not_block_optimistic_state():
     coordinator = _coordinator()
-    device = _device("D2-01-04")
+    device = _device("D2-01-11")
     device.channels[0] = EnOceanChannel(channel_id=0, is_on=False)
     entity = OpusGreenNetSwitch(coordinator, EAG_ID, GATEWAY_DEVICE_ID, device)
     entity.async_write_ha_state = MagicMock()
@@ -796,3 +810,95 @@ async def test_other_channel_feedback_does_not_block_optimistic_state():
 
     assert device.channels[0].is_on is True
     assert device.channels[1].is_on is False
+
+
+async def test_feedback_during_command_ack_wins_in_home_assistant(
+    hass, gateway: FakeGateway
+):
+    """A device report that arrives before the PUT answer beats the estimate."""
+    gateway.devices = [
+        device_object("DEV1", "D2-01-02", states=[{"key": "dimValue", "value": 0}])
+    ]
+    await setup_bridge(hass, gateway)
+    entity_id = await wait_for_entity(hass, "light", f"{EAG_ID}_DEV1")
+    assert hass.states.get(entity_id).state == "off"
+
+    async def report_before_answer(method: str, path: str, body: object) -> None:
+        if method == "PUT" and path == "/devices/DEV1/state":
+            await gateway.push(telegram("DEV1", [{"key": "dimValue", "value": "30"}]))
+
+    gateway.on_request = report_before_answer
+    await hass.services.async_call(
+        "light",
+        "turn_on",
+        {"entity_id": entity_id, "brightness": 255},
+        blocking=True,
+    )
+    assert gateway.requests_to("PUT", "/devices/DEV1/state") == [
+        {
+            "state": {
+                "functions": [
+                    {"key": "dimValue", "value": "100"},
+                    {"key": "rampingMode", "value": "switch"},
+                ]
+            }
+        }
+    ]
+    state = hass.states.get(entity_id)
+    assert state.state == "on"
+    assert state.attributes["brightness"] == round(30 * 255 / 100)
+
+
+async def test_rejected_command_keeps_reported_state_in_home_assistant(
+    hass, gateway: FakeGateway
+):
+    gateway.devices = [
+        device_object("DEV1", "D2-01-01", states=[{"key": "switch", "value": "off"}])
+    ]
+    entry = await setup_bridge(hass, gateway)
+    entity_id = await wait_for_entity(hass, "switch", f"{EAG_ID}_DEV1")
+    gateway.status["/devices/DEV1/state"] = 409
+
+    with pytest.raises(HomeAssistantError) as error:
+        await hass.services.async_call(
+            "switch", "turn_on", {"entity_id": entity_id}, blocking=True
+        )
+    assert error.value.translation_key == "request_rejected"
+    assert hass.states.get(entity_id).state == "off"
+    device = entry.runtime_data.coordinator.get_device("DEV1")
+    assert device.last_command_error == "status 409: forced failure"
+
+    # The next accepted command clears the error and applies its estimate.
+    del gateway.status["/devices/DEV1/state"]
+    await hass.services.async_call(
+        "switch", "turn_on", {"entity_id": entity_id}, blocking=True
+    )
+    assert device.last_command_error is None
+    assert hass.states.get(entity_id).state == "on"
+
+
+async def test_device_without_profile_gets_entities_once_its_eeps_arrive(
+    hass, gateway: FakeGateway
+):
+    """A device listed without EEPs is discovered again by a device update."""
+    gateway.devices = [device_object("DEV1", [], friendly_id="Heat area")]
+    entry = await setup_bridge(hass, gateway)
+    coordinator = entry.runtime_data.coordinator
+    assert coordinator.get_device("DEV1").eeps == []
+
+    await gateway.push(
+        {
+            "header": {"content": "device"},
+            "device": device_object(
+                "DEV1",
+                "D1-4B-05",
+                friendly_id="Heat area",
+                states=[{"key": "temperature", "value": "21.5"}],
+            ),
+        }
+    )
+    await wait_for_entity(hass, "sensor", f"{EAG_ID}_DEV1_humidity")
+    entity_id = await wait_for_entity(hass, "climate", f"{EAG_ID}_DEV1")
+    await wait_until(
+        lambda: hass.states.get(entity_id).attributes.get("current_temperature") == 21.5
+    )

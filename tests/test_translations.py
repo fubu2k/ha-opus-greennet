@@ -20,6 +20,7 @@ from homeassistant.config_entries import ConfigEntryState
 
 from custom_components.opus_greennet import (
     binary_sensor,
+    button,
     climate,
     cover,
     event,
@@ -39,6 +40,7 @@ TRANSLATIONS = {
 }
 PLATFORMS = {
     "binary_sensor": binary_sensor,
+    "button": button,
     "climate": climate,
     "cover": cover,
     "event": event,
@@ -132,13 +134,23 @@ def test_config_flow_errors_and_aborts_are_translated() -> None:
             for kw in node.keywords:
                 if kw.arg == "reason" and isinstance(kw.value, ast.Constant):
                     aborts.add(kw.value.value)
-    # _abort_if_unique_id_configured() uses the standard reason.
-    aborts.add("already_configured")
+    # _abort_if_unique_id_configured() and async_update_reload_and_abort()
+    # use the standard reasons.
+    aborts |= {"already_configured", "reauth_successful", "reconfigure_successful"}
     assert errors == set(STRINGS["config"]["error"])
     assert aborts == set(STRINGS["config"]["abort"])
-    assert set(STRINGS["config"]["step"]["user"]["data"]) == set(
-        STRINGS["config"]["step"]["user"]["data_description"]
-    )
+    steps = {
+        node.name.removeprefix("async_step_")
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name.startswith("async_step_")
+        # These steps only route to a step with a form.
+        and node.name not in {"async_step_reauth", "async_step_zeroconf"}
+    }
+    assert steps == set(STRINGS["config"]["step"])
+    for step in steps:
+        texts = STRINGS["config"]["step"][step]
+        assert set(texts["data"]) == set(texts["data_description"]), step
 
 
 def test_services_yaml_matches_service_strings() -> None:

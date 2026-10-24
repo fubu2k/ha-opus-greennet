@@ -185,6 +185,69 @@ def migrate_legacy_multichannel_entity(
     )
 
 
+# Highest channel count earlier releases assumed for a D2-01 type.
+LEGACY_MAX_CHANNELS: Final = 8
+OUTPUT_DOMAINS: Final = ("light", "switch")
+
+
+@callback
+def migrate_output_entities(
+    entity_registry: EntityRegistry,
+    entity_domain: str,
+    eag_id: str,
+    device: EnOceanDevice,
+) -> None:
+    """Adapt switch and light registry entries to the device's real outputs.
+
+    Earlier releases derived type and channel count of D2-01 actuators from
+    the EEP number. A single-channel actuator that was created as channel 0
+    gets its plain unique ID back, keeping entity ID and settings. Entries of
+    channels or of a platform the device does not have are removed only when
+    the gateway profile confirmed the outputs; with the EEP fallback they stay,
+    so a profile that could not be read once never deletes user settings.
+    """
+    migrate_legacy_multichannel_entity(entity_registry, entity_domain, eag_id, device)
+    base = f"{eag_id}_{device.device_id}"
+    count = device.channel_count
+    if count == 1:
+        channel_zero = entity_registry.async_get_entity_id(
+            entity_domain, DOMAIN, f"{base}_ch0"
+        )
+        if (
+            channel_zero is not None
+            and entity_registry.async_get_entity_id(entity_domain, DOMAIN, base) is None
+        ):
+            entity_registry.async_update_entity(channel_zero, new_unique_id=base)
+            _LOGGER.info(
+                "Migrated %s to the single-channel unique ID %s", channel_zero, base
+            )
+    if device.profile is None:
+        return
+    first_stale = 0 if count == 1 else count
+    stale = [
+        (entity_domain, f"{base}_ch{channel}")
+        for channel in range(first_stale, LEGACY_MAX_CHANNELS)
+    ]
+    for other_domain in OUTPUT_DOMAINS:
+        if other_domain != entity_domain:
+            stale.append((other_domain, base))
+            stale.extend(
+                (other_domain, f"{base}_ch{channel}")
+                for channel in range(LEGACY_MAX_CHANNELS)
+            )
+    for domain, unique_id in stale:
+        if (
+            entity_id := entity_registry.async_get_entity_id(domain, DOMAIN, unique_id)
+        ) is not None:
+            entity_registry.async_remove(entity_id)
+            _LOGGER.warning(
+                "Removed %s: the gateway profile of %s has no such output. "
+                "Update dashboards and automations that used it",
+                entity_id,
+                device.device_id,
+            )
+
+
 class OpusGreenNetEntity(Entity):
     """Base class for entities owned by an Opus GreenNet gateway."""
 
@@ -208,6 +271,11 @@ class OpusGreenNetEntity(Entity):
         # Immutable projection of the state last written by a coordinator
         # dispatch. Any other write (commands, availability) clears it.
         self._dispatched_projection: Hashable | None = None
+        # The first write (when the entity is added) shows the device state
+        # the coordinator already holds, like a dispatch. With a stream-first
+        # start no device list follows the entity creation, so the initial
+        # write is the baseline for unchanged updates.
+        self._initial_write_pending = True
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -223,7 +291,7 @@ class OpusGreenNetEntity(Entity):
 
     @property
     def available(self) -> bool:
-        """Return whether the MQTT transport is connected."""
+        """Return whether the gateway is reachable."""
         return self._coordinator.available
 
     async def async_added_to_hass(self) -> None:
@@ -260,9 +328,16 @@ class OpusGreenNetEntity(Entity):
             return None
 
     def _async_write_ha_state(self) -> None:
-        """Forget the dispatch projection whenever any path writes state."""
+        """Forget the dispatch projection whenever any path writes state.
+
+        The initial write is the exception: it shows the coordinator's current
+        device state and becomes the baseline for later dispatches.
+        """
         self._dispatched_projection = None
         super()._async_write_ha_state()
+        if self._initial_write_pending:
+            self._initial_write_pending = False
+            self._dispatched_projection = self._visible_projection()
 
     @callback
     def _handle_state_update(self, device: EnOceanDevice) -> None:

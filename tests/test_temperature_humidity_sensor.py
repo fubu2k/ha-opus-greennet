@@ -1,11 +1,14 @@
 """A5-04-03 temperature and humidity sensor support."""
 
-import asyncio
+from __future__ import annotations
 
 import pytest
+from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from custom_components.opus_greennet.const import EEP_MAPPINGS
-from tests.ha_helpers import configure_bridge, wait_for_entity
+from tests.fake_gateway import FakeGateway, device_object, telegram
+from tests.ha_helpers import setup_bridge, wait_for_entity, wait_until
 
 EEP = "A5-04-03"
 
@@ -89,21 +92,23 @@ def test_battery_level(make_device, value, expected):
     assert device.channels[0].battery_level == expected
 
 
-async def test_entities_are_created_and_updated(hass, mqtt_transport):
-    mqtt_transport.devices = [
-        {
-            "deviceId": "THS1",
-            "friendlyId": "Living room",
-            "eeps": [{"eep": EEP}],
-            "batteryLevel": "90%",
-            "states": [
+async def test_entities_are_created_and_updated(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    gateway.devices = [
+        device_object(
+            "THS1",
+            EEP,
+            friendly_id="Living room",
+            batteryLevel="90%",
+            states=[
                 {"key": "humidity", "value": 49.02},
                 {"key": "temperature", "value": 23.32},
                 {"key": "trigger", "value": "heartbeat"},
             ],
-        }
+        )
     ]
-    await configure_bridge(hass)
+    entry = await setup_bridge(hass, gateway)
     temperature = await wait_for_entity(hass, "sensor", "AABB0011_THS1_temperature")
     humidity = await wait_for_entity(hass, "sensor", "AABB0011_THS1_humidity")
     battery = await wait_for_entity(hass, "sensor", "AABB0011_THS1_battery_level")
@@ -115,7 +120,24 @@ async def test_entities_are_created_and_updated(hass, mqtt_transport):
     assert hass.states.get(humidity).attributes["unit_of_measurement"] == "%"
     assert float(hass.states.get(battery).state) == 90
 
-    mqtt_transport.receive("EnOcean/AABB0011/stream/device/THS1/batteryLevel", "85")
-    await asyncio.sleep(0.05)
-    await hass.async_block_till_done()
-    assert float(hass.states.get(battery).state) == 85
+    await gateway.push(
+        telegram(
+            "THS1",
+            [
+                {"key": "humidity", "value": "51.5", "unit": "%"},
+                {"key": "temperature", "value": "22.84", "unit": "°C"},
+                {"key": "trigger", "value": "heartbeat"},
+            ],
+        )
+    )
+    await wait_until(lambda: float(hass.states.get(temperature).state) == 22.84)
+    assert float(hass.states.get(humidity).state) == 51.5
+
+    # The battery level is refreshed by the periodic device list.
+    gateway.devices = [{**gateway.devices[0], "batteryLevel": "85"}]
+    coordinator = entry.runtime_data.coordinator
+    coordinator._async_refresh_tick(dt_util.utcnow())  # noqa: SLF001
+    await coordinator._refresh_task  # noqa: SLF001
+    await wait_until(lambda: float(hass.states.get(battery).state) == 85)
+    # The refresh does not replace newer readings from the stream.
+    assert float(hass.states.get(temperature).state) == 22.84

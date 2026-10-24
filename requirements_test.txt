@@ -1,10 +1,6 @@
-# Shared, exactly pinned test tools.
-# Home Assistant: minimum supported release (equals hacs.json). CI installs
-# either the fixed reference release (requirements_test_reference.txt) or the
-# latest stable release resolved from PyPI on each run.
+# CI resolves and pins the latest stable Home Assistant release on every run.
 homeassistant>=2026.10.1
 mypy==2.4.0
-paho-mqtt==2.1.0
 pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-cov==7.1.0

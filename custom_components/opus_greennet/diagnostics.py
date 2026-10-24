@@ -24,10 +24,14 @@ TO_REDACT = {
     "address",
     "apikey",
     "authorization",
+    "baseid",
     "deviceid",
     "eagid",
     "eurid",
     "friendlyid",
+    "homekitpin",
+    # The HomeKit QR setup payload (X-HM://...) encodes the same setup code.
+    "homekitqr",
     "host",
     "hostname",
     "ip",
@@ -132,7 +136,7 @@ def log_entity_state_write(
     device: EnOceanDevice,
     channel_id: int | None = None,
 ) -> None:
-    """Log latency from MQTT receipt to the entity state write."""
+    """Log latency from telegram receipt to the entity state write."""
     if not logger.isEnabledFor(logging.DEBUG):
         return
 
@@ -159,6 +163,10 @@ async def async_get_config_entry_diagnostics(
     coordinator = runtime_data.coordinator
 
     devices: list[dict[str, Any]] = []
+    # REST phase 02: last vertical run duration and position origin per
+    # channel, for diagnostics only.
+    movement_times = getattr(coordinator, "last_vertical_movement_times", None)
+    origin = getattr(coordinator, "position_origin", None)
     for device in coordinator.devices.values():
         devices.append(
             {
@@ -170,20 +178,37 @@ async def async_get_config_entry_diagnostics(
                 "last_update_source": device.last_update_source,
                 "dbm": device.dbm,
                 "last_command_error": device.last_command_error,
-                # Values accepted with ACK 201 and not yet reported back.
-                "deferred_commands": {
-                    channel_id: dict(values)
-                    for channel_id, values in device.deferred_commands.items()
-                },
-                # Requests that ended without an answer, and answers that may
-                # belong to such an earlier request (no wire request ID).
-                "late_answers": coordinator.late_answer_diagnostics(device.device_id),
                 "channels": {
                     channel_id: asdict(channel)
                     for channel_id, channel in device.channels.items()
                 },
+                # Where type and channels come from: the gateway profile read
+                # at setup, or the EEP tables when it could not be read.
+                "capabilities": {
+                    "source": "gateway profile" if device.profile else "EEP table",
+                    "entity_type": device.entity_type,
+                    "channel_count": device.channel_count,
+                    "dimmable": device.is_dimmable,
+                },
             }
         )
+        runs = getattr(coordinator, "last_cover_runs", None)
+        if isinstance(runs, dict):
+            devices[-1]["last_cover_run"] = {
+                channel_id: asdict(run)
+                for (device_id, channel_id), run in runs.items()
+                if device_id == device.device_id
+            }
+        if isinstance(movement_times, dict):
+            devices[-1]["last_vertical_movement_time"] = dict(
+                movement_times.get(device.device_id, {})
+            )
+            if callable(origin):
+                devices[-1]["position_origin"] = {
+                    channel_id: origin(device.device_id, channel_id)
+                    for channel_id, channel in device.channels.items()
+                    if channel.position is not None
+                }
 
     return _redact_diagnostics(
         {
@@ -197,7 +222,11 @@ async def async_get_config_entry_diagnostics(
                 "available": coordinator.available,
                 "info": coordinator.gateway_info,
                 "uptime": coordinator.gateway_uptime,
-                "late_answers": coordinator.late_answer_diagnostics(coordinator.eag_id),
+                # Seconds from opening the event stream to its first device
+                # list at setup.
+                "first_device_list_seconds": getattr(
+                    coordinator, "first_device_list_seconds", None
+                ),
             },
             "devices": devices,
         },

@@ -25,7 +25,7 @@ from custom_components.opus_greennet.entity import (
     async_create_duplicate_beta_entity_issue,
     migrate_legacy_entity_suffix,
 )
-from tests.ha_helpers import configure_bridge
+from tests.ha_helpers import setup_bridge
 
 INTEGRATION = Path(__file__).resolve().parents[1] / "custom_components/opus_greennet"
 PREFIX = "AABB0011_TEST"
@@ -36,10 +36,8 @@ PLACEHOLDERS = {
 }
 
 
-async def _entry(hass: HomeAssistant):
-    entry = (await configure_bridge(hass))["result"]
-    await hass.async_block_till_done()
-    return entry
+async def _entry(hass: HomeAssistant, gateway):
+    return await setup_bridge(hass, gateway)
 
 
 def _registry_entries(hass: HomeAssistant, entry, *, legacy: bool, current: bool):
@@ -82,11 +80,11 @@ def _domain_issues(hass: HomeAssistant) -> dict[str, ir.IssueEntry]:
 
 
 async def test_duplicate_removal_raises_one_persistent_fixable_issue(
-    hass: HomeAssistant, mqtt_transport
+    hass: HomeAssistant, gateway
 ) -> None:
-    entry = await _entry(hass)
+    entry = await _entry(hass, gateway)
     _registry_entries(hass, entry, legacy=True, current=True)
-    mqtt_transport.published.clear()
+    gateway.requests.clear()
 
     _migrate(hass, entry)
 
@@ -111,8 +109,8 @@ async def test_duplicate_removal_raises_one_persistent_fixable_issue(
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert list(_domain_issues(hass)) == [ISSUE_ID]
-    # Raising the issue is local: no MQTT request was published for it.
-    assert not [topic for topic, _ in mqtt_transport.published if "/put/" in topic]
+    # Raising the issue is local: no request was sent to the gateway for it.
+    assert not [method for method, _, _ in gateway.requests if method == "PUT"]
 
 
 @pytest.mark.parametrize(
@@ -121,26 +119,25 @@ async def test_duplicate_removal_raises_one_persistent_fixable_issue(
     ids=["rename_only", "upstream_only", "nothing"],
 )
 async def test_no_issue_without_a_removed_duplicate(
-    hass: HomeAssistant, mqtt_transport, legacy: bool, current: bool
+    hass: HomeAssistant, gateway, legacy: bool, current: bool
 ) -> None:
-    entry = await _entry(hass)
+    entry = await _entry(hass, gateway)
     _registry_entries(hass, entry, legacy=legacy, current=current)
     _migrate(hass, entry)
     assert _domain_issues(hass) == {}
 
 
-async def test_gateway_outage_raises_no_issue(
-    hass: HomeAssistant, mqtt_transport
-) -> None:
-    """Transient MQTT and bridge outages are availability, not repairs."""
-    await _entry(hass)
-    await mqtt_transport.set_connected(False)
-    await mqtt_transport.set_connected(True)
+async def test_gateway_outage_raises_no_issue(hass: HomeAssistant, gateway) -> None:
+    """Transient gateway outages are availability, not repairs."""
+    await _entry(hass, gateway)
+    await gateway.stop()
+    await gateway.start()
+    await gateway.wait_for_stream(timeout=10)
     assert _domain_issues(hass) == {}
 
 
-async def test_issue_survives_a_restart(hass: HomeAssistant, mqtt_transport) -> None:
-    entry = await _entry(hass)
+async def test_issue_survives_a_restart(hass: HomeAssistant, gateway) -> None:
+    entry = await _entry(hass, gateway)
     _registry_entries(hass, entry, legacy=True, current=True)
     _migrate(hass, entry)
     stored = {"issues": [i.to_json() for i in ir.async_get(hass).issues.values()]}
@@ -158,12 +155,12 @@ async def test_issue_survives_a_restart(hass: HomeAssistant, mqtt_transport) -> 
 
 
 async def test_confirming_the_repair_resolves_the_issue(
-    hass: HomeAssistant, mqtt_transport
+    hass: HomeAssistant, gateway
 ) -> None:
-    entry = await _entry(hass)
+    entry = await _entry(hass, gateway)
     _registry_entries(hass, entry, legacy=True, current=True)
     _migrate(hass, entry)
-    mqtt_transport.published.clear()
+    gateway.requests.clear()
     hass.data["repairs"] = {}
     issue_handler.async_setup(hass)
     manager = hass.data["repairs"]["flow_manager"]
@@ -176,15 +173,15 @@ async def test_confirming_the_repair_resolves_the_issue(
     result = await manager.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert _domain_issues(hass) == {}
-    assert mqtt_transport.published == []
+    assert gateway.requests == []
     # Confirming changes no registry entry.
     assert er.async_get(hass).async_get("sensor.kept_illuminance") is not None
 
 
 async def test_removing_the_entry_deletes_only_its_issues(
-    hass: HomeAssistant, mqtt_transport
+    hass: HomeAssistant, gateway
 ) -> None:
-    entry = await _entry(hass)
+    entry = await _entry(hass, gateway)
     _registry_entries(hass, entry, legacy=True, current=True)
     _migrate(hass, entry)
     async_create_duplicate_beta_entity_issue(

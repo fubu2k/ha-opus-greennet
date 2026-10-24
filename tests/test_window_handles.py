@@ -1,19 +1,26 @@
 """Handle position and protected AutoLock behavior in Home Assistant."""
 
-import asyncio
+from __future__ import annotations
+
+from unittest.mock import patch
 
 import pytest
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.opus_greennet.const import DOMAIN
-from tests.ha_helpers import configure_bridge, wait_for_entity
+from tests.fake_gateway import FakeGateway, device_object, telegram
+from tests.ha_helpers import setup_bridge, wait_for_entity, wait_until
 
 
 @pytest.mark.parametrize("eep", ["D2-06-40", "F6-10-00", "D2-03-10"])
-async def test_handle_positions_and_lock_safety(hass, mqtt_transport, eep):
-    mqtt_transport.devices = [{"deviceId": "HANDLE", "eeps": [{"eep": eep}]}]
-    await configure_bridge(hass)
+async def test_handle_positions_and_lock_safety(
+    hass: HomeAssistant, gateway: FakeGateway, eep: str
+) -> None:
+    gateway.devices = [device_object("HANDLE", eep)]
+    # Lock requests settle before they are sent; not needed in this test.
+    settle = patch("custom_components.opus_greennet.lock.LOCK_SETTLE_SECONDS", 0)
+    entry = await setup_bridge(hass, gateway)
     state = await wait_for_entity(hass, "sensor", "AABB0011_HANDLE_handle_state")
     positions = {}
     for suffix in ("open", "tilt", "closed"):
@@ -29,14 +36,15 @@ async def test_handle_positions_and_lock_safety(hass, mqtt_transport, eep):
         ("tilted", "tilt"),
         ("invalid", None),
     ]:
-        mqtt_transport.receive(
-            "EnOcean/AABB0011/stream/device/HANDLE/states/0/key", "handleState"
+        await gateway.push(telegram("HANDLE", [{"key": "handleState", "value": value}]))
+        expected_state = (
+            "unknown"
+            if expected is None
+            else "tilted"
+            if expected == "tilt"
+            else expected
         )
-        mqtt_transport.receive(
-            "EnOcean/AABB0011/stream/device/HANDLE/states/0/value", value
-        )
-        await asyncio.sleep(0.03)
-        await hass.async_block_till_done()
+        await wait_until(lambda: hass.states.get(state).state == expected_state)
         for position, entity_id in positions.items():
             assert hass.states.get(entity_id).state == (
                 "unknown"
@@ -45,41 +53,54 @@ async def test_handle_positions_and_lock_safety(hass, mqtt_transport, eep):
                 if expected == position
                 else "off"
             )
-        expected_state = (
-            "unknown"
-            if expected is None
-            else "tilted"
-            if expected == "tilt"
-            else expected
-        )
-        assert hass.states.get(state).state == expected_state
     if eep == "D2-06-40":
         lock = await wait_for_entity(hass, "lock", "AABB0011_HANDLE_autolock")
         assert hass.states.get(lock).state == "unknown"
-        mqtt_transport.receive(
-            "EnOcean/AABB0011/stream/device/HANDLE/states/0/value", "closed"
+        await gateway.push(
+            telegram("HANDLE", [{"key": "handleState", "value": "closed"}])
         )
-        await asyncio.sleep(0.03)
-        await hass.async_block_till_done()
+        await wait_until(lambda: hass.states.get(state).state == "closed")
         assert hass.states.get(lock).state == "unknown"
-        for value in ("unlocked", "locked"):
-            mqtt_transport.receive(
-                "EnOcean/AABB0011/stream/device/HANDLE/states/1/key", "lock"
-            )
-            mqtt_transport.receive(
-                "EnOcean/AABB0011/stream/device/HANDLE/states/1/value", value
-            )
-            await asyncio.sleep(0.03)
-            await hass.async_block_till_done()
-            assert hass.states.get(lock).state == value
-        before = list(mqtt_transport.published)
-        for service in ("lock", "unlock"):
-            with pytest.raises(HomeAssistantError) as error:
-                await hass.services.async_call(
-                    "lock", service, {"entity_id": lock}, blocking=True
+        # The reported lock-bolt is a binary sensor (on = unlocked); the lock
+        # entity is the gateway's stored answer to the unlock request.
+        bolt = await wait_for_entity(hass, "binary_sensor", "AABB0011_HANDLE_lock_bolt")
+        for value, expected in (("unlocked", "on"), ("locked", "off")):
+            await gateway.push(
+                telegram(
+                    "HANDLE",
+                    [
+                        {"key": "handleState", "value": "closed"},
+                        {"key": "lock", "value": value},
+                    ],
                 )
-            assert error.value.translation_key == "autolock_read_only"
-        assert mqtt_transport.published == before
+            )
+            await wait_until(lambda: hass.states.get(bolt).state == expected)
+        assert hass.states.get(lock).state == "unknown"
+        # The gateway stores the answer for the sleeping handle (status 202).
+        gateway.responses["/devices/HANDLE/state"] = {"header": {"httpStatus": 202}}
+        settle.start()
+        await hass.services.async_call(
+            "lock", "unlock", {"entity_id": lock}, blocking=True
+        )
+        assert gateway.requests_to("PUT", "/devices/HANDLE/state")[-1] == {
+            "state": {"functions": [{"key": "unlock", "value": "allowed"}]}
+        }
+        assert hass.states.get(lock).state == "unlocked"
+        await hass.services.async_call(
+            "lock", "lock", {"entity_id": lock}, blocking=True
+        )
+        assert gateway.requests_to("PUT", "/devices/HANDLE/state")[-1] == {
+            "state": {"functions": [{"key": "unlock", "value": "notAllowed"}]}
+        }
+        assert hass.states.get(lock).state == "locked"
+        # The answer the gateway sends the handle ("to") updates it as well.
+        # Forget the own commands so it is not taken for their echo.
+        entry.runtime_data.coordinator._sent_commands.clear()  # noqa: SLF001
+        await gateway.push(
+            telegram("HANDLE", [{"key": "unlock", "value": "allowed"}], direction="to")
+        )
+        await wait_until(lambda: hass.states.get(lock).state == "unlocked")
+        settle.stop()
     else:
         assert (
             er.async_get(hass).async_get_entity_id(
@@ -87,9 +108,9 @@ async def test_handle_positions_and_lock_safety(hass, mqtt_transport, eep):
             )
             is None
         )
-    await mqtt_transport.set_connected(False)
+    await gateway.stop()
     for entity_id in positions.values():
-        assert hass.states.get(entity_id).state == "unavailable"
+        await wait_until(lambda: hass.states.get(entity_id).state == "unavailable")
 
 
 @pytest.mark.parametrize(

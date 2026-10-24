@@ -49,6 +49,61 @@ def test_non_text_keys_are_preserved() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "key",
+    [
+        "host",
+        "Host",
+        "password",
+        "username",
+        "homekitPin",
+        "homekit_pin",
+        "HomeKit-PIN",
+        "serialNumber",
+        "serial_number",
+        "baseId",
+        "base_id",
+        "BaseID",
+        "eurid",
+        "EURID",
+    ],
+)
+def test_rest_credentials_and_gateway_identity_keys_are_redacted(key: str) -> None:
+    """Key spelling variants of the REST entry and systemInfo are all hidden."""
+    result = _redact_diagnostics(
+        {"info": {key: "value-1234", "note": "seen value-1234 twice"}}, set()
+    )
+    assert result == {"info": {key: REDACTED, "note": f"seen {REDACTED} twice"}}
+
+
+@pytest.mark.parametrize("value", [8080, None, True, ""], ids=repr)
+def test_non_text_sensitive_values_are_redacted_but_not_collected(
+    value: object,
+) -> None:
+    """Only text values become identifiers for free-text redaction."""
+    result = _redact_diagnostics(
+        {"entry": {"host": value, "port": 8080, "note": "port 8080 True None"}},
+        set(),
+    )
+    assert result == {
+        "entry": {"host": REDACTED, "port": 8080, "note": "port 8080 True None"}
+    }
+
+
+def test_system_info_values_inside_embedded_json_are_redacted() -> None:
+    result = _redact_diagnostics(
+        {
+            "info": {"homekitPin": "246-80-135"},
+            "error": '{"message": "pin 246-80-135 rejected", "code": 4}',
+        },
+        set(),
+    )
+    assert result == {
+        "info": {"homekitPin": REDACTED},
+        "error": f'{{"message": "pin {REDACTED} rejected", "code": 4}}',
+    }
+
+
 def test_duration_formatting() -> None:
     assert _duration_ms(None, 5.0) == "unknown"
     assert _duration_ms(1.0, 1.25) == "250.0"

@@ -1,174 +1,193 @@
-"""Data coordinator for Opus GreenNet Bridge integration."""
+"""Coordinator for one OPUS gateway, fed by its REST event stream.
+
+Lifecycle:
+
+* Setup reads the gateway identity and its uptime, then opens the event
+  stream and waits for its first document, the complete device list (stream
+  first). Every entity is created with current state before the platforms
+  start. The streamed list carries no ``configuration`` block, so the device
+  list is read once right after setup for cover movement and rotation times
+  (never live state).
+* The same background task keeps ``GET /devices/stream`` open. Each new
+  stream begins with the complete device list (a full resynchronisation) and
+  then delivers every telegram the moment the gateway handles it.
+* A health probe reads the uptime every minute. It detects an unreachable
+  gateway even while the stream is silent, and a gateway restart (falling
+  uptime) whose old stream connection could otherwise stay half open.
+* Commands are HTTP PUTs. The gateway acknowledges them synchronously; one
+  radio request is in flight at a time, user commands first.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
+import random
 from collections.abc import Callable, Coroutine, Sequence
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
-from time import monotonic
+from time import monotonic, time
 
-from homeassistant.components import mqtt
-from homeassistant.components.mqtt import ReceiveMessage
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
+from homeassistant.util import dt as dt_util
 
-from .const import (
-    BUTTON_KEYS,
-    COVER_MOVEMENT_GRACE_SECONDS,
-    COVER_RECONCILIATION_DELAYS,
-    DOMAIN,
-    INDEXED_STATE_CONTAINERS,
-    KEY_CHANNEL,
-    KEY_QUERY,
-    KEY_ROTATION_TIME,
-    KEY_STOP,
-    KEY_VERTICAL_MOVEMENT_TIME,
-    KNOWN_STATE_KEYS,
-    TOPIC_BASE,
-    TOPIC_GET_ANSWER_DEVICE_CONFIGURATION,
-    TOPIC_GET_ANSWER_DEVICE_PARAMETERS,
-    TOPIC_GET_ANSWER_DEVICE_PROFILE,
-    TOPIC_GET_ANSWER_DEVICES,
-    TOPIC_GET_ANSWER_SYSTEM_INFO,
-    TOPIC_GET_ANSWER_SYSTEM_UPTIME,
-    TOPIC_GET_DEVICE_CONFIGURATION,
-    TOPIC_GET_DEVICE_PARAMETERS,
-    TOPIC_GET_DEVICE_PROFILE,
-    TOPIC_GET_DEVICES,
-    TOPIC_GET_SYSTEM_INFO,
-    TOPIC_PUT_ANSWER_DEVICE_CONFIGURATION,
-    TOPIC_PUT_DEVICE_CONFIGURATION,
-    TOPIC_PUT_STATE,
-    TOPIC_SUB_DEVICE_STREAM_ALL,
-    TOPIC_SUB_DEVICES_ALL,
-    TOPIC_SUB_PUT_ANSWER_STATE,
-    TOPIC_SUB_TELEGRAM_FROM_ALL,
-)
-from .enocean_device import EnOceanDevice
-from .mqtt_transport import (
+from . import protocol
+from .api import (
     PRIORITY_BACKGROUND,
     PRIORITY_COMMAND,
     PRIORITY_QUERY,
-    REQUEST_TIMEOUT,
-    SETUP_REQUEST_TIMEOUT,
-    SETUP_SUBSCRIPTION_TIMEOUT,
-    MQTTRequestManager,
-    async_get_gateway_uptime,
-    async_wait_for_subscriptions,
-    decode_response,
+    RECOM_TIMEOUT,
+    OpusApiError,
+    OpusAuthError,
+    OpusConnectionError,
+    OpusGatewayClient,
+    OpusResponseError,
+    OpusTimeoutError,
+    PriorityLock,
     gateway_uptime_value,
-    request_error,
     response_status,
 )
-from .wire import (
-    JsonList,
-    JsonObject,
-    JsonScalar,
-    JsonValue,
-    WireFunction,
-    WireMapping,
-    as_list,
-    as_object,
-    object_items,
-    parse_json,
-    payload_text,
+from .const import (
+    COVER_MOVEMENT_GRACE_SECONDS,
+    COVER_RECONCILIATION_DELAYS,
+    DOMAIN,
+    KEY_ANGLE,
+    KEY_CHANNEL,
+    KEY_DIMMER,
+    KEY_LOCKING_MODE,
+    KEY_POSITION,
+    KEY_QUERY,
+    KEY_RAMPING_MODE,
+    KEY_REPOSITIONING,
+    KEY_ROTATION_TIME,
+    KEY_STOP,
+    KEY_UNLOCK,
+    KEY_VERTICAL_MOVEMENT_TIME,
+    RAMPING_MODE_FADE,
+    RAMPING_MODE_SWITCH,
+    REPOSITIONING_FIRST_DOWN,
+    REPOSITIONING_FIRST_UP,
+    UNLOCK_ALLOWED,
+    UNLOCK_NOT_ALLOWED,
+    VALUE_UNKNOWN,
 )
+from .enocean_device import DeviceProfile, EnOceanDevice
+from .wire import JsonObject, WireFunction, WireMapping, as_object, object_items
 
 _LOGGER = logging.getLogger(__name__)
-
-# Synchronous MQTT message callback registered via mqtt.async_subscribe.
-type MessageHandler = Callable[[ReceiveMessage], None]
-
-
-def _metadata_text(value: object) -> str:
-    """Return a device metadata field as text.
-
-    Strings pass through unchanged. Flattened MQTT properties are parsed by
-    ``_parse_value``, so a numeric name such as ``friendlyId = "123"`` arrives
-    as a number and is rendered back to its text. Other types (null, booleans,
-    containers) are not names and fall back to an empty string.
-    """
-    if isinstance(value, str):
-        return value
-    if isinstance(value, int | float) and not isinstance(value, bool):
-        return str(value)
-    return ""
-
-
-def _index_sort_key(key: str) -> tuple[int, int, str]:
-    """Order flattened index keys numerically, other keys after them by name."""
-    return (0, int(key), "") if key.isdigit() else (1, 0, key)
-
 
 # Dispatcher signals
 SIGNAL_DEVICE_REMOVED = f"{DOMAIN}_device_removed"
 SIGNAL_DEVICE_DISCOVERED = f"{DOMAIN}_device_discovered"
-SIGNAL_DEVICE_STATE_UPDATE = f"{DOMAIN}_device_state_update"
-SIGNAL_AVAILABILITY_UPDATE = f"{DOMAIN}_availability_update"
 
-FAST_PATH_PROPERTIES = frozenset({"batteryLevel", "dbm"})
-DEVICE_STREAM_FINALIZE_DELAY = 0.02
-TELEGRAM_FINALIZE_DELAY = 0.15
-RAW_MQTT_DEBUG_PAYLOAD_LIMIT = 500
-OUTBOUND_STATE_RECONCILIATION_DELAYS = (5, 20)
-# Gateway acknowledgement "SoftSmartAck" (vendor reference 3.3): the gateway
-# accepted the telegram for deferred delivery and transmits it later. It is
-# neither a radio transmission nor device feedback.
-ACK_STATUS_DEFERRED = 201
-# Command keys whose deferred value is compared numerically with feedback.
-NUMERIC_COMMAND_KEYS = frozenset(
-    {"dimValue", "position", "angle", "temperatureSetpoint"}
-)
-# Internal reason for a background status check dropped before publish.
-SUPERSEDED = "superseded"
-GATEWAY_HEALTH_INTERVAL = timedelta(seconds=60)
-# Each broker/bridge reconnect re-requests the full device snapshot so
-# entities catch up without live telegrams. A flapping connection must not
-# re-trigger that multi-thousand-message snapshot every few seconds: within
-# this window after the previous reconnect, only the health probe runs and
-# the retained replay refreshes entity state.
-RECONNECT_RESYNC_DEBOUNCE_SECONDS = 60.0
-# stream/# holds tens of thousands of retained telemetry topics. QoS 0
-# avoids one PUBACK per replayed message while periodic telegrams make a
-# rare lost message self-healing; request/response topics stay at QoS 1.
-STREAM_SUBSCRIPTION_QOS = 0
-
-# Regex to parse device topics (plural - initial full state at boot)
-# EnOcean/{EAG}/stream/devices/{DeviceID}/{property}
-DEVICE_TOPIC_PATTERN = re.compile(r"EnOcean/([^/]+)/stream/devices/([^/]+)/(.+)")
-
-# Regex to parse telegram topics
-# EnOcean/{EAG}/stream/telegram/{DeviceID}/{property}
-TELEGRAM_TOPIC_PATTERN = re.compile(
-    r"EnOcean/([^/]+)/stream/telegram/([^/]+)(?:/(.+))?"
-)
-
-# Regex to parse device stream topics (singular - live deltas)
-# EnOcean/{EAG}/stream/device/{DeviceID}/{property}
-DEVICE_STREAM_TOPIC_PATTERN = re.compile(r"EnOcean/([^/]+)/stream/device/([^/]+)/(.+)")
-PUT_ANSWER_STATE_TOPIC_PATTERN = re.compile(
-    r"EnOcean/([^/]+)/putAnswer/devices/([^/]+)/state"
-)
+# Gateway answer to a state command.
+SOFT_SMART_ACK_STATUS = 201
+# The gateway stored the command as the device's target state; it answers the
+# device's next request with it (HOPPE SecureConnect unlock permission).
+TARGET_STATE_STATUS = 202
 
 
 class CommandDelivery(StrEnum):
-    """What a positive gateway acknowledgement says about one command.
+    """How the gateway handled an accepted state command."""
 
-    Neither value confirms physical execution: only a device report (a radio
-    telegram or a device-model update) for the commanded field does that.
-    """
-
-    # httpStatus 200: the gateway transmitted the telegram.
-    SENT = "sent"
-    # httpStatus 201 (SoftSmartAck): queued by the gateway for later delivery.
+    SENT = "sent"  # 200: the telegram went out over the radio.
+    # 201 (SoftSmartAck): queued until the sleeping device wakes up and asks
+    # for it; 202: stored as the device's target state for its next request.
+    # The device has not received anything yet.
     DEFERRED = "deferred"
+
+
+SIGNAL_DEVICE_STATE_UPDATE = f"{DOMAIN}_device_state_update"
+SIGNAL_AVAILABILITY_UPDATE = f"{DOMAIN}_availability_update"
+
+GATEWAY_HEALTH_INTERVAL = timedelta(seconds=60)
+# The stream reports live changes; the periodic device list additionally
+# refreshes slowly changing metadata (battery level, signal, movement times)
+# and picks up newly paired devices.
+DEVICE_LIST_REFRESH_INTERVAL = timedelta(minutes=30)
+# Reconnecting the event stream (phase R4, finding B-2). Every new stream
+# starts with the complete device list, so each attempt is a full download
+# from the gateway (no radio telegram). The pause before the next attempt
+# grows exponentially from STREAM_BACKOFF_INITIAL to STREAM_BACKOFF_MAX
+# seconds and is lengthened by a random share of up to STREAM_BACKOFF_JITTER,
+# so it is never shorter than the nominal value. A pause is taken after every
+# stream, also after one that connected: a stream that ended within
+# STREAM_MIN_HEALTHY_SECONDS of its first document counts as a failure, so a
+# gateway that closes every connection right after the device list cannot
+# cause a tight reconnect loop. Only a stream that stayed open longer resets
+# the backoff.
+STREAM_BACKOFF_INITIAL = 1.0
+STREAM_BACKOFF_MAX = 60.0
+STREAM_BACKOFF_JITTER = 0.25
+STREAM_MIN_HEALTHY_SECONDS = 10.0
+# Setup opens the event stream and waits for its first device list instead of
+# reading GET /devices first (phase R5, plan section 7.2, findings B-8/E7).
+# The list is the first document the gateway writes; it is as large as the
+# answer of GET /devices, which has a 10 s request timeout. 30 s leaves room
+# for large installations on a slow gateway; without the list by then, setup
+# fails and Home Assistant retries it with its own backoff.
+FIRST_DEVICE_LIST_TIMEOUT = 30.0
+# A telegram from a device missing in the device list triggers one lookup of
+# that device; failed lookups are retried after this many seconds.
+UNKNOWN_DEVICE_RETRY_SECONDS = 3600.0
+OUTBOUND_STATE_RECONCILIATION_DELAYS = (5.0, 20.0)
+# The gateway echoes every command it sends as a "to" telegram. The echo of
+# this integration's own command can arrive just after the HTTP
+# acknowledgement; within this time an echo with the same content is not
+# mistaken for a command from another controller.
+OWN_COMMAND_ECHO_SECONDS = 2.0
+# Internal reason for a background status check dropped before sending.
+SUPERSEDED = "superseded"
+
+
+def stream_retry_delay(failures: int, random_share: float | None = None) -> float:
+    """Return the pause in seconds before the next event stream attempt.
+
+    ``failures`` counts the stream attempts since the last healthy stream.
+    The nominal pause doubles with every failure up to ``STREAM_BACKOFF_MAX``;
+    a random share (0 to 1, drawn when ``random_share`` is None) adds up to
+    ``STREAM_BACKOFF_JITTER`` of it, so several Home Assistant instances that
+    lost the same gateway do not reconnect in lockstep.
+    """
+    nominal = min(
+        STREAM_BACKOFF_MAX,
+        STREAM_BACKOFF_INITIAL * 2.0 ** min(max(failures, 0), 32),
+    )
+    share = random.random() if random_share is None else random_share
+    share = min(max(share, 0.0), 1.0)
+    return nominal * (1.0 + STREAM_BACKOFF_JITTER * share)
+
+
+def _is_timed_parameter(function: WireFunction) -> bool:
+    """Return whether a command sets a cover movement or rotation duration.
+
+    The device list reports these times in seconds; the D2-05-00 "Set
+    parameters" command of another controller uses milliseconds. Only a
+    positive number has a unit; zero and ``noRotation`` mean no rotation in
+    both and stay usable.
+    """
+    if function.get("key") not in (KEY_ROTATION_TIME, KEY_VERTICAL_MOVEMENT_TIME):
+        return False
+    number = EnOceanDevice._parse_number(function.get("value"))
+    return number is not None and number > 0
+
+
+def request_error(key: str, device_id: str, reason: str = "") -> HomeAssistantError:
+    """Create a translated request error without logging sensitive payloads."""
+    return HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key=key,
+        translation_placeholders={"device_id": device_id, "reason": reason},
+    )
+
+
+class GatewayMismatchError(OpusApiError):
+    """The configured address answers with a different gateway identity."""
 
 
 @dataclass
@@ -188,1130 +207,869 @@ class CoverMovement:
         return self.started_at + self.travel + COVER_MOVEMENT_GRACE_SECONDS
 
 
-class OpusGreenNetCoordinator:
-    """Coordinator for managing MQTT communication with Opus GreenNet Bridge."""
+# A run without a matching end report is dropped after this many seconds.
+COVER_RUN_TIMEOUT_SECONDS = 300.0
+# Reported end positions within this distance of the target finish a run.
+COVER_RUN_TARGET_TOLERANCE = 2
 
-    def __init__(self, hass: HomeAssistant, eag_id: str) -> None:
+
+@dataclass
+class CoverRun:
+    """Measured travel of one cover command, from sending to the end report.
+
+    ``seconds`` stays None until the device reports a position at the target.
+    A status query sent meanwhile makes the measurement unusable: its answer
+    tells the position, not when the blind arrived.
+    """
+
+    start_position: int | None
+    target: int
+    repositioning: str | None
+    started_at: float
+    seconds: float | None = None
+    finished_at: str | None = None
+    queried: bool = False
+
+    @property
+    def direction(self) -> str:
+        """Return up/down, or the reference run direction (OPUS 0 = top)."""
+        if self.repositioning == REPOSITIONING_FIRST_UP:
+            return "reference_up"
+        if self.repositioning == REPOSITIONING_FIRST_DOWN:
+            return "reference_down"
+        if self.start_position is not None and self.target < self.start_position:
+            return "up"
+        return "down" if self.start_position is not None else "unknown"
+
+    @property
+    def full_travel(self) -> bool:
+        """Return whether the run covered the whole height without detour."""
+        return self.repositioning in (None, "direct") and {
+            self.start_position,
+            self.target,
+        } == {0, 100}
+
+
+class OpusGreenNetCoordinator:
+    """Own the connection to one gateway and the state of its devices."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: OpusGatewayClient,
+        eag_id: str,
+        *,
+        on_auth_failed: Callable[[], None] | None = None,
+    ) -> None:
         """Initialize the coordinator."""
         self.hass = hass
+        self.client = client
         self.eag_id = eag_id
         self.devices: dict[str, EnOceanDevice] = {}
-        # Raw wire data (JSON objects assembled from MQTT), kept apart from the
-        # normalised domain model in ``self.devices``.
-        self._device_data: dict[str, JsonObject] = {}  # Raw device properties
-        self._telegram_data: dict[str, JsonObject] = {}  # Raw telegram properties
-        self._device_stream_data: dict[str, JsonObject] = {}  # Device stream deltas
-        self._subscriptions: list[Callable[[], None]] = []
-        self._discovery_complete = False
-        self._pending_devices: set[str] = set()
-        # Debounce timer cancel callbacks per device.
-        self._pending_telegrams: dict[str, Callable[[], None] | None] = {}
-        self._pending_device_streams: dict[str, Callable[[], None] | None] = {}
-        self._telegram_received_at: dict[str, float] = {}
-        self._device_stream_received_at: dict[str, float] = {}
-        # Delta windows that so far contain retained replays only.
-        self._device_stream_replay_windows: set[str] = set()
+        self.gateway_info: JsonObject = {}
+        self.gateway_uptime: str | None = None
+        self._on_auth_failed = on_auth_failed
+        self._auth_failed = False
+        self._unloaded = False
+        self._gateway_available = False
+        self._stream_connected = False
+        self._stream_task: asyncio.Task[None] | None = None
+        # Incremented for every new stream reader. A replaced reader may still
+        # hold documents it parsed before its cancellation takes effect; it
+        # drops them instead of applying stale state (phase R4).
+        self._stream_generation = 0
+        # Resolved by the stream with its first device list during setup, or
+        # failed with the error of the first stream attempt (phase R5).
+        self._first_device_list: asyncio.Future[None] | None = None
+        # Seconds from opening the stream to its first device list at setup
+        # (diagnostics; measurement asked for by REST plan R5).
+        self.first_device_list_seconds: float | None = None
+        # Monotonic time of the last received telegram per device; a device
+        # list requested before it never replaces its signal strength and
+        # last-seen time (finding B-5).
+        self._telegram_metadata_at: dict[str, float] = {}
+        self._probe_task: asyncio.Task[None] | None = None
+        self._refresh_task: asyncio.Task[None] | None = None
+        self._tasks: set[asyncio.Task[None]] = set()
+        self._timers: list[Callable[[], None]] = []
+        # One radio request in flight at a time, dispatched by priority.
+        self._radio_queue = PriorityLock()
+        self._device_generations: dict[str, int] = {}
+        # Incremented whenever the gateway becomes unavailable: requests queued
+        # before an outage are never sent after the gateway returns.
+        self._outage_generation = 0
+        self._unknown_devices: dict[str, float] = {}
+        self._command_waiters: dict[str, int] = {}
+        self._sent_commands: dict[str, list[tuple[float, frozenset[object]]]] = {}
+        self._cover_movements: dict[tuple[str, int], CoverMovement] = {}
+        # Last vertical run duration per device and channel from the device
+        # list (diagnostics only, REST phase 02). Never used for estimates,
+        # timers or queries.
+        self.last_vertical_movement_times: dict[str, dict[int, float]] = {}
+        # Origin and value of each cover position at the moment the integration
+        # set it (diagnostics only). A position that differs from the recorded
+        # value was written by an entity estimate.
+        self._position_origins: dict[tuple[str, int], tuple[str, int]] = {}
         self._pending_reconciliation_queries: dict[
             tuple[str, int], list[Callable[[], None]]
         ] = {}
-        self._cover_movements: dict[tuple[str, int], CoverMovement] = {}
         self._pending_reconciliation_fields: dict[tuple[str, int], set[str]] = {}
         self._feedback_revisions: dict[tuple[str, int, str], int] = {}
-        self._discovery_timer: Callable[[], None] | None = None
-        self._requests = MQTTRequestManager(hass)
-        self._tasks: set[asyncio.Task[None]] = set()
-        self._gateway_available = False
-        self._bridge_connected: bool | None = None
-        self._unloaded = False
-        self._started = False
-        self._refresh_task: asyncio.Task[None] | None = None
-        self._subscription_topics: list[str] = []
-        self._resync_requested_at: float | None = None
-        self._telegram_paths: dict[str, set[str]] = {}
-        self._command_waiters: dict[str, int] = {}
         self._reconciling: set[tuple[str, int]] = set()
         # Channels whose delayed status check is still wanted. A queued
-        # background check is published only while its channel is listed here;
+        # background check is sent only while its channel is listed here;
         # feedback or a newer command removes it before the request is sent.
         self._reconcile_needed: set[tuple[str, int]] = set()
-        self._control_topics: list[str] = []
-        self._stream_topics: list[str] = []
-        self._last_reconnect_at: float | None = None
-        # Field provenance for retained replays (phase 10). Per device, the
-        # (channel, key) fields that received a live (non-retained) value or
-        # an answer to this session's own request. Only valid while the
-        # session is uninterrupted and every stream wildcard is subscribed:
-        # then every gateway publication reaches the coordinator live, so a
-        # later retained replay of such a field cannot be newer.
-        self._live_fields: dict[str, set[tuple[int, str]]] = {}
-        self._replay_guard_armed = False
-        # Gateway info
-        self.gateway_info: JsonObject = {}
-        self.gateway_uptime: str | None = None
+        # Gateway profiles per announced EEP combination, read once at setup
+        # (GET /devices/<id>/profile, no radio telegram). Devices with the
+        # same EEPs share one profile. None marks a profile that could not be
+        # read; such devices use the EEP tables.
+        self.profiles: dict[tuple[str, ...], DeviceProfile | None] = {}
+        # Cover runs being timed and the last completed one per channel.
+        self._cover_runs: dict[tuple[str, int], CoverRun] = {}
+        self.last_cover_runs: dict[tuple[str, int], CoverRun] = {}
 
-    @callback
-    def async_forget_device(self, device_id: str) -> None:
-        """Discard only this child's state and queued work, without MQTT writes."""
-        for did, channel_id in list(self._cover_movements):
-            if did == device_id:
-                self._clear_cover_movement(did, channel_id, notify=False)
-        self.devices.pop(device_id, None)
-        self._pending_devices.discard(device_id)
-        for cache in (
-            self._device_data,
-            self._telegram_data,
-            self._device_stream_data,
-            self._telegram_received_at,
-            self._device_stream_received_at,
-            self._telegram_paths,
-        ):
-            cache.pop(device_id, None)
-        self._device_stream_replay_windows.discard(device_id)
-        for timers in (self._pending_telegrams, self._pending_device_streams):
-            if cancel := timers.pop(device_id, None):
-                cancel()
-        self._cancel_reconciliation_queries(device_id)
-        for key in list(self._feedback_revisions):
-            if key[0] == device_id:
-                self._feedback_revisions.pop(key)
-        # A re-added device starts without provenance: its first snapshot,
-        # retained or not, initialises state again.
-        self._live_fields.pop(device_id, None)
-        self._requests.async_cancel_device(device_id)
-        async_dispatcher_send(
-            self.hass, f"{SIGNAL_DEVICE_REMOVED}_{self.eag_id}", device_id
-        )
+    # ──────────────────────────────────────────────────────────────────────
+    # Lifecycle
+    # ──────────────────────────────────────────────────────────────────────
 
     @property
     def available(self) -> bool:
-        """Require both the broker connection and a responsive OPUS gateway."""
-        return (
-            not self._unloaded
-            and self._gateway_available
-            and self._bridge_connected is not False
-            and mqtt.is_connected(self.hass)
-        )
+        """Return whether the gateway answers and its event stream is open."""
+        return not self._unloaded and self._gateway_available
 
-    def _control_subscriptions(self) -> tuple[tuple[str, MessageHandler, int], ...]:
-        """Small, non-retained answer/status topics needed for the probe."""
-        return (
-            ("opus_greennet/{eag_id}/bridge/status", self._handle_bridge_status, 1),
-            (TOPIC_GET_ANSWER_SYSTEM_UPTIME, self._handle_system_uptime, 1),
-            (TOPIC_GET_ANSWER_SYSTEM_INFO, self._handle_system_info, 1),
-            (TOPIC_SUB_PUT_ANSWER_STATE, self._handle_put_answer_state, 1),
-        )
+    async def async_setup(self) -> None:
+        """Read identity and uptime, then take the devices from the stream.
 
-    def _stream_subscriptions(self) -> tuple[tuple[str, MessageHandler, int], ...]:
-        """Heavy wildcard topics, ordered by importance for discovery.
-
-        stream/# replays a retained snapshot of up to ~30,000 topics. Each
-        filter is subscribed and SUBACKed before the next one is requested,
-        so the broker never has to replay everything concurrently. The three
-        telemetry wildcards use QoS 0 to keep the retained replay cheap.
+        The event stream starts with the complete device list; that list is the
+        only snapshot at setup (stream first, phase R5). The same reader keeps
+        the stream open afterwards. Raises an ``OpusApiError`` when the gateway
+        cannot be used yet: the error of the first stream attempt, or
+        ``OpusTimeoutError`` when no device list arrives within
+        ``FIRST_DEVICE_LIST_TIMEOUT``.
         """
-        return (
-            (TOPIC_GET_ANSWER_DEVICES, self._handle_get_answer_devices, 1),
-            (
-                TOPIC_SUB_DEVICES_ALL,
-                self._handle_device_property_message,
-                STREAM_SUBSCRIPTION_QOS,
-            ),
-            (
-                TOPIC_SUB_DEVICE_STREAM_ALL,
-                self._handle_device_stream_message,
-                STREAM_SUBSCRIPTION_QOS,
-            ),
-            (
-                TOPIC_SUB_TELEGRAM_FROM_ALL,
-                self._handle_telegram_property_message,
-                STREAM_SUBSCRIPTION_QOS,
-            ),
+        info = await self.client.async_get("/system/info")
+        self._apply_system_info(info)
+        self.gateway_uptime = gateway_uptime_value(
+            await self.client.async_get("/system/uptime")
         )
-
-    async def _async_subscribe_group(
-        self,
-        group: tuple[tuple[str, MessageHandler, int], ...],
-        target: list[str],
-        *,
-        staggered: bool,
-        required: bool = True,
-    ) -> None:
-        """Subscribe missing topics of one group, optionally one SUBACK at a time.
-
-        SUBACK waits always use the same QoS as the subscription itself.
-        ``required=False`` treats a missing SUBACK as advisory: telemetry
-        listeners are registered with the subscribe call, so messages flow
-        even while the confirmation is still outstanding.
-        """
-        for pattern, handler, qos in group:
-            topic = pattern.format(base=TOPIC_BASE, eag_id=self.eag_id)
-            if topic in target:
-                continue
-            self._subscriptions.append(
-                await mqtt.async_subscribe(self.hass, topic, handler, qos=qos)
-            )
-            target.append(topic)
-            self._subscription_topics.append(topic)
-            if staggered:
-                await async_wait_for_subscriptions(
-                    self.hass,
-                    [topic],
-                    timeout=SETUP_SUBSCRIPTION_TIMEOUT,
-                    qos=qos,
-                    required=required,
-                )
-                _LOGGER.debug("OPUS subscription ready: %s", topic)
-        if not staggered:
-            # Wait per QoS level: the done callback fires per topic/QoS pair.
-            by_qos: dict[int, list[str]] = {}
-            for pattern, _, qos in group:
-                topic = pattern.format(base=TOPIC_BASE, eag_id=self.eag_id)
-                if topic in target:
-                    by_qos.setdefault(qos, []).append(topic)
-            for qos, topics in by_qos.items():
-                await async_wait_for_subscriptions(
-                    self.hass,
-                    topics,
-                    timeout=SETUP_SUBSCRIPTION_TIMEOUT,
-                    qos=qos,
-                    required=required,
-                )
-
-    @callback
-    def _register_answer_routes(self) -> None:
-        """Route exact answers through the already active wildcard listeners."""
-        for pattern in (TOPIC_GET_ANSWER_SYSTEM_UPTIME, TOPIC_SUB_PUT_ANSWER_STATE):
-            self._requests.async_add_route_pattern(
-                pattern.format(base=TOPIC_BASE, eag_id=self.eag_id)
-            )
-
-    async def async_setup(self) -> bool:
-        """Probe the gateway quickly; load the retained snapshot in background.
-
-        Phase 1 (blocking, part of the config entry setup):
-          subscribe only the light control/answer topics, wait for their
-          SUBACKs and probe the uptime endpoint with setup-specific bounds.
-          No stream/# wildcard is active yet, so the retained flood cannot
-          delay the probe or the SUBACKs.
-        Phase 2 (background task):
-          subscribe the heavy stream/# wildcards one by one, then request a
-          fresh device snapshot. Entities are created via dispatcher signals
-          when discovery finalizes, so setup does not need to wait for this.
-        """
-        self._subscriptions.append(
-            mqtt.async_subscribe_connection_status(
-                self.hass, self._handle_connection_status
-            )
-        )
+        first = self.hass.loop.create_future()
+        self._first_device_list = first
+        opened_at = monotonic()
+        self._start_stream()
         try:
-            await self._async_subscribe_group(
-                self._control_subscriptions(), self._control_topics, staggered=False
-            )
-            self._register_answer_routes()
-            uptime_response = await async_get_gateway_uptime(
-                self._requests,
-                self.eag_id,
-                priority=PRIORITY_COMMAND,
-                timeout=SETUP_REQUEST_TIMEOUT,
-                subscribe_timeout=SETUP_SUBSCRIPTION_TIMEOUT,
-            )
-            self.gateway_uptime = gateway_uptime_value(uptime_response)
-            self._started = True
-            self._subscriptions.append(
-                async_track_time_interval(
-                    self.hass, self._async_health_tick, GATEWAY_HEALTH_INTERVAL
-                )
-            )
-            # Phase 2: stream subscriptions + snapshot, decoupled from setup.
-            self._schedule_gateway_refresh(resync=True)
-        except BaseException:
-            await self.async_unload()
-            raise
-        return True
-
-    @callback
-    def _set_gateway_available(self, available: bool) -> None:
-        """Notify every entity when gateway health changes, without replaying events."""
-        if self._gateway_available == available:
-            return
-        self._gateway_available = available
-        _LOGGER.info(
-            "OPUS gateway %s is %s",
+            async with asyncio.timeout(FIRST_DEVICE_LIST_TIMEOUT):
+                await asyncio.shield(first)
+        except TimeoutError as err:
+            raise OpusTimeoutError(
+                "The event stream sent no device list within "
+                f"{FIRST_DEVICE_LIST_TIMEOUT:.0f} s"
+            ) from err
+        finally:
+            self._first_device_list = None
+            if not first.done():
+                first.cancel()
+        self.first_device_list_seconds = round(monotonic() - opened_at, 3)
+        # Entities are created after setup returns, so their type and channel
+        # count can follow the gateway profiles read here.
+        await self._async_load_profiles()
+        _LOGGER.debug(
+            "OPUS gateway %s sent its first device list after %.3f s",
             self.eag_id,
-            "available" if available else "unavailable",
+            self.first_device_list_seconds,
         )
-        async_dispatcher_send(self.hass, f"{SIGNAL_AVAILABILITY_UPDATE}_{self.eag_id}")
-
-    def _reconnect_requires_snapshot(self) -> bool:
-        """Decide whether a reconnect may re-request the full snapshot.
-
-        HA replays every retained stream topic on each broker reconnect, so
-        entities refresh anyway. Re-requesting the gateway's snapshot after
-        every quick reconnect of a flapping connection would overload the
-        gateway and the broker with tens of thousands of messages.
-        """
-        now = monotonic()
-        previous = self._last_reconnect_at
-        self._last_reconnect_at = now
-        return previous is None or now - previous >= RECONNECT_RESYNC_DEBOUNCE_SECONDS
-
-    @callback
-    def _handle_connection_status(self, connected: bool) -> None:
-        """Invalidate outstanding work on disconnect and resync on reconnect."""
-        if self._unloaded:
-            return
-        if not connected:
-            self._set_gateway_available(False)
-            # HA resubscribes after reconnect; until those SUBACKs arrive the
-            # persistent wildcards cannot be trusted for answer routing.
-            self._requests.async_clear_route_patterns()
-            self._requests.async_cancel_pending("mqtt_unavailable")
-            self._cancel_background_work()
-        elif self._started:
-            self._schedule_gateway_refresh(resync=self._reconnect_requires_snapshot())
-
-    @callback
-    def _handle_bridge_status(self, msg: ReceiveMessage) -> None:
-        """Consume the optional Mosquitto bridge notification topic."""
-        payload = msg.payload
-        if isinstance(payload, bytes):
-            payload = payload.decode(errors="replace")
-        if payload not in ("0", "1"):
-            return
-        self._bridge_connected = payload == "1"
-        if not self._bridge_connected:
-            self._set_gateway_available(False)
-            self._requests.async_cancel_pending("gateway_unavailable")
-            self._cancel_background_work()
-        elif self._started:
-            self._schedule_gateway_refresh(resync=self._reconnect_requires_snapshot())
-
-    @callback
-    def _async_health_tick(self, _now: datetime) -> None:
-        """Probe the gateway independently of quiet or batteryless devices."""
-        if mqtt.is_connected(self.hass) and self._bridge_connected is not False:
-            self._schedule_gateway_refresh(resync=not self._gateway_available)
-
-    @callback
-    def _schedule_gateway_refresh(self, *, resync: bool) -> None:
-        if self._unloaded or (
-            self._refresh_task
-            and not self._refresh_task.done()
-            and not self._refresh_task.cancelling()
-        ):
-            return
-        self._refresh_task = self._create_task(
-            self._async_refresh_gateway_background(resync=resync),
-            # HA emits its connected callback before queuing resubscriptions.
-            # Wait until that callback returns before checking SUBACK readiness.
-            eager_start=False,
-        )
-
-    async def _async_refresh_gateway_background(self, *, resync: bool) -> None:
-        try:
-            await self._async_refresh_gateway(resync=resync)
-        except HomeAssistantError, TimeoutError:
-            self._set_gateway_available(False)
-            self._requests.async_cancel_pending("gateway_unavailable")
-            _LOGGER.debug(
-                "OPUS gateway %s did not answer its health probe", self.eag_id
+        self._timers.append(
+            async_track_time_interval(
+                self.hass, self._async_health_tick, GATEWAY_HEALTH_INTERVAL
             )
-
-    def _bridge_reported_offline(self) -> bool:
-        """Return whether the bridge explicitly reported itself offline."""
-        return self._bridge_connected is False
-
-    async def _async_refresh_gateway(self, *, resync: bool) -> None:
-        if self._bridge_connected is False:
-            raise request_error("gateway_unavailable", self.eag_id)
-        # A quick reconnect can interrupt phase two before its subscriptions
-        # and first snapshot finish. Debounce only a completed discovery setup.
-        resync = (
-            resync
-            or self._resync_requested_at is None
-            or len(self._stream_topics) < len(self._stream_subscriptions())
         )
-        # Always re-establish answer routing: HA resubscribes after every
-        # broker reconnect, and already-subscribed topics are skipped cheaply.
-        # This also resumes an interrupted phase 2.
-        await self._async_subscribe_group(
-            self._control_subscriptions(), self._control_topics, staggered=False
-        )
-        self._register_answer_routes()
-        if resync:
-            # The heavy stream wildcards follow one SUBACK at a time. Their
-            # SUBACKs are advisory: a slow confirmation must not fail the
-            # health probe or keep the gateway marked unavailable.
-            await self._async_subscribe_group(
-                self._stream_subscriptions(),
-                self._stream_topics,
-                staggered=True,
-                required=False,
+        self._timers.append(
+            async_track_time_interval(
+                self.hass, self._async_refresh_tick, DEVICE_LIST_REFRESH_INTERVAL
             )
-        # A resync coincides with a retained replay; allow a wider deadline.
-        uptime_response = await async_get_gateway_uptime(
-            self._requests,
-            self.eag_id,
-            priority=PRIORITY_QUERY,
-            timeout=SETUP_REQUEST_TIMEOUT if resync else REQUEST_TIMEOUT,
-            subscribe_timeout=SETUP_SUBSCRIPTION_TIMEOUT,
         )
-        self.gateway_uptime = gateway_uptime_value(uptime_response)
-        # Re-read through a method: the bridge status may change while the
-        # uptime request is awaited, which attribute narrowing cannot see.
-        if self._unloaded or self._bridge_reported_offline():
-            raise request_error("gateway_unavailable", self.eag_id)
-        # The answer arrived on a topic Home Assistant (re)subscribes after
-        # every stream wildcard, so all retained replays of this connection
-        # were queued before it. Arm before the snapshot request so its
-        # answer counts as fresher than any later replay.
-        self._arm_replay_guard()
-        if resync:
-            self._resync_requested_at = monotonic()
-            await mqtt.async_publish(
-                self.hass,
-                TOPIC_GET_DEVICES.format(base=TOPIC_BASE, eag_id=self.eag_id),
-                "",
-                qos=1,
-                retain=False,
+        # The stream's device list carries no ``configuration`` block on real
+        # gateways (OPUS-IQ-DOT 1.21.30; phase 21 hardware diagnostics: 0 of
+        # 10 covers had a movement time after a stream-first start). Cover
+        # movement and rotation times come only from GET /devices, so the
+        # metadata refresh runs once before setup returns, so entities start
+        # with their movement times. It is not authoritative: live state stays
+        # with the stream, and newer telegram metadata is kept (B-5). A failure
+        # is only logged; the 30 min refresh tries again. No radio telegram is
+        # sent.
+        await self._async_refresh_device_list()
+
+    async def async_unload(self) -> None:
+        """Stop all background work and mark the gateway unavailable."""
+        _LOGGER.debug("Unloading Opus GreenNet coordinator for EAG %s", self.eag_id)
+        self._unloaded = True
+        self._set_gateway_available(False)
+        for cancel in self._timers:
+            cancel()
+        self._timers.clear()
+        self._cancel_background_work()
+        for task in self._tasks:
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+            self._tasks.clear()
+
+    def _apply_system_info(self, document: JsonObject) -> None:
+        """Store the gateway information and verify its identity."""
+        info = as_object(document.get("systemInfo")) or {}
+        eurid = info.get("eurid")
+        if isinstance(eurid, str) and eurid.upper() != self.eag_id:
+            raise GatewayMismatchError(
+                f"The gateway at {self.client.host} reports EURID {eurid}"
             )
-            if not self._discovery_timer:
-                self._discovery_timer = async_call_later(
-                    self.hass, 2, self._finalize_discovery
-                )
-        self._set_gateway_available(True)
-        if resync:
-            # Some firmware answers uptime and discovery but never system/info.
-            # Request optional metadata without awaiting an application response.
-            try:
-                await mqtt.async_publish(
-                    self.hass,
-                    TOPIC_GET_SYSTEM_INFO.format(base=TOPIC_BASE, eag_id=self.eag_id),
-                    "",
-                    qos=1,
-                    retain=False,
-                )
-            except HomeAssistantError:
-                _LOGGER.debug("Could not request optional OPUS system information")
+        self.gateway_info = info
 
     def _create_task(
-        self, coroutine: Coroutine[object, object, None], *, eager_start: bool = True
+        self, coroutine: Coroutine[object, object, None], name: str
     ) -> asyncio.Task[None]:
-        """Own every coordinator background operation until unload."""
-        task = self.hass.async_create_task(coroutine, eager_start=eager_start)
+        """Own every background operation until unload."""
+        task = self.hass.async_create_background_task(
+            coroutine, f"{DOMAIN} {self.eag_id} {name}"
+        )
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return task
 
     @callback
+    def _set_gateway_available(self, available: bool) -> None:
+        """Notify every entity when gateway health changes."""
+        if self._gateway_available == available:
+            return
+        self._gateway_available = available
+        if not available:
+            self._outage_generation += 1
+            self._cancel_background_work()
+        if not self._unloaded:
+            _LOGGER.info(
+                "OPUS gateway %s is %s",
+                self.eag_id,
+                "available" if available else "unavailable",
+            )
+        async_dispatcher_send(self.hass, f"{SIGNAL_AVAILABILITY_UPDATE}_{self.eag_id}")
+
+    @callback
     def _cancel_background_work(self) -> None:
+        """Drop estimates and delayed checks that assume a working gateway."""
         for device_id, channel_id in list(self._cover_movements):
             self._clear_cover_movement(device_id, channel_id, notify=False)
-        for task in self._tasks:
-            task.cancel()
         for device_id, channel_id in list(self._pending_reconciliation_queries):
             self._cancel_reconciliation_queries(device_id, channel_id)
         self._reconcile_needed.clear()
-        for pending in (self._pending_telegrams, self._pending_device_streams):
-            for cancel in pending.values():
-                if cancel:
-                    cancel()
-            pending.clear()
-        self._telegram_data.clear()
-        self._telegram_paths.clear()
-        self._device_stream_data.clear()
-        self._telegram_received_at.clear()
-        self._device_stream_received_at.clear()
-        self._device_stream_replay_windows.clear()
-        # Publications during an interruption may be newer than anything seen
-        # live before it; after reconnect, retained replays apply as before.
-        self._replay_guard_armed = False
-        self._live_fields.clear()
 
-    async def async_unload(self) -> None:
-        """Unload the coordinator and unsubscribe from MQTT."""
-        _LOGGER.debug("Unloading Opus GreenNet coordinator for EAG %s", self.eag_id)
-        self._unloaded = True
+    @callback
+    def _handle_auth_failure(self) -> None:
+        """Stop using rejected credentials and ask the user for new ones once."""
         self._set_gateway_available(False)
-        self._requests.async_close()
-        self._cancel_background_work()
-        if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
-            self._tasks.clear()
-        if self._discovery_timer:
-            self._discovery_timer()
-            self._discovery_timer = None
-        for cancel in self._pending_telegrams.values():
-            if cancel:
-                cancel()
-        for cancel in self._pending_device_streams.values():
-            if cancel:
-                cancel()
-        for device_id, channel_id in list(self._pending_reconciliation_queries):
-            self._cancel_reconciliation_queries(device_id, channel_id)
-        for unsubscribe in self._subscriptions:
-            unsubscribe()
-        self._subscriptions.clear()
-        self._subscription_topics.clear()
-        self._control_topics.clear()
-        self._stream_topics.clear()
-        self._requests.async_clear_route_patterns()
-        self._pending_telegrams.clear()
-        self._pending_device_streams.clear()
-        self._telegram_data.clear()
-        self._telegram_paths.clear()
-        self._device_stream_data.clear()
-        self._telegram_received_at.clear()
-        self._device_stream_received_at.clear()
+        if self._auth_failed:
+            return
+        self._auth_failed = True
+        _LOGGER.warning("OPUS gateway %s rejected the credentials", self.eag_id)
+        if self._on_auth_failed is not None:
+            self._on_auth_failed()
 
     # ──────────────────────────────────────────────────────────────────────
-    # Device property messages (stream/devices - initial full state at boot)
+    # Event stream
     # ──────────────────────────────────────────────────────────────────────
 
     @callback
-    def _handle_device_property_message(self, msg: ReceiveMessage) -> None:
-        """Handle incoming device property messages from flattened MQTT structure."""
-        try:
-            self._log_raw_mqtt_message("stream/devices", msg)
-
-            match = DEVICE_TOPIC_PATTERN.match(msg.topic)
-            if not match:
-                return
-
-            eag_id, device_id, property_path = match.groups()
-
-            if eag_id != self.eag_id:
-                return
-
-            received_at = monotonic()
-            retained = bool(getattr(msg, "retain", False))
-            if not retained:
-                self._log_latency_received(
-                    "stream/devices", device_id, property_path, received_at
-                )
-
-            payload = payload_text(msg.payload)
-            if retained and self._drop_stale_replay(
-                "stream/devices", device_id, property_path, payload
-            ):
-                return
-
-            if device_id not in self._device_data:
-                self._device_data[device_id] = {"deviceId": device_id}
-                if self._find_device_by_id(device_id) is None:
-                    self._pending_devices.add(device_id)
-
-            self._set_nested_property(
-                self._device_data[device_id], property_path, payload
-            )
-            if not retained:
-                self._record_live_property(device_id, property_path)
-
-            if self.get_device(device_id) is not None and re.match(
-                r"(?:states|transmitModes|configuration/parameters)/\d+/", property_path
-            ):
-                self._buffer_device_stream_property(
-                    device_id, property_path, payload, received_at, retained=retained
-                )
-                return
-
-            if self._apply_known_device_state_property(
-                device_id, property_path, payload, received_at, retained=retained
-            ):
-                return
-
-            self._pending_devices.add(device_id)
-
-            # Reset discovery timer on each message
-            if self._discovery_timer:
-                self._discovery_timer()
-            self._discovery_timer = async_call_later(
-                self.hass, 2, self._finalize_discovery
-            )
-
-        except Exception as err:
-            _LOGGER.exception("Error handling device property message: %s", err)
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Device stream messages (stream/device - live deltas)
-    # ──────────────────────────────────────────────────────────────────────
+    def _start_stream(self) -> None:
+        if self._unloaded or self._auth_failed:
+            return
+        self._stream_generation += 1
+        self._stream_task = self._create_task(
+            self._async_run_stream(self._stream_generation), "stream"
+        )
 
     @callback
-    def _handle_device_stream_message(self, msg: ReceiveMessage) -> None:
-        """Handle live device model delta messages from stream/device/{EURID}."""
-        try:
-            self._log_raw_mqtt_message("stream/device", msg)
+    def _restart_stream(self) -> None:
+        """Replace the stream connection, e.g. after a gateway restart."""
+        if self._stream_task is not None and not self._stream_task.done():
+            self._stream_task.cancel()
+        self._stream_connected = False
+        self._start_stream()
 
-            match = DEVICE_STREAM_TOPIC_PATTERN.match(msg.topic)
-            if not match:
-                return
+    def _is_current_stream(self, generation: int) -> bool:
+        """Return whether ``generation`` is the reader that may apply state."""
+        return not self._unloaded and generation == self._stream_generation
 
-            eag_id, device_id, property_path = match.groups()
+    async def _async_run_stream(self, generation: int) -> None:
+        """Keep the event stream open until unload or replacement.
 
-            if eag_id != self.eag_id:
-                return
-
-            received_at = monotonic()
-            retained = bool(getattr(msg, "retain", False))
-            if not retained:
-                self._log_latency_received(
-                    "stream/device", device_id, property_path, received_at
+        Only the reader of the current ``generation`` applies documents and
+        changes availability. A pause from ``stream_retry_delay`` follows every
+        stream; ``failures`` is reset only by a stream that stayed open for at
+        least ``STREAM_MIN_HEALTHY_SECONDS``. Rejected credentials end the
+        reader without another attempt.
+        """
+        failures = 0
+        while self._is_current_stream(generation):
+            connected_at: float | None = None
+            try:
+                # ``aclosing`` releases the HTTP response as soon as a replaced
+                # reader leaves the loop, not only when the generator is
+                # garbage collected.
+                async with aclosing(self.client.async_stream()) as stream:
+                    async for document in stream:
+                        if not self._is_current_stream(generation):
+                            return
+                        if connected_at is None:
+                            connected_at = monotonic()
+                            self._stream_connected = True
+                            _LOGGER.debug(
+                                "OPUS event stream connected for %s", self.eag_id
+                            )
+                        self._handle_document(document)
+                        if not self._gateway_available:
+                            self._set_gateway_available(True)
+                        if _is_device_list(document):
+                            self._resolve_first_device_list(None)
+                _LOGGER.debug("OPUS event stream for %s ended", self.eag_id)
+                self._resolve_first_device_list(
+                    OpusConnectionError("The event stream ended before its device list")
                 )
-
-            payload = payload_text(msg.payload)
-            if retained and self._drop_stale_replay(
-                "stream/device", device_id, property_path, payload
-            ):
+            except OpusAuthError as err:
+                if self._is_current_stream(generation):
+                    self._stream_connected = False
+                    if not self._resolve_first_device_list(err):
+                        self._handle_auth_failure()
                 return
-            if self._apply_scalar_telemetry(
-                device_id, property_path, payload, received_at, retained=retained
-            ):
+            except OpusApiError as err:
+                _LOGGER.debug("OPUS event stream for %s failed: %s", self.eag_id, err)
+                self._resolve_first_device_list(err)
+            except Exception as err:
+                _LOGGER.exception("Unexpected error in the OPUS event stream")
+                self._resolve_first_device_list(
+                    OpusResponseError(f"Unexpected error in the event stream: {err}")
+                )
+            if not self._is_current_stream(generation):
                 return
-            self._buffer_device_stream_property(
-                device_id, property_path, payload, received_at, retained=retained
-            )
-            if not retained:
-                self._record_live_property(device_id, property_path)
+            self._stream_connected = False
+            if connected_at is None:
+                # No document arrived: the gateway cannot be used right now.
+                self._set_gateway_available(False)
+            elif monotonic() - connected_at >= STREAM_MIN_HEALTHY_SECONDS:
+                failures = 0
+            else:
+                # The gateway answers but closed the stream right away. The
+                # entities stay available (the device list just arrived); the
+                # attempt still counts towards the backoff (finding B-2).
+                _LOGGER.debug(
+                    "OPUS event stream for %s closed after less than %s s",
+                    self.eag_id,
+                    STREAM_MIN_HEALTHY_SECONDS,
+                )
+            delay = stream_retry_delay(failures)
+            failures += 1
+            await asyncio.sleep(delay)
 
-        except Exception as err:
-            _LOGGER.exception("Error handling device stream message: %s", err)
+    @callback
+    def _resolve_first_device_list(self, error: OpusApiError | None) -> bool:
+        """Finish a waiting setup; return whether one was waiting.
 
-    def _apply_scalar_telemetry(
-        self,
-        device_id: str,
-        property_path: str,
-        payload: str,
-        received_at: float,
-        *,
-        retained: bool = False,
-    ) -> bool:
-        """Apply standalone battery/RSSI readings without a debounce timer."""
-        device = self.devices.get(device_id)
-        if device is None or property_path not in FAST_PATH_PROPERTIES:
+        Only the setup's first stream attempt reports here. Later attempts,
+        after setup finished, keep the normal reconnect behaviour.
+        """
+        first = self._first_device_list
+        if first is None or first.done():
             return False
-        raw: object = self._parse_value(payload)
-        if property_path == "batteryLevel":
-            raw = EnOceanDevice._normalize_battery_level(raw)
-        value: JsonScalar
-        number: float | None = None
-        if raw == "notAvailable":
-            value = "notAvailable"
+        if error is None:
+            first.set_result(None)
         else:
-            number = EnOceanDevice._parse_number(
-                raw,
-                minimum=0 if property_path == "batteryLevel" else None,
-                maximum=100 if property_path == "batteryLevel" else None,
-                integer=property_path == "dbm",
-            )
-            if number is None:
-                return True
-            value = number
-        cached = self._device_data.setdefault(device_id, {"deviceId": device_id})
-        cached[property_path] = value
-        if not retained:
-            self._record_live_fields(device_id, {(0, property_path)})
-        # A buffered older scalar must not overwrite this newer reading later.
-        self._device_stream_data.get(device_id, {}).pop(property_path, None)
-        if property_path == "dbm":
-            previous_dbm = device.dbm
-            device.dbm = None if number is None else int(number)
-            changed = previous_dbm != device.dbm
-        else:
-            channel = device.get_or_create_channel()
-            previous = channel.battery_level
-            device.update_from_telegram(
-                {"functions": [{"key": "batteryLevel", "value": value}]}
-            )
-            changed = previous != channel.battery_level
-        if changed:
-            signal = f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}"
-            self._mark_and_log_dispatch(
-                device,
-                "stream/device",
-                signal,
-                received_at,
-                received_at,
-                retained=retained,
-            )
-            async_dispatcher_send(self.hass, signal, device)
+            first.set_exception(error)
         return True
 
-    def _buffer_device_stream_property(
-        self,
-        device_id: str,
-        property_path: str,
-        payload: str,
-        received_at: float,
-        *,
-        retained: bool = False,
-    ) -> None:
-        """Collect indexed state metadata before applying its value and channel."""
-        # A window opened by a retained replay stays a replay window until a
-        # live message joins it (see _finalize_device_stream).
-        if not retained:
-            self._device_stream_replay_windows.discard(device_id)
-        elif device_id not in self._device_stream_data:
-            self._device_stream_replay_windows.add(device_id)
-        self._device_stream_received_at.setdefault(device_id, received_at)
-        stream_data = self._device_stream_data.setdefault(
-            device_id, {"deviceId": device_id}
+    @callback
+    def _handle_document(self, document: JsonObject) -> None:
+        """Apply one event stream document."""
+        header = as_object(document.get("header")) or {}
+        content = header.get("content")
+        if content == "devices":
+            self._apply_device_list(document, authoritative=True)
+        elif content == "device":
+            if (data := as_object(document.get("device"))) is not None:
+                # A single changed device is live feedback, unlike a list.
+                if isinstance(device_id := data.get("deviceId"), str):
+                    self._record_confirmed_feedback(
+                        device_id, protocol.device_state_functions(data)
+                    )
+                self._apply_device_object(
+                    data, authoritative=True, position_origin="reported"
+                )
+        elif content == "telegram":
+            if (telegram := as_object(document.get("telegram"))) is not None:
+                self._handle_telegram(telegram)
+        else:
+            _LOGGER.debug("Ignoring OPUS stream document of type %r", content)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Health probe and device list refresh
+    # ──────────────────────────────────────────────────────────────────────
+
+    @callback
+    def _async_health_tick(self, _now: datetime) -> None:
+        if self._probe_task is None or self._probe_task.done():
+            self._probe_task = self._create_task(self._async_probe(), "health probe")
+
+    async def _async_probe(self) -> None:
+        """Check that the gateway answers and detect gateway restarts."""
+        try:
+            uptime = gateway_uptime_value(await self.client.async_get("/system/uptime"))
+        except OpusAuthError:
+            self._handle_auth_failure()
+            return
+        except OpusApiError as err:
+            _LOGGER.debug("OPUS gateway %s health probe failed: %s", self.eag_id, err)
+            if self._gateway_available:
+                self._set_gateway_available(False)
+                # The open stream may be half open towards a rebooting gateway.
+                self._restart_stream()
+            return
+        previous = self.gateway_uptime
+        self.gateway_uptime = uptime
+        if previous is not None and float(uptime) < float(previous):
+            _LOGGER.info("OPUS gateway %s restarted; reopening its stream", self.eag_id)
+            self._restart_stream()
+        elif self._stream_connected and not self._gateway_available:
+            self._set_gateway_available(True)
+
+    @callback
+    def _async_refresh_tick(self, _now: datetime) -> None:
+        if self._refresh_task is None or self._refresh_task.done():
+            self._refresh_task = self._create_task(
+                self._async_refresh_device_list(), "device list refresh"
+            )
+
+    async def _async_load_profiles(self) -> None:
+        """Read one gateway profile per announced EEP combination.
+
+        The profile is static gateway data (no radio telegram). A failure only
+        means the EEP tables decide for these devices. Devices paired later
+        take a profile read here when their EEPs match, otherwise the tables;
+        a reload reads the profiles again.
+        """
+        samples: dict[tuple[str, ...], str] = {}
+        for device in self.devices.values():
+            signature = device.eep_names
+            if signature and signature not in self.profiles:
+                samples.setdefault(signature, device.device_id)
+        for signature, device_id in samples.items():
+            profile: DeviceProfile | None = None
+            try:
+                profile = protocol.device_profile(
+                    await self.client.async_get(
+                        OpusGatewayClient.device_path(device_id, "profile")
+                    )
+                )
+            except OpusAuthError:
+                raise
+            except OpusApiError as err:
+                _LOGGER.debug(
+                    "Could not read the OPUS profile of %s (%s): %s",
+                    device_id,
+                    ", ".join(signature),
+                    err,
+                )
+            self.profiles[signature] = profile
+        for device in self.devices.values():
+            device.profile = self.profiles.get(device.eep_names)
+
+    async def _async_refresh_device_list(self) -> None:
+        """Refresh metadata and discover newly paired devices."""
+        if not self.available:
+            return
+        requested_at = monotonic()
+        try:
+            document = await self.client.async_get("/devices")
+        except OpusApiError as err:
+            _LOGGER.debug("Could not refresh the OPUS device list: %s", err)
+            return
+        self._apply_device_list(
+            document, authoritative=False, requested_at=requested_at
         )
-        self._set_nested_property(stream_data, property_path, payload)
-        if cancel := self._pending_device_streams.get(device_id):
-            cancel()
 
-        @callback
-        def finalize_callback(_now: datetime) -> None:
-            self._finalize_device_stream(device_id)
+    # ──────────────────────────────────────────────────────────────────────
+    # Devices
+    # ──────────────────────────────────────────────────────────────────────
 
-        self._pending_device_streams[device_id] = async_call_later(
-            self.hass, DEVICE_STREAM_FINALIZE_DELAY, finalize_callback
+    @callback
+    def _apply_device_list(
+        self,
+        document: WireMapping,
+        *,
+        authoritative: bool,
+        requested_at: float | None = None,
+    ) -> None:
+        """Apply a complete device list.
+
+        ``authoritative`` lists (the start of every stream) carry the current
+        state. A periodic refresh only updates metadata, because the stream
+        may already have delivered newer state; ``requested_at`` is when that
+        refresh was requested (finding B-5).
+        """
+        devices = object_items(document.get("devices"))
+        for entry in devices:
+            data = as_object(entry.get("device", entry))
+            if data is not None:
+                self._apply_device_object(
+                    data, authoritative=authoritative, requested_at=requested_at
+                )
+        _LOGGER.debug("Applied OPUS device list with %d devices", len(devices))
+
+    @callback
+    def _apply_device_object(
+        self,
+        data: JsonObject,
+        *,
+        authoritative: bool,
+        requested_at: float | None = None,
+        position_origin: str = "device list",
+    ) -> None:
+        """Create or refresh one device from its gateway object.
+
+        A device list requested at ``requested_at`` keeps the signal strength
+        and last-seen time of a telegram received after that moment: the
+        telegram is newer than the list (finding B-5).
+        """
+        device_id = data.get("deviceId")
+        if not isinstance(device_id, str) or not device_id:
+            return
+        self._unknown_devices.pop(device_id, None)
+        existing = self.devices.get(device_id)
+        listed = EnOceanDevice(
+            device_id=device_id,
+            friendly_id=protocol.metadata_text(data.get("friendlyId")) or device_id,
+            eeps=object_items(data.get("eeps")),
+            manufacturer=protocol.metadata_text(data.get("manufacturer")),
+            physical_device=protocol.metadata_text(data.get("physicalDevice")),
+            first_seen=protocol.metadata_text(data.get("firstSeen")),
+            last_seen=protocol.metadata_text(data.get("lastSeen")),
+            dbm=EnOceanDevice._parse_integer(data.get("dbm")),
+        )
+        was_known = existing is not None and bool(existing.eeps)
+        if existing is None:
+            device = listed
+            device.profile = self.profiles.get(device.eep_names)
+        else:
+            # Update in place (REST phase 02, E6/B-4): channels, the last
+            # command error and update timestamps stay on the same object that
+            # entities and running commands hold.
+            device = existing
+            telegram_at = self._telegram_metadata_at.get(device_id)
+            newer_telegram = (
+                requested_at is not None
+                and telegram_at is not None
+                and telegram_at >= requested_at
+            )
+            device.apply_listed_metadata(listed, keep_signal=newer_telegram)
+            if device.profile is None:
+                device.profile = self.profiles.get(device.eep_names)
+            # A device list refreshes metadata and state, never a previous
+            # rocker occurrence.
+            device.clear_button_occurrence()
+        self._record_last_movement_times(device_id, data)
+        functions = (
+            protocol.device_state_functions(data)
+            if authoritative or existing is None
+            else protocol.configuration_functions(data)
+        )
+        if functions:
+            device.update_from_telegram({"functions": functions})
+            if authoritative or existing is None:
+                # The latency log measures from here, not from the device's
+                # last telegram.
+                device.last_update_source = "device list"
+                device.last_update_received_monotonic = monotonic()
+                device.last_update_dispatched_monotonic = (
+                    device.last_update_received_monotonic
+                )
+                self._note_position_origin(device, functions, position_origin)
+        self.devices[device_id] = device
+        if not was_known:
+            _LOGGER.info(
+                "Device discovered: %s (%s) - EEPs: %s - Type: %s",
+                device.friendly_id,
+                device_id,
+                [eep.get("eep") for eep in device.eeps],
+                device.entity_type,
+            )
+            async_dispatcher_send(
+                self.hass, f"{SIGNAL_DEVICE_DISCOVERED}_{self.eag_id}", device
+            )
+        else:
+            self._dispatch_state(device)
+
+    @callback
+    def _note_position_origin(
+        self, device: EnOceanDevice, functions: Sequence[WireFunction], origin: str
+    ) -> None:
+        """Record the origin of every position in ``functions``.
+
+        A numeric position records its origin. ``unknown`` keeps the last
+        known position (``EnOceanDevice.update_from_telegram``) and so its
+        origin as well. Diagnostics only.
+        """
+        default = protocol.channel_from_functions(functions)
+        for function in functions:
+            if function.get("key") != KEY_POSITION:
+                continue
+            if (
+                EnOceanDevice._parse_number(
+                    function.get("value"), minimum=0, maximum=100
+                )
+                is None
+            ):
+                continue
+            channel_id = protocol.function_channel(function, default)
+            channel = (
+                device.channels.get(channel_id) if channel_id is not None else None
+            )
+            if channel_id is None or channel is None or channel.position is None:
+                continue
+            self._position_origins[(device.device_id, channel_id)] = (
+                origin,
+                channel.position,
+            )
+
+    def position_origin(self, device_id: str, channel_id: int) -> str | None:
+        """Return where a channel's current position came from (diagnostics).
+
+        ``device list`` (a snapshot), ``reported`` (device report),
+        ``assumed`` (end of a travel estimate) or ``estimated``
+        (acknowledged command or a foreign command telegram). None without a
+        position. Never used for state, timers or queries.
+        """
+        device = self.devices.get(device_id)
+        channel = device.channels.get(channel_id) if device is not None else None
+        if channel is None or channel.position is None:
+            return None
+        recorded = self._position_origins.get((device_id, channel_id))
+        if recorded is None or recorded[1] != channel.position:
+            return "estimated"
+        return recorded[0]
+
+    @callback
+    def _record_last_movement_times(self, device_id: str, data: JsonObject) -> None:
+        """Keep the last run durations a device list reports (diagnostics)."""
+        if durations := protocol.last_vertical_movement_times(data):
+            self.last_vertical_movement_times.setdefault(device_id, {}).update(
+                durations
+            )
+
+    @callback
+    def async_forget_device(self, device_id: str) -> None:
+        """Discard only this child's state and queued work, without gateway writes."""
+        for did, channel_id in list(self._cover_movements):
+            if did == device_id:
+                self._clear_cover_movement(did, channel_id, notify=False)
+        self.devices.pop(device_id, None)
+        for runs in (self._cover_runs, self.last_cover_runs):
+            for run_key in [k for k in runs if k[0] == device_id]:
+                del runs[run_key]
+        self._telegram_metadata_at.pop(device_id, None)
+        self.last_vertical_movement_times.pop(device_id, None)
+        for origin_key in [k for k in self._position_origins if k[0] == device_id]:
+            del self._position_origins[origin_key]
+        self._cancel_reconciliation_queries(device_id)
+        for key in list(self._feedback_revisions):
+            if key[0] == device_id:
+                self._feedback_revisions.pop(key)
+        # Requests already queued for this device are dropped before sending.
+        self._device_generations[device_id] = (
+            self._device_generations.get(device_id, 0) + 1
+        )
+        async_dispatcher_send(
+            self.hass, f"{SIGNAL_DEVICE_REMOVED}_{self.eag_id}", device_id
         )
 
     @callback
-    def _finalize_device_stream(self, device_id: str) -> None:
-        """Finalize device stream delta processing."""
-        if device_id not in self._device_stream_data:
+    def _lookup_unknown_device(self, device_id: str) -> None:
+        """Fetch a device that reported before it appeared in a device list."""
+        now = monotonic()
+        last = self._unknown_devices.get(device_id)
+        if last is not None and now - last < UNKNOWN_DEVICE_RETRY_SECONDS:
+            return
+        self._unknown_devices[device_id] = now
+        self._create_task(self._async_lookup_device(device_id), "device lookup")
+
+    async def _async_lookup_device(self, device_id: str) -> None:
+        try:
+            document = await self.client.async_get(
+                OpusGatewayClient.device_path(device_id)
+            )
+        except OpusApiError as err:
+            _LOGGER.debug(
+                "OPUS device %s is not known to the gateway: %s", device_id, err
+            )
+            return
+        if (data := as_object(document.get("device"))) is not None:
+            self._apply_device_object(data, authoritative=True)
+
+    def get_device(self, device_id: str) -> EnOceanDevice | None:
+        """Get a device by ID."""
+        return self.devices.get(device_id)
+
+    def get_devices_by_type(self, entity_type: str) -> list[EnOceanDevice]:
+        """Get all devices of a specific entity type."""
+        return [
+            device
+            for device in self.devices.values()
+            if device.entity_type == entity_type
+        ]
+
+    @callback
+    def _dispatch_state(self, device: EnOceanDevice) -> None:
+        async_dispatcher_send(
+            self.hass,
+            f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device.device_id}",
+            device,
+        )
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Telegrams
+    # ──────────────────────────────────────────────────────────────────────
+
+    @callback
+    def _handle_telegram(self, telegram: JsonObject) -> None:
+        """Apply one radio telegram.
+
+        ``from`` telegrams are device reports. ``to`` telegrams are commands
+        the gateway sent: from HomeKit, the gateway's own logic or this
+        integration. Commands from elsewhere update state optimistically and
+        are verified by delayed status queries; this integration's own
+        commands are left to the entity, which applies its estimate after
+        the acknowledgement.
+        """
+        received_at = monotonic()
+        device_id = telegram.get("deviceId")
+        direction = telegram.get("direction")
+        if not isinstance(device_id, str) or direction not in ("from", "to"):
+            return
+        is_outbound = direction == "to"
+        if is_outbound and self._command_waiters.get(device_id):
             return
 
-        stream_data = self._device_stream_data.pop(device_id)
-        self._pending_device_streams.pop(device_id, None)
-        received_at = self._device_stream_received_at.pop(device_id, None)
-        replay_window = device_id in self._device_stream_replay_windows
-        self._device_stream_replay_windows.discard(device_id)
-        finalized_at = monotonic()
+        raw_functions = telegram.get("functions")
+        single = as_object(raw_functions)
+        functions: list[WireFunction] = [
+            function
+            for function in ([single] if single else object_items(raw_functions))
+            if isinstance(function.get("key"), str)
+            and function.get("value") is not None
+        ]
+        if is_outbound:
+            functions = protocol.outbound_state_functions(functions)
+            if not protocol.has_target_state(functions):
+                return
+            if self._is_own_echo(device_id, functions, received_at):
+                return
+        if not functions:
+            return
 
         device = self.devices.get(device_id)
-
-        cached_data = self._device_data.setdefault(device_id, {"deviceId": device_id})
-        self._merge_device_data(cached_data, stream_data)
-        if device is None or any(
-            key in stream_data for key in ("eeps", "friendlyId", "manufacturer")
-        ):
-            self._pending_devices.add(device_id)
-            if not self._discovery_timer:
-                self._discovery_timer = async_call_later(
-                    self.hass, 2, self._finalize_discovery
-                )
-            if device is None:
-                return
-
-        # Indexed device-model deltas may contain only states/N/value. Resolve
-        # their unchanged key/channel metadata from the accumulated snapshot.
-        state_delta: dict[str, object] = {
-            key: value for key, value in stream_data.items() if key != "configuration"
-        }
-        for container in INDEXED_STATE_CONTAINERS:
-            delta = stream_data.get(container)
-            cached = cached_data.get(container)
-            if isinstance(delta, list) and isinstance(cached, list):
-                cached_view: Sequence[object] = cached
-                if container == "transmitModes" and device.is_smoke_detector:
-                    cached_view = self._rwm_transmit_modes(cached)
-                state_delta[container] = self._indexed_changed_functions(
-                    delta, cached_view
-                )
-        functions = self._device_state_functions(state_delta)
-
-        configuration = as_object(stream_data.get("configuration"))
-        cached_configuration = as_object(cached_data.get("configuration"))
-        if configuration is not None and cached_configuration is not None:
-            configuration_view: dict[str, object] = dict(configuration)
-            parameters = as_list(configuration.get("parameters"))
-            cached_parameters = as_list(cached_configuration.get("parameters"))
-            if parameters is not None and cached_parameters is not None:
-                configuration_view["parameters"] = self._indexed_changed_functions(
-                    parameters,
-                    cached_parameters,
-                    default_channel=cached_configuration.get("channel", 0),
-                )
-            functions.extend(
-                self._configuration_state_functions(
-                    {
-                        "configuration": configuration_view,
-                    }
-                )
-            )
-
-        if functions:
-            self._log_latency_finalized(
-                "stream/device", device_id, received_at, finalized_at, len(functions)
-            )
-            if self._record_confirmed_feedback(
-                device_id, functions, live=not replay_window
-            ):
-                device.last_command_error = None
-            telegram = {"functions": functions}
-            device.update_from_telegram(telegram)
-
-            signal = f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}"
-            self._mark_and_log_dispatch(
-                device,
-                "stream/device",
-                signal,
-                received_at,
-                finalized_at,
-                retained=replay_window,
-            )
-            async_dispatcher_send(self.hass, signal, device)
-
-    # ──────────────────────────────────────────────────────────────────────
-    # GET answer handler (active discovery)
-    # ──────────────────────────────────────────────────────────────────────
-
-    @callback
-    def _handle_get_answer_devices(self, msg: ReceiveMessage) -> None:
-        """Handle getAnswer/devices response with device data."""
-        # RPC answers are responses to current requests, not retained snapshots.
-        # Replaying an old answer can restore stale state or rediscover a device
-        # that the gateway no longer reports. Retained stream/devices discovery
-        # remains supported by its separate handler.
-        if getattr(msg, "retain", False):
-            return
-        # The wildcard also receives profile/configuration responses, which are
-        # owned by request waiters and must never enter device discovery.
-        prefix = f"{TOPIC_BASE}/{self.eag_id}/getAnswer/devices"
-        if not (
-            msg.topic == prefix
-            or re.fullmatch(re.escape(prefix) + r"/[^/]+", msg.topic)
-        ):
-            return
-        try:
-            self._log_raw_mqtt_message("getAnswer/devices", msg)
-
-            payload = payload_text(msg.payload)
-
-            data = parse_json(payload)
-            response = as_object(data)
-            if response is not None and "header" in response:
-                decode_response(payload)
-
-            # Response may be a list of devices or a single device object
-            devices_list: JsonValue
-            if isinstance(data, list):
-                devices_list = data
-            elif response is not None:
-                # Could be a single device or a wrapper with device list
-                if "devices" in response:
-                    devices_list = response["devices"]
-                else:
-                    devices_list = [response]
-            else:
-                return
-
-            if not isinstance(devices_list, list):
-                return
-
-            for raw_device_data in devices_list:
-                device_object = as_object(raw_device_data)
-                if device_object is None:
-                    continue
-                device_data = as_object(device_object.get("device", device_object))
-                if device_data is None:
-                    continue
-                device_id = str(device_data.get("deviceId", ""))
-                if device_id:
-                    self._device_data[device_id] = device_data
-                    self._pending_devices.add(device_id)
-                    # Answers this session requested; a later retained replay
-                    # must not overwrite them in the cache before discovery
-                    # finalises. Applying them still follows the resync rule.
-                    self._record_live_fields(
-                        device_id,
-                        self._function_fields(
-                            self._device_state_functions(device_data)
-                        ),
-                    )
-
-            # Reset discovery timer
-            if self._discovery_timer:
-                self._discovery_timer()
-            self._discovery_timer = async_call_later(
-                self.hass, 2, self._finalize_discovery
-            )
-
-        except json.JSONDecodeError:
-            # Not JSON - might be a flattened property, ignore
-            pass
-        except Exception as err:
-            _LOGGER.exception("Error handling getAnswer/devices: %s", err)
-
-    @callback
-    def _handle_put_answer_state(self, msg: ReceiveMessage) -> None:
-        """Handle the protocol's asynchronous command acknowledgement."""
-        self._requests.async_route(msg)
-        if getattr(msg, "retain", False):
-            return
-        match = PUT_ANSWER_STATE_TOPIC_PATTERN.fullmatch(msg.topic)
-        if not match or match.group(1) != self.eag_id:
-            return
-
-        device_id = match.group(2)
-        payload = (
-            msg.payload.decode(errors="replace")
-            if isinstance(msg.payload, bytes)
-            else str(msg.payload)
-        )
-
-        status: int | None = None
-        error = "Gateway rejected the state command"
-        try:
-            response = decode_response(payload, require_status=True)
-            status = response_status(response)
-        except ValueError as err:
-            error = str(err)
-
-        device = self.get_device(device_id)
-        if status is not None and 200 <= status < 300:
-            _LOGGER.debug(
-                "OPUS command accepted for %s with HTTP status %d",
-                device_id,
-                status,
-            )
-            if device is not None and device.last_command_error is not None:
-                device.last_command_error = None
-                signal = f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}"
-                async_dispatcher_send(self.hass, signal, device)
-            return
-
-        _LOGGER.warning("OPUS command failed for %s: %s", device_id, error)
-
         if device is None:
+            self._lookup_unknown_device(device_id)
             return
 
-        device.last_command_error = error
-        self._cancel_reconciliation_queries(device_id)
-        signal = f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}"
-        async_dispatcher_send(self.hass, signal, device)
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Gateway system info
-    # ──────────────────────────────────────────────────────────────────────
-
-    @callback
-    def _handle_system_info(self, msg: ReceiveMessage) -> None:
-        """Handle gateway system info response."""
-        try:
-            payload = msg.payload
-            if isinstance(payload, bytes):
-                payload = payload.decode()
-            data = json.loads(payload)
-            if isinstance(data, dict) and data != self.gateway_info:
-                self.gateway_info = data
-                _LOGGER.debug(
-                    "Updated system information for OPUS gateway %s", self.eag_id
+        if not is_outbound:
+            self._record_confirmed_feedback(device_id, functions)
+        applied = functions
+        if is_outbound:
+            self._start_cover_runs(device, functions, received_at)
+            estimated = self._start_cover_commands(device, functions)
+            default = protocol.channel_from_functions(functions)
+            applied = [
+                function
+                for function in functions
+                if not (
+                    function.get("key") == KEY_POSITION
+                    and protocol.function_channel(function, default) in estimated
                 )
-        except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as err:
-            _LOGGER.debug("Could not parse system info: %s", err)
+                # A command target of "unknown" is no report of the device.
+                and not (
+                    function.get("key") in (KEY_POSITION, KEY_ANGLE)
+                    and function.get("value") == VALUE_UNKNOWN
+                )
+                and not _is_timed_parameter(function)
+            ]
+        update: dict[str, object] = {"functions": applied}
+        if not is_outbound:
+            # Only a received telegram tells when the device was last heard
+            # and how strong it was; sent telegrams report dbm 0.
+            update["timestamp"] = telegram.get("timestamp")
+            update["telegramInfo"] = telegram.get("telegramInfo")
+            self._telegram_metadata_at[device_id] = received_at
+        device.update_from_telegram(update)
+        # A foreign command is applied optimistically; a device report is
+        # feedback (diagnostics only).
+        self._note_position_origin(
+            device, applied, "estimated" if is_outbound else "reported"
+        )
+        if not is_outbound and protocol.has_operational_state(functions):
+            device.last_command_error = None
 
-    @callback
-    def _handle_system_uptime(self, msg: ReceiveMessage) -> None:
-        """Handle gateway uptime response."""
-        self._requests.async_route(msg)
-        try:
-            data = decode_response(msg.payload, require_status=True)
-            self.gateway_uptime = gateway_uptime_value(data)
-            _LOGGER.debug("Gateway uptime: %s", self.gateway_uptime)
-        except ValueError as err:
-            _LOGGER.debug("Could not parse system uptime: %s", err)
+        source = "telegram/to" if is_outbound else "telegram/from"
+        self._mark_and_log_dispatch(device, source, received_at, telegram)
+        self._dispatch_state(device)
+        # Event entities consume button fields synchronously during the
+        # dispatch above. Clear them so later dispatches cannot replay them.
+        device.clear_button_occurrence()
 
-    # ──────────────────────────────────────────────────────────────────────
-    # Shared helpers
-    # ──────────────────────────────────────────────────────────────────────
+        if is_outbound:
+            for channel_id, fields in protocol.command_fields_by_channel(
+                functions, device
+            ).items():
+                self._schedule_reconciliation_queries(
+                    device_id, channel_id, fields=fields
+                )
 
-    def _log_raw_mqtt_message(self, source: str, msg: ReceiveMessage) -> None:
-        """Log raw OPUS MQTT message details when debug logging is enabled."""
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
-        if source in ("stream/devices", "stream/device") and getattr(
-            msg, "retain", False
-        ):
-            # A startup replay can contain tens of thousands of properties.
-            # Discovery/finalization logs summarize these; retain live details.
-            return
-
-        payload = msg.payload
-        if isinstance(payload, bytes):
-            payload_text = payload.decode("utf-8", errors="replace")
+    def _is_own_echo(
+        self, device_id: str, functions: Sequence[WireFunction], now: float
+    ) -> bool:
+        """Consume a recent own command whose echo these functions are."""
+        sent = [
+            entry for entry in self._sent_commands.get(device_id, []) if entry[0] > now
+        ]
+        signature = protocol.command_signature(functions)
+        match = next((entry for entry in sent if entry[1] == signature), None)
+        if match is not None:
+            sent.remove(match)
+        if sent:
+            self._sent_commands[device_id] = sent
         else:
-            payload_text = str(payload)
-
-        if len(payload_text) > RAW_MQTT_DEBUG_PAYLOAD_LIMIT:
-            payload_text = (
-                f"{payload_text[:RAW_MQTT_DEBUG_PAYLOAD_LIMIT]}..."
-                f" [truncated {len(payload_text)} chars]"
-            )
-
-        _LOGGER.debug(
-            "Raw OPUS MQTT %s: topic=%s payload=%r",
-            source,
-            msg.topic,
-            payload_text,
-        )
-
-    def _duration_ms(self, start: float | None, end: float) -> str:
-        """Return a displayable millisecond duration."""
-        if start is None:
-            return "unknown"
-        return f"{(end - start) * 1000:.1f}"
-
-    def _log_latency_received(
-        self, source: str, device_id: str, property_path: str, received_at: float
-    ) -> None:
-        """Log the point where a valid MQTT state message enters the integration."""
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
-
-        _LOGGER.debug(
-            "OPUS update latency received: source=%s device_id=%s path=%s "
-            "received_at=%.6f",
-            source,
-            device_id,
-            property_path,
-            received_at,
-        )
-
-    def _log_latency_finalized(
-        self,
-        source: str,
-        device_id: str,
-        received_at: float | None,
-        finalized_at: float,
-        function_count: int,
-    ) -> None:
-        """Log when a debounced MQTT update has been converted to functions."""
-        if not _LOGGER.isEnabledFor(logging.DEBUG):
-            return
-
-        _LOGGER.debug(
-            "OPUS update latency finalized: source=%s device_id=%s "
-            "functions=%d receive_to_finalize_ms=%s",
-            source,
-            device_id,
-            function_count,
-            self._duration_ms(received_at, finalized_at),
-        )
+            self._sent_commands.pop(device_id, None)
+        return match is not None
 
     def _mark_and_log_dispatch(
         self,
         device: EnOceanDevice,
         source: str,
-        signal: str,
-        received_at: float | None,
-        finalized_at: float | None,
-        *,
-        retained: bool = False,
+        received_at: float,
+        telegram: WireMapping,
     ) -> None:
-        """Stamp a device update and log just before dispatcher notification.
-
-        A retained replay is not a live update: it keeps the last live receipt
-        time, which the rediscovery freshness rule compares with the resync
-        request. Otherwise a replay arriving after the request would suppress
-        the fresher snapshot answer.
-        """
-        dispatched_at = monotonic()
-        device.last_update_source = f"{source} (retained)" if retained else source
-        if not retained:
-            device.last_update_received_monotonic = received_at
-        device.last_update_finalized_monotonic = finalized_at
-        device.last_update_dispatched_monotonic = dispatched_at
-
+        """Stamp a device update and log the gateway-to-HA latency."""
+        device.last_update_source = source
+        device.last_update_received_monotonic = received_at
+        device.last_update_dispatched_monotonic = monotonic()
         if not _LOGGER.isEnabledFor(logging.DEBUG):
             return
-
+        sent_at = protocol.telegram_timestamp(telegram.get("timestamp"))
         _LOGGER.debug(
-            "OPUS update latency dispatch: source=%s device_id=%s "
-            "friendly_id=%s signal=%s receive_to_dispatch_ms=%s "
-            "finalize_to_dispatch_ms=%s",
+            "OPUS %s %s (%s): %s gateway_to_ha_ms=%s",
             source,
-            device.device_id,
             device.friendly_id,
-            signal,
-            self._duration_ms(received_at, dispatched_at),
-            self._duration_ms(finalized_at, dispatched_at),
+            device.device_id,
+            telegram.get("functions"),
+            "unknown" if sent_at is None else f"{(time() - sent_at) * 1000:.0f}",
         )
 
-    def _find_device_by_id(self, device_id: str) -> tuple[str, EnOceanDevice] | None:
-        """Find an existing device by its stable EURID."""
-        if (device := self.devices.get(device_id)) is None:
-            return None
-        return device_id, device
-
-    def _apply_known_device_state_property(
-        self,
-        device_id: str,
-        property_path: str,
-        payload: str,
-        received_at: float | None = None,
-        *,
-        retained: bool = False,
-    ) -> bool:
-        """Apply stream/devices state updates immediately for known devices.
-
-        stream/devices is primarily a startup snapshot, but some bridges may also
-        publish local-control state there. Once a device is known, state updates
-        should not wait on the discovery debounce.
-        """
-        if not property_path.startswith("states/"):
-            return False
-
-        device_entry = self._find_device_by_id(device_id)
-        if device_entry is None:
-            return False
-
-        state_key = property_path.removeprefix("states/").split("/", 1)[0]
-        if state_key in BUTTON_KEYS:
-            # Device-model state is cached and may be retained. Only incoming
-            # radio telegrams represent a new rocker occurrence.
-            return True
-        if state_key not in KNOWN_STATE_KEYS:
-            return False
-
-        _, device = device_entry
-        value = self._parse_value(payload)
-        if self._record_confirmed_feedback(
-            device_id, [{"key": state_key, "value": value}], live=not retained
-        ):
-            device.last_command_error = None
-        device.update_from_telegram(
-            {
-                "functions": [
-                    {
-                        "key": state_key,
-                        "value": value,
-                    }
-                ]
-            }
-        )
-
-        signal = f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}"
-        self._log_latency_finalized(
-            "stream/devices", device_id, received_at, received_at or monotonic(), 1
-        )
-        self._mark_and_log_dispatch(
-            device,
-            "stream/devices",
-            signal,
-            received_at,
-            received_at,
-            retained=retained,
-        )
-        _LOGGER.debug(
-            "Fast stream/devices state update for %s: %s=%r",
-            device_id,
-            state_key,
-            value,
-        )
-        async_dispatcher_send(self.hass, signal, device)
-        return True
-
-    def _dispatch_cover_estimate(self, device_id: str) -> None:
-        if (device := self.get_device(device_id)) is not None:
-            async_dispatcher_send(
-                self.hass,
-                f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}",
-                device,
-            )
+    # ──────────────────────────────────────────────────────────────────────
+    # Cover travel estimates
+    # ──────────────────────────────────────────────────────────────────────
 
     def _clear_cover_movement(
         self, device_id: str, channel_id: int, *, notify: bool = True
@@ -1323,11 +1081,15 @@ class OpusGreenNetCoordinator:
             movement.cancel()
         if (device := self.get_device(device_id)) is not None:
             device.get_or_create_channel(channel_id).movement = None
-        if notify:
-            self._dispatch_cover_estimate(device_id)
+            if notify:
+                self._dispatch_state(device)
 
     def _start_cover_movement(
-        self, device: EnOceanDevice, channel_id: int, target: int
+        self,
+        device: EnOceanDevice,
+        channel_id: int,
+        target: int,
+        via: int | None = None,
     ) -> CoverMovement | None:
         channel = device.get_or_create_channel(channel_id)
         key = (device.device_id, channel_id)
@@ -1335,7 +1097,7 @@ class OpusGreenNetCoordinator:
         if previous is not None and previous.target == target:
             # An outbound echo must not extend the same movement's deadline.
             # A repeated local request must also suppress the entity's target
-            # assignment after its ACK, just like the first request does.
+            # assignment after its acknowledgement, like the first request.
             channel.state_revision += 1
             return previous
         current: float | None = channel.position
@@ -1351,26 +1113,36 @@ class OpusGreenNetCoordinator:
         full_time = channel.vertical_movement_time
         if full_time is None or full_time <= 0:
             return None
-        travel = (
-            full_time if current is None else abs(target - current) / 100 * full_time
-        )
+        if via is not None:
+            # Reference run: first to the end position ``via``, then back.
+            first_leg = (
+                full_time if current is None else abs(via - current) / 100 * full_time
+            )
+            travel = first_leg + abs(target - via) / 100 * full_time
+        else:
+            travel = (
+                full_time
+                if current is None
+                else abs(target - current) / 100 * full_time
+            )
         if travel == 0:
-            self._dispatch_cover_estimate(device.device_id)
+            self._dispatch_state(device)
             return None
-        # A replacement must stop old status queries before waiting for its ACK.
-        # Keep other unconfirmed fields (e.g. tilt) for the replacement schedule.
+        # A replacement must stop old status queries before waiting for its
+        # acknowledgement. Keep other unconfirmed fields (e.g. tilt).
         pending = self._pending_reconciliation_fields.get(key, set())
         self._cancel_reconciliation_queries(device.device_id, channel_id)
         if pending:
             self._pending_reconciliation_fields[key] = pending
             self._pending_reconciliation_queries[key] = []
+        first_target = target if via is None else via
         channel.movement = (
             "closing"
-            if (target > 50 if current is None else target > current)
+            if (first_target > 50 if current is None else first_target > current)
             else "opening"
         )
-        # Prevent an entity awaiting its command ACK from replacing the last
-        # reported position with the target while the cover is still travelling.
+        # Prevent an entity awaiting its acknowledgement from replacing the
+        # last reported position with the target while the cover travels.
         channel.state_revision += 1
         movement = CoverMovement(current, target, now, travel)
         self._cover_movements[key] = movement
@@ -1382,7 +1154,7 @@ class OpusGreenNetCoordinator:
         movement.cancel = async_call_later(
             self.hass, travel + COVER_MOVEMENT_GRACE_SECONDS, finished
         )
-        self._dispatch_cover_estimate(device.device_id)
+        self._dispatch_state(device)
         return movement
 
     def _finish_cover_movement(
@@ -1391,8 +1163,8 @@ class OpusGreenNetCoordinator:
         if self._cover_movements.get((device_id, channel_id)) is not movement:
             return
         movement.elapsed = True
-        # Very short travel can end before the request's acknowledgement timeout.
-        # Keep the estimate cancellable and never assume an unaccepted target.
+        # Very short travel can end before the acknowledgement arrives. Keep
+        # the estimate cancellable and never assume an unaccepted target.
         if not movement.accepted:
             return
         device = self.get_device(device_id)
@@ -1401,7 +1173,11 @@ class OpusGreenNetCoordinator:
             channel = device.get_or_create_channel(channel_id)
             channel.position = movement.target  # Assumed, not physical feedback.
             channel.state_revision += 1
-            self._dispatch_cover_estimate(device_id)
+            self._position_origins[(device_id, channel_id)] = (
+                "assumed",
+                movement.target,
+            )
+            self._dispatch_state(device)
 
     def _start_cover_commands(
         self, device: EnOceanDevice | None, functions: Sequence[WireFunction]
@@ -1409,28 +1185,165 @@ class OpusGreenNetCoordinator:
         started: dict[int, CoverMovement] = {}
         if device is None or device.entity_type != "cover":
             return started
-        default = self._channel_from_functions(functions)
+        default = protocol.channel_from_functions(functions)
+        repositioning = next(
+            (
+                function.get("value")
+                for function in functions
+                if function.get("key") == KEY_REPOSITIONING
+            ),
+            None,
+        )
+        via = {REPOSITIONING_FIRST_UP: 0, REPOSITIONING_FIRST_DOWN: 100}.get(
+            repositioning if isinstance(repositioning, str) else ""
+        )
         for function in functions:
-            channel = EnOceanDevice._parse_number(
-                function.get("channel", default), minimum=0, integer=True
-            )
-            if channel is None:
+            channel_id = protocol.function_channel(function, default)
+            if channel_id is None:
                 continue
-            channel_id = int(channel)
             if function.get("key") == KEY_STOP and function.get("value") == "true":
                 self._clear_cover_movement(device.device_id, channel_id)
                 self._cancel_reconciliation_queries(device.device_id, channel_id)
-            elif function.get("key") == "position":
-                target = EnOceanDevice._parse_number(
-                    function.get("value"), minimum=0, maximum=100, integer=True
+            elif function.get("key") == KEY_POSITION:
+                target = EnOceanDevice._parse_integer(
+                    function.get("value"), minimum=0, maximum=100
                 )
                 if target is not None:
                     movement = self._start_cover_movement(
-                        device, channel_id, int(target)
+                        device, channel_id, target, via
                     )
                     if movement is not None:
                         started[channel_id] = movement
         return started
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Feedback and delayed status checks
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _record_confirmed_feedback(
+        self, device_id: str, functions: Sequence[WireFunction]
+    ) -> bool:
+        """Confirm only reported fields on their own channel."""
+        self._finish_cover_runs(device_id, functions)
+        confirmed = protocol.confirmed_fields_by_channel(functions)
+        for channel_id, fields in confirmed.items():
+            if KEY_POSITION in fields:
+                self._clear_cover_movement(device_id, channel_id, notify=False)
+            for field in fields:
+                key = (device_id, channel_id, field)
+                self._feedback_revisions[key] = self._feedback_revisions.get(key, 0) + 1
+            pending_key = (device_id, channel_id)
+            expected = self._pending_reconciliation_fields.get(pending_key)
+            if expected is not None:
+                expected.difference_update(fields)
+            if not expected:
+                self._cancel_reconciliation_queries(device_id, channel_id)
+        return bool(confirmed)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Cover run times
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _start_cover_runs(
+        self,
+        device: EnOceanDevice | None,
+        functions: Sequence[WireFunction],
+        started_at: float,
+    ) -> None:
+        """Start timing every cover position command in ``functions``.
+
+        A stop ends the timing without a result; a new target replaces it.
+        """
+        if device is None or device.entity_type != "cover":
+            return
+        default = protocol.channel_from_functions(functions)
+        repositioning = next(
+            (
+                value
+                for function in functions
+                if function.get("key") == KEY_REPOSITIONING
+                and isinstance(value := function.get("value"), str)
+            ),
+            None,
+        )
+        for function in functions:
+            channel_id = protocol.function_channel(function, default)
+            if channel_id is None:
+                continue
+            key = (device.device_id, channel_id)
+            if function.get("key") == KEY_STOP:
+                self._cover_runs.pop(key, None)
+            elif (
+                function.get("key") == KEY_POSITION
+                and (
+                    target := EnOceanDevice._parse_integer(
+                        function.get("value"), minimum=0, maximum=100
+                    )
+                )
+                is not None
+            ):
+                channel = device.channels.get(channel_id)
+                self._cover_runs[key] = CoverRun(
+                    channel.position if channel is not None else None,
+                    target,
+                    repositioning,
+                    started_at,
+                )
+
+    def _mark_cover_runs_queried(self, device_id: str, channel_id: int) -> None:
+        """A status query answers with the position, not the arrival time."""
+        if (run := self._cover_runs.get((device_id, channel_id))) is not None:
+            run.queried = True
+
+    def _finish_cover_runs(
+        self, device_id: str, functions: Sequence[WireFunction]
+    ) -> None:
+        """Finish timed runs with a reported position at their target."""
+        if not self._cover_runs:
+            return
+        now = monotonic()
+        default = protocol.channel_from_functions(functions)
+        for function in functions:
+            if function.get("key") != KEY_POSITION:
+                continue
+            channel_id = protocol.function_channel(function, default)
+            position = EnOceanDevice._parse_integer(
+                function.get("value"), minimum=0, maximum=100
+            )
+            if channel_id is None or position is None:
+                continue
+            key = (device_id, channel_id)
+            run = self._cover_runs.get(key)
+            if run is None:
+                continue
+            seconds = now - run.started_at
+            if seconds > COVER_RUN_TIMEOUT_SECONDS:
+                del self._cover_runs[key]
+                continue
+            if abs(position - run.target) > COVER_RUN_TARGET_TOLERANCE:
+                continue  # an intermediate report, e.g. at a reference end
+            del self._cover_runs[key]
+            if run.queried:
+                _LOGGER.debug(
+                    "OPUS cover %s channel %s reached %s %% after a status "
+                    "query; no run time recorded",
+                    device_id,
+                    key[1],
+                    position,
+                )
+                continue
+            run.seconds = round(seconds, 2)
+            run.finished_at = dt_util.utcnow().isoformat()
+            self.last_cover_runs[key] = run
+            _LOGGER.info(
+                "OPUS cover %s channel %s: %s run from %s %% to %s %% took %.1f s",
+                device_id,
+                key[1],
+                run.direction,
+                "?" if run.start_position is None else run.start_position,
+                position,
+                run.seconds,
+            )
 
     def _cancel_reconciliation_queries(
         self, device_id: str, channel_id: int | None = None
@@ -1445,8 +1358,8 @@ class OpusGreenNetCoordinator:
             self._pending_reconciliation_fields.pop(key, None)
             for cancel in self._pending_reconciliation_queries.pop(key, []):
                 cancel()
-        # A check already waiting in the send queue is superseded as well;
-        # it is dropped before publish unless a later timer wants it again.
+        # A check already waiting in the queue is superseded as well; it is
+        # dropped before sending unless a later timer wants it again.
         self._reconcile_needed.difference_update(
             {
                 key
@@ -1471,7 +1384,7 @@ class OpusGreenNetCoordinator:
             self._pending_reconciliation_fields[key] = expected
 
         delays: tuple[float, ...] = OUTBOUND_STATE_RECONCILIATION_DELAYS
-        if "position" in expected and (movement := self._cover_movements.get(key)):
+        if KEY_POSITION in expected and (movement := self._cover_movements.get(key)):
             remaining = max(0.0, movement.ends_at - monotonic())
             delays = tuple(remaining + delay for delay in COVER_RECONCILIATION_DELAYS)
         for delay in delays:
@@ -1493,10 +1406,11 @@ class OpusGreenNetCoordinator:
                     return
                 self._reconcile_needed.add((did, channel))
                 if (did, channel) in self._reconciling:
-                    # Coalesce: one queued background query per channel is
-                    # enough; never pile up behind a command burst.
+                    # Coalesce: one queued background query per channel.
                     return
-                self._create_task(self._async_reconcile_status(did, channel))
+                self._create_task(
+                    self._async_reconcile_status(did, channel), "status check"
+                )
 
             self._pending_reconciliation_queries[key].append(
                 async_call_later(self.hass, delay, query_callback)
@@ -1509,7 +1423,7 @@ class OpusGreenNetCoordinator:
         self._reconciling.add(key)
 
         def still_needed() -> bool:
-            # Evaluated once, immediately before publish. Consuming the flag
+            # Evaluated once, immediately before sending. Consuming the flag
             # lets a timer firing during the in-flight query start a new one.
             if key not in self._reconcile_needed:
                 return False
@@ -1532,1076 +1446,76 @@ class OpusGreenNetCoordinator:
         finally:
             self._reconciling.discard(key)
 
-    @staticmethod
-    def _channel_from_functions(functions: Sequence[WireFunction]) -> int | None:
-        """Return the telegram channel selector, defaulting to channel zero."""
-        for function in functions:
-            if function.get("key") != KEY_CHANNEL:
-                continue
-            value = EnOceanDevice._parse_number(
-                function.get("value"), minimum=0, integer=True
-            )
-            return int(value) if value is not None else None
-        return 0
-
-    def _set_nested_property(self, data: JsonObject, path: str, value: str) -> None:
-        """Set a nested property in a dict using a path like 'eeps/0/eep'."""
-        parts = path.split("/")
-        if len(parts) > 16 or any(
-            not part or (part.isdigit() and int(part) > 255) for part in parts
-        ):
-            raise ValueError("Invalid or oversized MQTT property path")
-        # Gateways can mix named state updates with an indexed snapshot. Keep
-        # the snapshot's layout and update its matching function in place.
-        if (
-            len(parts) == 2
-            and parts[0] == "states"
-            and not parts[1].isdigit()
-            and isinstance(states := data.get("states"), list)
-        ):
-            for function in states:
-                if isinstance(function, dict) and function.get("key") == parts[1]:
-                    function["value"] = self._parse_value(value)
-                    return
-            states.append({"key": parts[1], "value": self._parse_value(value)})
-            return
-        # Walk/create the containers along the path. A container conflict
-        # (e.g. a key into a list or a scalar in the middle of the path) raises
-        # ValueError without mutating anything; the message handlers log and
-        # drop such a property exactly where the untyped walk failed before.
-        current: JsonObject | JsonList = data
-        for i, part in enumerate(parts[:-1]):
-            child: JsonValue
-            if parts[i + 1].isdigit():
-                if not isinstance(current, dict):
-                    raise ValueError(f"MQTT property path conflicts at {part!r}")
-                if part not in current:
-                    current[part] = []
-                child = current[part]
-            elif part.isdigit():
-                # This is an array index
-                if not isinstance(current, list):
-                    raise ValueError(f"MQTT property path conflicts at {part!r}")
-                idx = int(part)
-                while len(current) <= idx:
-                    current.append({})
-                child = current[idx]
-            else:
-                if not isinstance(current, dict):
-                    raise ValueError(f"MQTT property path conflicts at {part!r}")
-                if part not in current:
-                    current[part] = {}
-                child = current[part]
-            if not isinstance(child, dict | list):
-                raise ValueError(f"MQTT property path conflicts at {part!r}")
-            current = child
-
-        # Set the final value
-        final_key = parts[-1]
-        if final_key.isdigit():
-            idx = int(final_key)
-            if isinstance(current, dict):
-                # An index below an existing object (e.g. an unknown numeric
-                # top-level property) was previously stored under an integer
-                # key once the object had more entries than the index. JSON
-                # object keys are strings, so the same entry is kept under
-                # the index text; diagnostics serialise it identically.
-                if len(current) <= idx:
-                    raise ValueError(f"MQTT property path conflicts at {final_key!r}")
-                current[str(idx)] = self._parse_value(value)
-                return
-            while len(current) <= idx:
-                current.append(None)
-            current[idx] = self._parse_value(value)
-        else:
-            if not isinstance(current, dict):
-                raise ValueError(f"MQTT property path conflicts at {final_key!r}")
-            current[final_key] = self._parse_value(value)
-
-    def _parse_value(self, value: str) -> JsonScalar:
-        """Parse a string value to appropriate type."""
-        if value.startswith('"'):
-            try:
-                decoded = json.loads(value)
-            except ValueError:
-                pass
-            else:
-                if isinstance(decoded, str):
-                    value = decoded
-        if value.lower() == "true":
-            return True
-        if value.lower() == "false":
-            return False
-        try:
-            return int(value)
-        except ValueError:
-            pass
-        try:
-            return float(value)
-        except ValueError:
-            pass
-        return value
-
-    @staticmethod
-    def _merge_device_data(target: JsonObject, delta: JsonObject) -> None:
-        """Preserve metadata while assembling separately arriving device deltas."""
-        for key, value in delta.items():
-            existing = target.get(key)
-            if isinstance(value, dict) and isinstance(existing, dict):
-                OpusGreenNetCoordinator._merge_device_data(existing, value)
-            elif isinstance(value, list) and isinstance(existing, list):
-                for index, entry in enumerate(value):
-                    if index >= len(existing):
-                        existing.append(entry)
-                        continue
-                    current = existing[index]
-                    if isinstance(entry, dict) and isinstance(current, dict):
-                        OpusGreenNetCoordinator._merge_device_data(current, entry)
-                    else:
-                        existing[index] = entry
-            else:
-                target[key] = value
-
     # ──────────────────────────────────────────────────────────────────────
-    # Device discovery finalization
+    # Requests
     # ──────────────────────────────────────────────────────────────────────
 
-    @callback
-    def _finalize_discovery(self, *_args: object) -> None:
-        """Finalize device discovery after receiving all properties."""
-        self._discovery_timer = None
-        _LOGGER.info(
-            "Finalizing device discovery, found %d devices", len(self._device_data)
-        )
+    def _request_error(self, err: OpusApiError, device_id: str) -> HomeAssistantError:
+        """Translate a transport failure for one request."""
+        if isinstance(err, OpusAuthError):
+            self._handle_auth_failure()
+            return request_error("request_rejected", device_id, str(err))
+        if isinstance(err, OpusTimeoutError):
+            return request_error("request_timeout", device_id)
+        if isinstance(err, OpusConnectionError):
+            return request_error("gateway_unavailable", device_id)
+        reason = err.reason if isinstance(err, OpusResponseError) else str(err)
+        return request_error("request_rejected", device_id, reason)
 
-        for device_id, data in self._device_data.items():
-            if device_id in self._pending_devices:
-                self._pending_devices.discard(device_id)
-                self._create_device_from_data(device_id, data)
-
-        self._discovery_complete = True
-
-    def _create_device_from_data(self, device_id: str, data: JsonObject) -> None:
-        """Create an EnOceanDevice from collected property data."""
-        try:
-            friendly_id = _metadata_text(data.get("friendlyId", device_id))
-            existing_entry = self._find_device_by_id(device_id)
-            existing_device = existing_entry[1] if existing_entry else None
-
-            # Build EEPs list
-            eeps: list[JsonObject] = []
-            eeps_data = data.get("eeps", {})
-            if isinstance(eeps_data, list):
-                # Object entries keep their order; other entry types are dropped.
-                eeps = object_items(eeps_data)
-            elif isinstance(eeps_data, dict):
-                for idx in sorted(eeps_data, key=_index_sort_key):
-                    eep_entry = eeps_data[idx]
-                    if isinstance(eep_entry, dict):
-                        eeps.append(eep_entry)
-                    elif isinstance(eep_entry, str):
-                        eeps.append({"eep": eep_entry})
-
-            is_new = existing_device is None
-            was_incomplete = existing_device is not None and not existing_device.eeps
-
-            device = EnOceanDevice(
-                device_id=device_id,
-                friendly_id=friendly_id,
-                eeps=eeps,
-                manufacturer=_metadata_text(data.get("manufacturer", "")),
-                physical_device=_metadata_text(data.get("physicalDevice", "")),
-                first_seen=str(data.get("firstSeen", "")),
-                last_seen=str(data.get("lastSeen", "")),
-                dbm=EnOceanDevice._parse_integer(data.get("dbm")),
-            )
-
-            # Preserve existing channel state or apply initial state from discovery
-            rotation_functions = []
-            if existing_device is not None:
-                device.channels = existing_device.channels
-                # Discovery refreshes metadata/state, never a previous rocker
-                # occurrence. Clear transients before notifying existing entities.
-                device.update_from_telegram({"functions": []})
-                device.profile = existing_device.profile
-                device.last_update_source = existing_device.last_update_source
-                device.last_update_received_monotonic = (
-                    existing_device.last_update_received_monotonic
-                )
-                device.last_update_finalized_monotonic = (
-                    existing_device.last_update_finalized_monotonic
-                )
-                device.last_update_dispatched_monotonic = (
-                    existing_device.last_update_dispatched_monotonic
-                )
-                device.last_command_error = existing_device.last_command_error
-                if self._resync_requested_at is not None and (
-                    existing_device.last_update_received_monotonic is None
-                    or existing_device.last_update_received_monotonic
-                    <= self._resync_requested_at
-                ):
-                    self._apply_initial_state(device, data)
-                # Refresh configuration without replacing newer position/state
-                # values with a potentially stale discovery snapshot.
-                rotation_functions = [
-                    function
-                    for function in self._device_state_functions(data)
-                    if function.get("key") in (KEY_CHANNEL, KEY_ROTATION_TIME)
-                ]
-                if any(f.get("key") == KEY_ROTATION_TIME for f in rotation_functions):
-                    device.update_from_telegram({"functions": rotation_functions})
-            else:
-                self._apply_initial_state(device, data)
-
-            self.devices[device_id] = device
-
-            _LOGGER.info(
-                "Device %s: %s (%s) - EEPs: %s - Type: %s",
-                "discovered" if is_new else "updated",
-                friendly_id,
-                device_id,
-                [eep.get("eep") if isinstance(eep, dict) else eep for eep in eeps],
-                device.entity_type,
-            )
-
-            # Send discovery signal for new devices or devices that were incomplete
-            if is_new or was_incomplete:
-                async_dispatcher_send(
-                    self.hass,
-                    f"{SIGNAL_DEVICE_DISCOVERED}_{self.eag_id}",
-                    device,
-                )
-            else:
-                async_dispatcher_send(
-                    self.hass,
-                    f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}",
-                    device,
-                )
-
-        except Exception as err:
-            _LOGGER.exception("Error creating device from data: %s", err)
-
-    @staticmethod
-    def _indexed_changed_functions(
-        delta: Sequence[object],
-        cached: Sequence[object],
-        *,
-        default_channel: object = 0,
-    ) -> list[WireFunction]:
-        """Attach cached channel context to changed indexed values only."""
-        changed_indices = {
-            index
-            for index, function in enumerate(delta)
-            if isinstance(function, dict) and ("value" in function or "key" in function)
-        }
-        changed: list[WireFunction] = []
-        channel = default_channel
-        for index, function in enumerate(cached):
-            if not isinstance(function, dict):
-                continue
-            if function.get("key") == KEY_CHANNEL:
-                channel = function.get("value")
-            elif index in changed_indices:
-                changed.append({"channel": channel, **function})
-        return changed
-
-    @staticmethod
-    def _configuration_state_functions(data: WireMapping) -> list[WireFunction]:
-        """Read reported cover movement times, never parameter defaults."""
-        configuration = data.get("configuration")
-        if not isinstance(configuration, dict):
-            return []
-        parameters = configuration.get("parameters")
-        if not isinstance(parameters, list):
-            return []
-        channel = configuration.get("channel", 0)
-        functions: list[WireFunction] = []
-        for parameter in parameters:
-            if not isinstance(parameter, dict):
-                continue
-            if parameter.get("key") == KEY_CHANNEL:
-                channel = parameter.get("value")
-            elif (
-                parameter.get("key") in (KEY_ROTATION_TIME, KEY_VERTICAL_MOVEMENT_TIME)
-                and "value" in parameter
-            ):
-                functions.append({"channel": channel, **parameter})
-        return functions
-
-    @staticmethod
-    def _device_state_functions(data: WireMapping) -> list[WireFunction]:
-        """Read function arrays and both OPUS device-state representations."""
-        state = data.get("state", {})
-        states = data.get("states", {})
-        sources = [state.get("functions", [])] if isinstance(state, dict) else []
-        sources.append(states)
-        state_functions = []
-        for functions in sources:
-            if isinstance(functions, dict):
-                functions = [
-                    functions[index]
-                    for index in sorted(
-                        functions,
-                        key=lambda key: (
-                            (0, int(key)) if str(key).isdigit() else (1, str(key))
-                        ),
-                    )
-                ]
-            if isinstance(functions, list):
-                complete = [
-                    function
-                    for function in functions
-                    if isinstance(function, dict)
-                    and isinstance(function.get("key"), str)
-                    and function["key"] not in BUTTON_KEYS
-                    and "value" in function
-                ]
-                if complete:
-                    state_functions = complete
-                    break
-        if not state_functions and isinstance(states, dict):
-            state_functions = [
-                {"key": key, "value": value}
-                for key, value in states.items()
-                if (key in KNOWN_STATE_KEYS or key == KEY_CHANNEL)
-                and key not in BUTTON_KEYS
-            ]
-        modes = data.get("transmitModes", [])
-        eeps = data.get("eeps", [])
-        if (
-            isinstance(eeps, list)
-            and any(
-                isinstance(eep, dict) and eep.get("eep") == "F6-05-02" for eep in eeps
-            )
-            and isinstance(modes, list)
+    def _check_request_valid(self, device_id: str, generation: tuple[int, int]) -> None:
+        outage, device_generation = generation
+        if self._unloaded or device_generation != self._device_generations.get(
+            device_id, 0
         ):
-            modes = OpusGreenNetCoordinator._rwm_transmit_modes(modes)
-        if isinstance(modes, list):
-            state_functions.extend(
-                function
-                for function in modes
-                if isinstance(function, dict)
-                and function.get("key") in ("alarm", "smokeAlarm", "batteryLow")
-                and "value" in function
-            )
-        if "batteryLevel" in data:
-            state_functions.append(
-                {"key": "batteryLevel", "value": data["batteryLevel"]}
-            )
-        return state_functions + OpusGreenNetCoordinator._configuration_state_functions(
-            data
-        )
+            raise request_error("request_cancelled", device_id)
+        if not self.available or outage != self._outage_generation:
+            raise request_error("gateway_unavailable", device_id)
 
-    @staticmethod
-    def _rwm_transmit_modes(modes: Sequence[object]) -> list[object]:
-        """Resolve the RWM's documented value-only slots, scoped to F6-05-02."""
-        keys = ("smokeAlarm", "batteryLow")
-        resolved = []
-        for index, mode in enumerate(modes):
-            if not isinstance(mode, dict):
-                resolved.append(mode)
-                continue
-            entry = dict(mode)
-            if index < len(keys) and entry.get("key") in (None, ""):
-                entry["key"] = keys[index]
-            resolved.append(entry)
-        return resolved
+    def _request_generation(self, device_id: str) -> tuple[int, int]:
+        """Identify the device and connection state a request was queued for."""
+        return (self._outage_generation, self._device_generations.get(device_id, 0))
 
-    @staticmethod
-    def _has_operational_state(functions: Sequence[WireFunction]) -> bool:
-        """Require usable actuator feedback, not interim values or metadata."""
-        return bool(OpusGreenNetCoordinator._confirmed_fields_by_channel(functions))
-
-    @staticmethod
-    def _confirmed_fields_by_channel(
-        functions: Sequence[WireFunction],
-    ) -> dict[int, set[str]]:
-        """Validate the fields that can confirm an actuator command."""
-        default = OpusGreenNetCoordinator._channel_from_functions(functions)
-        confirmed: dict[int, set[str]] = {}
-        for function in functions:
-            key, value = function.get("key"), function.get("value")
-            if key in ("dimValue", "position", "angle", "temperatureSetpoint"):
-                maximum = 40 if key == "temperatureSetpoint" else 100
-                valid = (
-                    EnOceanDevice._parse_number(
-                        value,
-                        minimum=0,
-                        maximum=maximum,
-                        integer=key != "temperatureSetpoint",
-                    )
-                    is not None
-                )
-            elif key == "switch":
-                valid = value in ("on", "off")
-            elif key == "heaterMode":
-                valid = value in ("heating", "on", "off", "autoOff")
-            else:
-                continue
-            channel = EnOceanDevice._parse_number(
-                function.get("channel", default), minimum=0, integer=True
-            )
-            if valid and channel is not None:
-                confirmed.setdefault(int(channel), set()).add(key)
-        return confirmed
-
-    @staticmethod
-    def _command_fields_by_channel(
-        functions: Sequence[WireFunction],
-        device: EnOceanDevice | None = None,
-    ) -> dict[int, set[str]]:
-        """Stop needs final position/tilt feedback, not an estimated position."""
-        expected = OpusGreenNetCoordinator._confirmed_fields_by_channel(functions)
-        default = OpusGreenNetCoordinator._channel_from_functions(functions)
-        for function in functions:
-            if function.get("key") != KEY_STOP or function.get("value") != "true":
-                continue
-            channel = EnOceanDevice._parse_number(
-                function.get("channel", default), minimum=0, integer=True
-            )
-            if channel is None:
-                continue
-            channel_id = int(channel)
-            fields = expected.setdefault(channel_id, set())
-            fields.add("position")
-            if device is not None and device.supports_tilt_for_channel(channel_id):
-                fields.add("angle")
-        return expected
-
-    def _record_confirmed_feedback(
+    async def _async_radio_request(
         self,
         device_id: str,
-        functions: Sequence[WireFunction],
+        request: Callable[[], Coroutine[object, object, JsonObject]],
         *,
-        live: bool = True,
-    ) -> bool:
-        """Confirm only reported fields on their own channel, including during ACK.
-
-        ``live`` is False for retained values. They keep their reconciliation
-        accounting (A1) but cannot confirm delivery of a deferred command.
-        """
-        if live:
-            self._clear_delivered_deferred(device_id, functions)
-        confirmed = self._confirmed_fields_by_channel(functions)
-        for channel_id, fields in confirmed.items():
-            if "position" in fields:
-                self._clear_cover_movement(device_id, channel_id, notify=False)
-            for field in fields:
-                key = (device_id, channel_id, field)
-                self._feedback_revisions[key] = self._feedback_revisions.get(key, 0) + 1
-            pending_key = (device_id, channel_id)
-            expected = self._pending_reconciliation_fields.get(pending_key)
-            if expected is not None:
-                expected.difference_update(fields)
-            if not expected:
-                self._cancel_reconciliation_queries(device_id, channel_id)
-        return bool(confirmed)
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Deferred delivery, ACK 201 (implementation plan, phase 11)
-    # ──────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _command_values_by_channel(
-        functions: Sequence[WireFunction],
-    ) -> dict[int, dict[str, object]]:
-        """Return the raw values of state keys and Stop, per channel."""
-        default = OpusGreenNetCoordinator._channel_from_functions(functions)
-        values: dict[int, dict[str, object]] = {}
-        for function in functions:
-            key, value = function.get("key"), function.get("value")
-            if not isinstance(key, str) or key in (KEY_CHANNEL, KEY_QUERY):
-                continue
-            if key not in KNOWN_STATE_KEYS and key != KEY_STOP:
-                continue
-            channel = EnOceanDevice._parse_number(
-                function.get("channel", default), minimum=0, integer=True
-            )
-            if channel is None or value is None:
-                continue
-            values.setdefault(int(channel), {})[key] = value
-        return values
-
-    @staticmethod
-    def _wire_value_matches(key: str, commanded: str, reported: object) -> bool:
-        """Return whether a reported value equals a commanded wire value."""
-        if key in NUMERIC_COMMAND_KEYS:
-            expected = EnOceanDevice._parse_number(commanded)
-            actual = EnOceanDevice._parse_number(reported)
-            return expected is not None and expected == actual
-        if isinstance(reported, bool):
-            reported = "true" if reported else "false"
-        return isinstance(reported, str) and reported == commanded
-
-    def _record_command_delivery(
-        self,
-        device: EnOceanDevice,
-        functions: Sequence[WireFunction],
-        delivery: CommandDelivery,
-        unconfirmed: dict[int, set[str]],
-    ) -> None:
-        """Track which commanded values are still queued at the gateway.
-
-        A transmitted (200) command supersedes an older deferred marker for the
-        same key; whether the gateway still delivers the older telegram later
-        cannot be observed (no request identifier). A deferred (201) command
-        records its values, except fields the device already reported while
-        the acknowledgement was awaited.
-        """
-        for channel_id, values in self._command_values_by_channel(functions).items():
-            markers = device.deferred_commands.get(channel_id, {})
-            if delivery is CommandDelivery.SENT:
-                for key in values:
-                    markers.pop(key, None)
-            else:
-                pending = unconfirmed.get(channel_id, set())
-                for key, value in values.items():
-                    if key == KEY_STOP or key in pending:
-                        # Outbound values are always wire strings.
-                        markers[key] = str(value)
-            if markers:
-                device.deferred_commands[channel_id] = markers
-            else:
-                device.deferred_commands.pop(channel_id, None)
-
-    def _clear_delivered_deferred(
-        self, device_id: str, functions: Sequence[WireFunction]
-    ) -> None:
-        """Clear deferred markers whose value the device or gateway reported.
-
-        Called for live device reports and for the gateway's outbound telegram,
-        which shows that a queued telegram was finally transmitted. A report
-        with a different value leaves the marker in place.
-        """
-        device = self.devices.get(device_id)
-        if device is None or not device.deferred_commands:
-            return
-        for channel_id, values in self._command_values_by_channel(functions).items():
-            markers = device.deferred_commands.get(channel_id)
-            if not markers:
-                continue
-            for key, reported in values.items():
-                commanded = markers.get(key)
-                if commanded is not None and self._wire_value_matches(
-                    key, commanded, reported
-                ):
-                    markers.pop(key)
-            if not markers:
-                device.deferred_commands.pop(channel_id, None)
-
-    def _handle_deferred_command(
-        self,
-        device: EnOceanDevice,
-        functions: Sequence[WireFunction],
-        unconfirmed: dict[int, set[str]],
-        started_movements: dict[int, CoverMovement],
-    ) -> None:
-        """Apply SoftSmartAck semantics without assuming or polling (finding O1).
-
-        The telegram has not reached the device yet, so no travel estimate
-        runs and no status query is scheduled for this command: a query would
-        itself wait for the device and add radio traffic without confirming
-        anything (A1). When the gateway finally transmits, its outbound
-        telegram follows the existing bridge-native path, which applies the
-        values optimistically and schedules the usual two status checks.
-        """
-        device_id = device.device_id
-        for channel_id, movement in started_movements.items():
-            key = (device_id, channel_id)
-            if self._cover_movements.get(key) is movement:
-                self._clear_cover_movement(device_id, channel_id)
-            # Starting the movement stopped the timers of fields still
-            # unconfirmed from earlier accepted commands. Restore them; this
-            # command's own fields are not added.
-            if self._pending_reconciliation_fields.get(
-                key
-            ) and not self._pending_reconciliation_queries.get(key):
-                self._schedule_reconciliation_queries(device_id, channel_id)
-        self._record_command_delivery(
-            device, functions, CommandDelivery.DEFERRED, unconfirmed
-        )
-        _LOGGER.debug(
-            "OPUS gateway deferred delivery of a command to %s (SoftSmartAck); "
-            "pending values: %s",
-            device_id,
-            device.deferred_commands,
-        )
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Field provenance for retained replays (implementation plan, phase 10)
-    # ──────────────────────────────────────────────────────────────────────
-
-    @callback
-    def _arm_replay_guard(self) -> None:
-        """Enable replay protection once every stream wildcard is subscribed."""
-        if len(self._stream_topics) == len(self._stream_subscriptions()):
-            self._replay_guard_armed = True
-
-    @staticmethod
-    def _function_fields(functions: Sequence[WireFunction]) -> set[tuple[int, str]]:
-        """Resolve state functions to (channel, key) like feedback matching."""
-        default = OpusGreenNetCoordinator._channel_from_functions(functions)
-        fields: set[tuple[int, str]] = set()
-        for function in functions:
-            key = function.get("key")
-            if not isinstance(key, str) or key == KEY_CHANNEL or key in BUTTON_KEYS:
-                continue
-            channel = EnOceanDevice._parse_number(
-                function.get("channel", default), minimum=0, integer=True
-            )
-            if channel is not None:
-                fields.add((int(channel), key))
-        return fields
-
-    def _record_live_fields(self, device_id: str, fields: set[tuple[int, str]]) -> None:
-        """Remember fields this armed session received live or requested."""
-        if self._replay_guard_armed and fields:
-            self._live_fields.setdefault(device_id, set()).update(fields)
-
-    def _record_live_property(self, device_id: str, property_path: str) -> None:
-        """Remember the field that a live flattened value message has set."""
-        if (field := self._property_field(device_id, property_path)) is not None:
-            self._record_live_fields(device_id, {field})
-
-    def _property_field(
-        self, device_id: str, property_path: str
-    ) -> tuple[int, str] | None:
-        """Resolve a flattened value path to the (channel, key) it sets.
-
-        Resolved are fast-path scalars, named known states and the value of an
-        indexed state whose key is known from the cached device model or the
-        current delta window; the channel follows _indexed_changed_functions.
-        Metadata, keys, channel selectors, buttons and configuration return
-        None, so they are never treated as stale.
-        """
-        if property_path in FAST_PATH_PROPERTIES:
-            return 0, property_path
-        parts = property_path.split("/")
-        if len(parts) == 2 and parts[0] == "states" and not parts[1].isdigit():
-            return (0, parts[1]) if parts[1] in KNOWN_STATE_KEYS else None
-        if (
-            len(parts) != 3
-            or parts[0] not in INDEXED_STATE_CONTAINERS
-            or not parts[1].isdigit()
-            or parts[2] != "value"
-        ):
-            return None
-        container, index = parts[0], int(parts[1])
-        cached: list[object] = list(
-            as_list(self._device_data.get(device_id, {}).get(container)) or []
-        )
-        device = self.devices.get(device_id)
-        if (
-            container == "transmitModes"
-            and device is not None
-            and device.is_smoke_detector
-        ):
-            cached = self._rwm_transmit_modes(cached)
-        buffered: list[object] = list(
-            as_list(self._device_stream_data.get(device_id, {}).get(container)) or []
-        )
-
-        def entry(position: int) -> dict[str, object]:
-            merged: dict[str, object] = {}
-            for source in (cached, buffered):
-                if position < len(source) and isinstance(
-                    item := source[position], dict
-                ):
-                    merged.update(item)
-            return merged
-
-        channel: object = 0
-        for position in range(index):
-            if (current := entry(position)).get("key") == KEY_CHANNEL:
-                channel = current.get("value")
-        target = entry(index)
-        key = target.get("key")
-        if not isinstance(key, str) or key in ("", KEY_CHANNEL, *BUTTON_KEYS):
-            return None
-        parsed = EnOceanDevice._parse_number(
-            target.get("channel", channel), minimum=0, integer=True
-        )
-        return None if parsed is None else (int(parsed), key)
-
-    def _drop_stale_replay(
-        self, source: str, device_id: str, property_path: str, payload: str
-    ) -> bool:
-        """Discard a retained value for a field this session already knows.
-
-        Within one armed session every gateway publication reaches the
-        coordinator live, so a retained replay of a field that already has a
-        live value (or an answer to this session's request) cannot be newer.
-        The stale value is neither applied nor written to the cached device
-        model. Feedback accounting is unchanged (A1): the replay still counts
-        for pending reconciliation exactly as it did before phase 10.
-        """
-        if not self._replay_guard_armed:
-            return False
-        known = self._live_fields.get(device_id)
-        if not known:
-            return False
-        field = self._property_field(device_id, property_path)
-        if field is None or field not in known:
-            return False
-        channel, key = field
-        device = self.devices.get(device_id)
-        if device is not None and self._record_confirmed_feedback(
-            device_id,
-            [{"channel": channel, "key": key, "value": self._parse_value(payload)}],
-            live=False,
-        ):
-            device.last_command_error = None
-        _LOGGER.debug(
-            "Ignoring retained %s replay for %s channel %d %s: field already "
-            "updated live in this session",
-            source,
-            device_id,
-            channel,
-            key,
-        )
-        return True
-
-    def _apply_initial_state(self, device: EnOceanDevice, data: WireMapping) -> None:
-        """Apply initial state from device discovery data."""
-        _LOGGER.debug(
-            "INITIAL STATE: device=%s data_keys=%s",
-            device.friendly_id,
-            list(data.keys()),
-        )
-        functions = [
-            function
-            for function in self._device_state_functions(data)
-            if function.get("key") not in BUTTON_KEYS
-        ]
-
-        if functions:
-            telegram = {"functions": functions}
-            device.update_from_telegram(telegram)
-            device.last_update_source = "discovery"
-            _LOGGER.debug(
-                "Applied initial state to device %s: %s",
-                device.friendly_id,
-                functions,
-            )
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Telegram messages (stream/telegram - raw radio traffic)
-    # ──────────────────────────────────────────────────────────────────────
-
-    @callback
-    def _handle_telegram_property_message(self, msg: ReceiveMessage) -> None:
-        """Handle incoming telegram property messages from flattened MQTT structure."""
-        # Radio telegrams represent occurrences. Retained replays must not fire
-        # rocker events or replace freshly confirmed state after a reconnect.
-        if self._unloaded or getattr(msg, "retain", False):
-            return
+        priority: int,
+        before_send: Callable[[], None] | None = None,
+    ) -> JsonObject:
+        """Run one radio request while owning the single in-flight slot."""
+        generation = self._request_generation(device_id)
+        self._check_request_valid(device_id, generation)
+        queued_at = monotonic()
+        await self._radio_queue.acquire(priority)
         try:
-            self._log_raw_mqtt_message("stream/telegram", msg)
-
-            match = TELEGRAM_TOPIC_PATTERN.fullmatch(msg.topic)
-            if not match:
-                return
-
-            eag_id, device_id, property_path = match.groups()
-
-            if eag_id != self.eag_id:
-                return
-
-            payload = payload_text(msg.payload)
-
-            if property_path in (None, "from", "to"):
-                # OPUS documents complete JSON at /to; accept the equivalent
-                # complete inbound shape as well as flattened property topics.
-                outer = as_object(parse_json(payload))
-                if outer is None:
-                    return
-                document = as_object(outer.get("telegram", outer))
-                if document is None:
-                    return
-                if (state := as_object(document.get("state"))) is not None:
-                    document = {**document, **state}
-                self._finalize_telegram(device_id)
-                self._telegram_data[device_id] = (
-                    {property_path: document} if property_path else document
-                )
-                self._telegram_received_at[device_id] = monotonic()
-                self._finalize_telegram(device_id)
-                return
-
-            existing = self._telegram_data.get(device_id)
-            if existing:
-                paths = self._telegram_paths.get(device_id, set())
-                effective = as_object(
-                    existing.get("from") or existing.get("to") or existing
-                )
-                functions = (
-                    effective.get("functions", []) if effective is not None else []
-                )
-                has_complete = isinstance(functions, list) and any(
-                    isinstance(function, dict)
-                    and "key" in function
-                    and "value" in function
-                    for function in functions
-                )
-                direction_changed = (
-                    property_path.startswith("from/") and "to" in existing
-                ) or (property_path.startswith("to/") and "from" in existing)
-                # A repeated endpoint starts the next flattened frame. Flushing
-                # before overwriting preserves rapid press/release and channel
-                # reports even when their spacing is below the debounce delay.
-                if direction_changed or (property_path in paths and has_complete):
-                    self._finalize_telegram(device_id)
-
-            received_at = monotonic()
-            self._telegram_received_at.setdefault(device_id, received_at)
-            self._log_latency_received(
-                "stream/telegram", device_id, property_path, received_at
-            )
-
-            if device_id not in self._telegram_data:
-                self._telegram_data[device_id] = {"deviceId": device_id}
-            self._telegram_paths.setdefault(device_id, set()).add(property_path)
-            self._set_nested_property(
-                self._telegram_data[device_id], property_path, payload
-            )
-
-            # Reset telegram timer for this device - finalize after short delay
-            if cancel := self._pending_telegrams.get(device_id):
-                cancel()
-
-            @callback
-            def finalize_callback(_now: datetime, did: str = device_id) -> None:
-                self._finalize_telegram(did)
-
-            # Telegram function key/value pairs can arrive as separate flattened
-            # MQTT messages. Wait long enough to avoid dispatching partial pairs.
-            self._pending_telegrams[device_id] = async_call_later(
-                self.hass, TELEGRAM_FINALIZE_DELAY, finalize_callback
-            )
-
-        except Exception as err:
-            _LOGGER.exception("Error handling telegram property message: %s", err)
-
-    @callback
-    def _finalize_telegram(self, device_id: str) -> None:
-        """Finalize telegram processing after receiving all properties."""
-        if device_id not in self._telegram_data:
-            return
-
-        telegram_data = self._telegram_data.pop(device_id)
-        if cancel := self._pending_telegrams.pop(device_id, None):
-            cancel()
-        self._telegram_paths.pop(device_id, None)
-        received_at = self._telegram_received_at.pop(device_id, None)
-        finalized_at = monotonic()
-
-        # Flattened MQTT topics can nest data under "from" or "to" sub-keys:
-        #   stream/telegram/{DEVICE}/from/functions/0/key → {"from": {"functions": ...}}
-        #   stream/telegram/{DEVICE}/to/... → {"to": {...}}
-        # OPUS also publishes flat messages with a top-level "direction" field.
-        # Prefer confirmed "from" device reports when they are present. If only a
-        # "to" command telegram is available, use state functions optimistically;
-        # this captures native bridge HomeKit commands that otherwise have no
-        # immediate confirmed status telegram.
-        from_data = telegram_data.get("from", {})
-        to_data = telegram_data.get("to", {})
-        if not isinstance(from_data, dict) or not isinstance(to_data, dict):
-            return
-
-        if from_data:
-            effective_data = from_data
-        elif to_data:
-            effective_data = to_data
-        else:
-            effective_data = telegram_data
-
-        direction = effective_data.get("direction") or telegram_data.get("direction")
-        is_outbound_command = direction == "to" or (to_data and not from_data)
-
-        # Inconsistent data under a "from" topic with direction=to is not a device
-        # report and should not be treated as confirmed state.
-        if from_data and is_outbound_command:
-            return
-        if is_outbound_command and self._command_waiters.get(device_id):
-            # Entities may optimistically update only after their awaited PUT
-            # acknowledgement succeeds. An outbound echo is not that success.
-            return
-
-        friendly_id = (
-            effective_data.get("friendlyId")
-            or telegram_data.get("friendlyId")
-            or device_id
-        )
-
-        # Build functions list from the telegram data
-        functions: list[JsonObject] = []
-        functions_data = effective_data.get("functions", [])
-
-        if isinstance(functions_data, list):
-            functions = [f for f in functions_data if isinstance(f, dict)]
-        elif isinstance(functions_data, dict):
-            for idx in sorted(
-                functions_data.keys(), key=lambda x: int(x) if str(x).isdigit() else x
-            ):
-                func_entry = functions_data[idx]
-                if isinstance(func_entry, dict):
-                    functions.append(func_entry)
-
-        complete_functions = [
-            func
-            for func in functions
-            if isinstance(func.get("key"), str) and func.get("value") is not None
-        ]
-        dropped_count = len(functions) - len(complete_functions)
-        if dropped_count:
-            _LOGGER.debug(
-                "Dropping %d incomplete telegram function(s) for %s: %s",
-                dropped_count,
-                device_id,
-                [func for func in functions if func not in complete_functions],
-            )
-        functions = complete_functions
-        if not functions:
-            _LOGGER.debug(
-                "Ignoring telegram for %s because it contains no complete functions",
-                device_id,
-            )
-            return
-
-        if is_outbound_command:
-            state_functions = [
-                func
-                for func in functions
-                if func.get("key") in KNOWN_STATE_KEYS
-                or func.get("key") in (KEY_CHANNEL, KEY_STOP)
-            ]
-            ignored_count = len(functions) - len(state_functions)
-            if ignored_count:
+            waited = monotonic() - queued_at
+            if waited > 1.0:
                 _LOGGER.debug(
-                    "Ignoring %d non-state outbound telegram function(s) for %s: %s",
-                    ignored_count,
+                    "OPUS request for %s waited %.2fs in the queue "
+                    "(priority %d, %d still queued)",
                     device_id,
-                    [func for func in functions if func not in state_functions],
+                    waited,
+                    priority,
+                    self._radio_queue.queue_depth,
                 )
-            functions = state_functions
-            if not any(
-                function.get("key") in KNOWN_STATE_KEYS
-                or function.get("key") == KEY_STOP
-                for function in functions
+            self._check_request_valid(device_id, generation)
+            if before_send is not None:
+                before_send()
+            try:
+                result = await request()
+            except OpusApiError as err:
+                raise self._request_error(err, device_id) from err
+            # The gateway answered: only unload or a removed device make the
+            # result meaningless. An outage declared meanwhile does not undo
+            # an accepted request.
+            if self._unloaded or generation[1] != self._device_generations.get(
+                device_id, 0
             ):
-                _LOGGER.debug(
-                    "Ignoring outbound telegram for %s because it has no "
-                    "state functions",
-                    device_id,
-                )
-                return
-            _LOGGER.debug(
-                "Using outbound telegram for optimistic state update of %s: %s",
-                device_id,
-                functions,
-            )
-        if not is_outbound_command:
-            self._record_confirmed_feedback(device_id, functions)
-        else:
-            # The gateway transmitted the telegram now, e.g. a SoftSmartAck
-            # delivery: that value is no longer queued.
-            self._clear_delivered_deferred(device_id, functions)
-
-        update_source = (
-            "stream/telegram/to" if is_outbound_command else "stream/telegram/from"
-        )
-        self._log_latency_finalized(
-            update_source, device_id, received_at, finalized_at, len(functions)
-        )
-
-        # Create telegram dict in the format expected by update_from_telegram
-        telegram = {
-            "deviceId": device_id,
-            "friendlyId": friendly_id,
-            "functions": functions,
-            "timestamp": effective_data.get("timestamp")
-            or telegram_data.get("timestamp"),
-            "telegramInfo": effective_data.get("telegramInfo")
-            or telegram_data.get("telegramInfo", {}),
-        }
-        if not isinstance(telegram["telegramInfo"], dict):
-            telegram["telegramInfo"] = {}
-
-        device = self.devices.get(device_id)
-
-        if device is None:
-            # Create a basic device entry if we haven't discovered it yet
-            device = EnOceanDevice(
-                device_id=device_id,
-                friendly_id=_metadata_text(friendly_id) or device_id,
-                eeps=object_items(effective_data.get("eeps", [])),
-            )
-            self.devices[device_id] = device
-            _LOGGER.info(
-                "Cached device from telegram before discovery: %s",
-                device_id,
-            )
-            if device.entity_type is not None:
-                async_dispatcher_send(
-                    self.hass,
-                    f"{SIGNAL_DEVICE_DISCOVERED}_{self.eag_id}",
-                    device,
-                )
-
-        # Update device state
-        if functions:
-            _LOGGER.debug(
-                "Telegram update for %s (%s): %d functions: %s",
-                friendly_id,
-                device_id,
-                len(functions),
-                functions,
-            )
-        applied_functions = functions
-        if is_outbound_command:
-            estimated = self._start_cover_commands(device, functions)
-            default_channel = self._channel_from_functions(functions)
-            applied_functions = [
-                function
-                for function in functions
-                if not (
-                    function.get("key") == "position"
-                    and EnOceanDevice._parse_number(
-                        function.get("channel", default_channel),
-                        minimum=0,
-                        integer=True,
-                    )
-                    in estimated
-                )
-            ]
-            telegram["functions"] = applied_functions
-        device.update_from_telegram(telegram)
-        # Telegrams are always live here (retained ones are discarded above).
-        self._record_live_fields(device_id, self._function_fields(applied_functions))
-        if not is_outbound_command and self._has_operational_state(functions):
-            device.last_command_error = None
-
-        # Notify listeners of state update
-        signal = f"{SIGNAL_DEVICE_STATE_UPDATE}_{self.eag_id}_{device_id}"
-        self._mark_and_log_dispatch(
-            device, update_source, signal, received_at, finalized_at
-        )
-        async_dispatcher_send(self.hass, signal, device)
-        # Event entities consume button fields synchronously during the dispatch
-        # above. Clear them so later dispatches cannot replay the same press.
-        device.clear_button_occurrence()
-
-        if is_outbound_command:
-            for channel_id, fields in self._command_fields_by_channel(
-                functions, device
-            ).items():
-                self._schedule_reconciliation_queries(
-                    device_id, channel_id, fields=fields
-                )
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Command sending
-    # ──────────────────────────────────────────────────────────────────────
+                raise request_error("request_cancelled", device_id)
+            return result
+        finally:
+            self._radio_queue.release()
 
     async def async_send_command(
         self,
@@ -2611,43 +1525,38 @@ class OpusGreenNetCoordinator:
         background: bool = False,
         still_needed: Callable[[], bool] | None = None,
     ) -> CommandDelivery:
-        """Send a command to a device using JSON state message.
+        """Send state functions to a device and wait for the acknowledgement.
 
-        All requests pass the transport's global send queue (one in flight).
         ``background`` marks delayed reconciliation queries, which are only
-        dispatched when no user command or interactive query is waiting.
-        ``still_needed`` (background only) is checked right before publish; a
+        sent when no user command or interactive query is waiting.
+        ``still_needed`` (background only) is checked right before sending; a
         superseded check is dropped without being sent.
 
-        Returns how the gateway accepted the command. ``DEFERRED`` (201) means
-        the telegram is queued: callers must not assume the commanded state.
+        A deferred command (status 201) gets no estimate and no status
+        queries: until the device fetches the telegram, a query would be
+        deferred as well, and the stream delivers the device's report later.
         """
-        topic = TOPIC_PUT_STATE.format(
-            base=TOPIC_BASE, eag_id=self.eag_id, device_id=device_id
-        )
-
-        state_message = {
-            "state": {
-                "functions": functions,
-            }
-        }
-
-        payload = json.dumps(state_message)
-        _LOGGER.debug("Sending command to %s: %s", topic, payload)
-
-        if not self.available:
-            raise request_error("gateway_unavailable", device_id)
         device = self.get_device(device_id)
-        fields_by_channel = self._command_fields_by_channel(functions, device)
+        fields_by_channel = protocol.command_fields_by_channel(functions, device)
         revisions: dict[tuple[int, str], int] = {}
         started_movements: dict[int, CoverMovement] = {}
+        sent_at: list[float] = []
+        body = {"state": {"functions": list(functions)}}
+        _LOGGER.debug("Sending command to OPUS device %s: %s", device_id, body)
+
+        is_query = any(function.get("key") == KEY_QUERY for function in functions)
 
         @callback
         def snapshot_feedback() -> None:
-            # Run inside the request manager's endpoint lock, immediately before
-            # publish. Feedback for an earlier queued command cannot confirm this one.
+            # Runs while owning the request slot, immediately before sending.
+            # Feedback for an earlier queued command cannot confirm this one.
             if background and still_needed is not None and not still_needed():
                 raise request_error("request_cancelled", device_id, SUPERSEDED)
+            sent_at.append(monotonic())
+            if is_query:
+                default = protocol.channel_from_functions(functions)
+                if default is not None:
+                    self._mark_cover_runs_queried(device_id, default)
             started_movements.update(self._start_cover_commands(device, functions))
             for movement in started_movements.values():
                 movement.accepted = False
@@ -2661,9 +1570,6 @@ class OpusGreenNetCoordinator:
                 }
             )
 
-        # Control commands overtake queued status queries/refreshes so that a
-        # burst of reconciliation traffic never delays a user action.
-        is_query = any(function.get("key") == KEY_QUERY for function in functions)
         if background:
             priority = PRIORITY_BACKGROUND
         elif is_query:
@@ -2674,36 +1580,52 @@ class OpusGreenNetCoordinator:
         self._command_waiters[device_id] = self._command_waiters.get(device_id, 0) + 1
         try:
             try:
-                response = await self._requests.async_request(
-                    topic,
-                    f"{TOPIC_BASE}/{self.eag_id}/putAnswer/devices/{device_id}/state",
+                response = await self._async_radio_request(
                     device_id,
-                    payload,
-                    require_status=True,
-                    is_available=lambda: self.available,
-                    before_publish=snapshot_feedback,
+                    lambda: self.client.async_put(
+                        OpusGatewayClient.device_path(device_id, "state"), body
+                    ),
                     priority=priority,
+                    before_send=snapshot_feedback,
                 )
             except HomeAssistantError as err:
-                if err.translation_key != "request_timeout":
-                    raise
-                # A missing acknowledgement only fails this entity action.
-                # Gateway availability is driven exclusively by MQTT/bridge
-                # connection state and the health probe, never by one command.
-                _LOGGER.warning(
-                    "OPUS device %s did not acknowledge a %s within the timeout",
-                    device_id,
-                    "status query" if is_query else "command",
-                )
-                raise request_error("request_timeout", device_id) from err
-            # The transport accepted only 200 or 201 (decode_response).
+                if err.translation_key == "request_rejected" and device is not None:
+                    device.last_command_error = (
+                        err.translation_placeholders or {}
+                    ).get("reason") or "rejected"
+                    self._cancel_reconciliation_queries(device_id)
+                    self._dispatch_state(device)
+                elif err.translation_key == "request_timeout":
+                    # A missing acknowledgement only fails this entity action.
+                    _LOGGER.warning(
+                        "OPUS device %s did not acknowledge a %s within the timeout",
+                        device_id,
+                        "status query" if is_query else "command",
+                    )
+                raise
             delivery = (
                 CommandDelivery.DEFERRED
-                if response_status(response) == ACK_STATUS_DEFERRED
+                if response_status(response)
+                in (SOFT_SMART_ACK_STATUS, TARGET_STATE_STATUS)
                 else CommandDelivery.SENT
             )
+            if delivery is CommandDelivery.DEFERRED:
+                _LOGGER.debug(
+                    "OPUS gateway queued the command for %s until the device "
+                    "wakes up (SoftSmartAck)",
+                    device_id,
+                )
+                for channel_id, movement in started_movements.items():
+                    if self._cover_movements.get((device_id, channel_id)) is movement:
+                        self._clear_cover_movement(device_id, channel_id)
+                started_movements.clear()
+                fields_by_channel = {}
             if device is not None:
-                unconfirmed_by_channel: dict[int, set[str]] = {}
+                if delivery is CommandDelivery.SENT and sent_at:
+                    self._start_cover_runs(device, functions, sent_at[0])
+                if device.last_command_error is not None:
+                    device.last_command_error = None
+                    self._dispatch_state(device)
                 for channel_id, fields in fields_by_channel.items():
                     unconfirmed = {
                         field
@@ -2714,19 +1636,9 @@ class OpusGreenNetCoordinator:
                         == revisions[channel_id, field]
                     }
                     if unconfirmed:
-                        unconfirmed_by_channel[channel_id] = unconfirmed
-                if delivery is CommandDelivery.DEFERRED:
-                    self._handle_deferred_command(
-                        device, functions, unconfirmed_by_channel, started_movements
-                    )
-                    return delivery
-                self._record_command_delivery(
-                    device, functions, delivery, unconfirmed_by_channel
-                )
-                for channel_id, unconfirmed in unconfirmed_by_channel.items():
-                    self._schedule_reconciliation_queries(
-                        device_id, channel_id, fields=unconfirmed
-                    )
+                        self._schedule_reconciliation_queries(
+                            device_id, channel_id, fields=unconfirmed
+                        )
                 for channel_id, movement in started_movements.items():
                     movement.accepted = True
                     if movement.elapsed:
@@ -2739,6 +1651,12 @@ class OpusGreenNetCoordinator:
                     self._cancel_reconciliation_queries(device_id, channel_id)
             raise
         finally:
+            self._sent_commands.setdefault(device_id, []).append(
+                (
+                    monotonic() + OWN_COMMAND_ECHO_SECONDS,
+                    protocol.command_signature(functions),
+                )
+            )
             remaining = self._command_waiters[device_id] - 1
             if remaining:
                 self._command_waiters[device_id] = remaining
@@ -2757,52 +1675,119 @@ class OpusGreenNetCoordinator:
             return [{"key": KEY_CHANNEL, "value": str(channel)}, *functions]
         return list(functions)
 
+    def _dim_functions(
+        self, device_id: str, dim_value: int, *, transition: bool
+    ) -> list[WireFunction]:
+        """Return a dim command, with the ramping mode where the device has one."""
+        functions: list[WireFunction] = [{"key": KEY_DIMMER, "value": str(dim_value)}]
+        device = self.get_device(device_id)
+        if device is not None and device.supports_ramping_mode:
+            functions.append(
+                {
+                    "key": KEY_RAMPING_MODE,
+                    "value": RAMPING_MODE_FADE if transition else RAMPING_MODE_SWITCH,
+                }
+            )
+        return functions
+
     async def async_turn_on(
         self,
         device_id: str,
         channel: int = 0,
         brightness: int | None = None,
         is_dimmable: bool = False,
+        *,
+        transition: bool = False,
     ) -> CommandDelivery:
-        """Turn on a switch or light."""
+        """Turn on a switch or light.
+
+        Dimmers use dimValue, not switch (OPUS reference section 5.3).
+        ``transition`` keeps the dimmer's own fade instead of switching at once.
+        """
         functions: list[WireFunction]
-        if brightness is not None:
-            functions = [{"key": "dimValue", "value": str(brightness)}]
-        elif is_dimmable:
-            # Dimmers use dimValue, not switch — per OPUS MQTT spec section 5.3
-            functions = [{"key": "dimValue", "value": "100"}]
+        if brightness is not None or is_dimmable:
+            functions = self._dim_functions(
+                device_id,
+                100 if brightness is None else brightness,
+                transition=transition,
+            )
         else:
             functions = [{"key": "switch", "value": "on"}]
-
-        functions = self._with_channel_if_needed(device_id, functions, channel)
-        return await self.async_send_command(device_id, functions)
+        return await self.async_send_command(
+            device_id, self._with_channel_if_needed(device_id, functions, channel)
+        )
 
     async def async_turn_off(
         self,
         device_id: str,
         channel: int = 0,
         is_dimmable: bool = False,
+        *,
+        transition: bool = False,
     ) -> CommandDelivery:
-        """Turn off a switch or light."""
+        """Turn off a switch or light (dimmers: dimValue 0)."""
         functions: list[WireFunction]
         if is_dimmable:
-            # Dimmers use dimValue 0, not switch off — per OPUS MQTT spec section 5.3
-            functions = [{"key": "dimValue", "value": "0"}]
+            functions = self._dim_functions(device_id, 0, transition=transition)
         else:
             functions = [{"key": "switch", "value": "off"}]
-        functions = self._with_channel_if_needed(device_id, functions, channel)
-        return await self.async_send_command(device_id, functions)
+        return await self.async_send_command(
+            device_id, self._with_channel_if_needed(device_id, functions, channel)
+        )
 
     async def async_set_cover_position(
         self,
         device_id: str,
         position: int,
         channel: int = 0,
+        repositioning: str | None = None,
     ) -> CommandDelivery:
-        """Set OPUS position (0 = open, 100 = closed)."""
+        """Set OPUS position (0 = open, 100 = closed).
+
+        ``repositioning`` (D2-05 "Go to Position and Angle") makes the blind
+        drive to an end position first (``firstUp``/``firstDown``) and so
+        recalibrates its position tracking; ``direct`` is the default.
+        """
         functions: list[WireFunction] = [{"key": "position", "value": str(position)}]
-        functions = self._with_channel_if_needed(device_id, functions, channel)
+        if repositioning is not None:
+            functions.append({"key": KEY_REPOSITIONING, "value": repositioning})
+        return await self.async_send_command(
+            device_id, self._with_channel_if_needed(device_id, functions, channel)
+        )
+
+    async def async_set_handle_unlock(
+        self, device_id: str, *, allowed: bool
+    ) -> CommandDelivery:
+        """Unlock (``allowed``) or lock (``notAllowed``) a HOPPE AutoLock handle.
+
+        The handle sleeps between uses; the gateway then queues the answer
+        (201, SoftSmartAck) until the handle wakes up, e.g. when its button
+        is pressed.
+        """
+        functions: list[WireFunction] = [
+            {
+                "key": KEY_UNLOCK,
+                "value": UNLOCK_ALLOWED if allowed else UNLOCK_NOT_ALLOWED,
+            }
+        ]
         return await self.async_send_command(device_id, functions)
+
+    async def async_set_cover_locking_mode(
+        self,
+        device_id: str,
+        locking_mode: str,
+        channel: int = 0,
+    ) -> CommandDelivery:
+        """Set the blockage of a blind (``block`` or ``unblock``).
+
+        Position and angle keep their profile default ``noChange``.
+        """
+        functions: list[WireFunction] = [
+            {"key": KEY_LOCKING_MODE, "value": locking_mode}
+        ]
+        return await self.async_send_command(
+            device_id, self._with_channel_if_needed(device_id, functions, channel)
+        )
 
     async def async_set_cover_tilt(
         self,
@@ -2812,8 +1797,9 @@ class OpusGreenNetCoordinator:
     ) -> CommandDelivery:
         """Set cover tilt angle."""
         functions: list[WireFunction] = [{"key": "angle", "value": str(tilt)}]
-        functions = self._with_channel_if_needed(device_id, functions, channel)
-        return await self.async_send_command(device_id, functions)
+        return await self.async_send_command(
+            device_id, self._with_channel_if_needed(device_id, functions, channel)
+        )
 
     async def async_stop_cover(
         self, device_id: str, channel: int = 0
@@ -2822,8 +1808,9 @@ class OpusGreenNetCoordinator:
         self._clear_cover_movement(device_id, channel)
         self._cancel_reconciliation_queries(device_id, channel)
         functions: list[WireFunction] = [{"key": KEY_STOP, "value": "true"}]
-        functions = self._with_channel_if_needed(device_id, functions, channel)
-        return await self.async_send_command(device_id, functions)
+        return await self.async_send_command(
+            device_id, self._with_channel_if_needed(device_id, functions, channel)
+        )
 
     async def async_query_device_status(
         self,
@@ -2835,18 +1822,12 @@ class OpusGreenNetCoordinator:
     ) -> CommandDelivery:
         """Query the current device status."""
         functions: list[WireFunction] = [{"key": KEY_QUERY, "value": "status"}]
-        functions = self._with_channel_if_needed(device_id, functions, channel)
-        if still_needed is None:
-            return await self.async_send_command(
-                device_id, functions, background=background
-            )
         return await self.async_send_command(
-            device_id, functions, background=background, still_needed=still_needed
+            device_id,
+            self._with_channel_if_needed(device_id, functions, channel),
+            background=background,
+            still_needed=still_needed,
         )
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Climate commands
-    # ──────────────────────────────────────────────────────────────────────
 
     async def async_set_climate_setpoint(
         self,
@@ -2854,8 +1835,9 @@ class OpusGreenNetCoordinator:
         temperature: float,
     ) -> CommandDelivery:
         """Set the temperature setpoint for a climate device."""
-        functions = [{"key": "temperatureSetpoint", "value": str(temperature)}]
-        return await self.async_send_command(device_id, functions)
+        return await self.async_send_command(
+            device_id, [{"key": "temperatureSetpoint", "value": str(temperature)}]
+        )
 
     async def async_set_climate_mode(
         self,
@@ -2863,95 +1845,45 @@ class OpusGreenNetCoordinator:
         mode: str,
     ) -> CommandDelivery:
         """Set the heater mode for a climate device."""
-        functions = [{"key": "heaterMode", "value": mode}]
-        return await self.async_send_command(device_id, functions)
-
-    async def async_query_climate_status(
-        self,
-        device_id: str,
-    ) -> CommandDelivery:
-        """Query the current status of a climate device."""
-        return await self.async_query_device_status(device_id)
+        return await self.async_send_command(
+            device_id, [{"key": "heaterMode", "value": mode}]
+        )
 
     # ──────────────────────────────────────────────────────────────────────
-    # Device profile queries
+    # ReCom service requests
     # ──────────────────────────────────────────────────────────────────────
-
-    async def async_get_device_profile(self, device_id: str) -> None:
-        """Request and cache a validated profile with bounded subscription ownership."""
-        profile = await self._async_device_request(
-            device_id, TOPIC_GET_DEVICE_PROFILE, TOPIC_GET_ANSWER_DEVICE_PROFILE
-        )
-        if device := self.get_device(device_id):
-            device.profile = profile
-
-    async def _async_device_request(
-        self,
-        device_id: str,
-        topic_pattern: str,
-        answer_pattern: str,
-        payload: str = "",
-        *,
-        require_status: bool = False,
-    ) -> JsonObject:
-        """Request one device object or acknowledgement and surface protocol errors."""
-        if not self.available:
-            raise request_error("gateway_unavailable", device_id)
-        values = {"base": TOPIC_BASE, "eag_id": self.eag_id, "device_id": device_id}
-        return await self._requests.async_request(
-            topic_pattern.format(**values),
-            answer_pattern.format(**values),
-            device_id,
-            payload,
-            require_status=require_status,
-            is_available=lambda: self.available,
-            priority=PRIORITY_QUERY,
-        )
 
     async def async_get_device_configuration(self, device_id: str) -> JsonObject:
-        """Read device configuration, raising an actionable error on failure."""
-        return await self._async_device_request(
+        """Read the configuration stored on a device."""
+        path = OpusGatewayClient.device_path(device_id, "configuration")
+        return await self._async_radio_request(
             device_id,
-            TOPIC_GET_DEVICE_CONFIGURATION,
-            TOPIC_GET_ANSWER_DEVICE_CONFIGURATION,
+            lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
+            priority=PRIORITY_QUERY,
         )
 
     async def async_set_device_configuration(
         self, device_id: str, config: WireMapping
     ) -> None:
-        """Write configuration and wait for the gateway's acknowledgement."""
-        await self._async_device_request(
+        """Write configuration to a device and wait for the acknowledgement."""
+        path = OpusGatewayClient.device_path(device_id, "configuration")
+        await self._async_radio_request(
             device_id,
-            TOPIC_PUT_DEVICE_CONFIGURATION,
-            TOPIC_PUT_ANSWER_DEVICE_CONFIGURATION,
-            json.dumps(config),
-            require_status=True,
+            lambda: self.client.async_put(path, config, timeout=RECOM_TIMEOUT),
+            priority=PRIORITY_QUERY,
         )
 
     async def async_get_device_parameters(self, device_id: str) -> JsonObject:
-        """Read a validated device-parameter response."""
-        return await self._async_device_request(
+        """Read the configurable parameters a device supports."""
+        path = OpusGatewayClient.device_path(device_id, "parameters")
+        return await self._async_radio_request(
             device_id,
-            TOPIC_GET_DEVICE_PARAMETERS,
-            TOPIC_GET_ANSWER_DEVICE_PARAMETERS,
+            lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
+            priority=PRIORITY_QUERY,
         )
 
-    # ──────────────────────────────────────────────────────────────────────
-    # Device lookup helpers
-    # ──────────────────────────────────────────────────────────────────────
 
-    def get_device(self, device_id: str) -> EnOceanDevice | None:
-        """Get a device by ID."""
-        return self.devices.get(device_id)
-
-    def late_answer_diagnostics(self, owner: str) -> dict[str, int]:
-        """Return late-answer counters of a device or the gateway (diagnostics)."""
-        return self._requests.late_answer_diagnostics(owner)
-
-    def get_devices_by_type(self, entity_type: str) -> list[EnOceanDevice]:
-        """Get all devices of a specific entity type."""
-        return [
-            device
-            for device in self.devices.values()
-            if device.entity_type == entity_type
-        ]
+def _is_device_list(document: JsonObject) -> bool:
+    """Return whether a stream document is the complete device list."""
+    header = as_object(document.get("header")) or {}
+    return header.get("content") == "devices"

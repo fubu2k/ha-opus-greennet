@@ -1,8 +1,8 @@
-"""Typed OPUS wire data and validation helpers for MQTT/JSON boundaries.
+"""Typed OPUS wire data and validation helpers for the JSON boundary.
 
-Wire data is what the bridge publishes: JSON values, flattened MQTT property
-paths and their string payloads. It is kept separate from the normalised
-domain model in ``enocean_device`` (``EnOceanDevice``/``EnOceanChannel``).
+Wire data is what the gateway sends: JSON documents from its REST API. It is
+kept separate from the normalised domain model in ``enocean_device``
+(``EnOceanDevice``/``EnOceanChannel``).
 
 The helpers only check container and field types. They never reinterpret
 values: valid string representations ("on", "50", "notAvailable", proprietary
@@ -21,22 +21,20 @@ type JsonObject = dict[str, JsonValue]
 type JsonList = list[JsonValue]
 
 
-def payload_text(payload: str | bytes | bytearray) -> str:
-    """Return an MQTT payload as text, exactly as the parsers did before."""
-    if isinstance(payload, bytes | bytearray):
-        return payload.decode()
-    return str(payload)
-
-
 def parse_json(text: str | bytes | bytearray) -> JsonValue:
     """Decode JSON text.
 
     ``json.loads`` only produces ``dict``/``list``/``str``/``int``/``float``/
     ``bool``/``None``, so its untyped result is a ``JsonValue`` by
-    construction. NaN and Infinity literals are accepted here as before; the
-    domain parsers reject non-finite numbers per field.
+    construction. NaN and Infinity literals are accepted here; the domain
+    parsers reject non-finite numbers per field. A document nested too
+    deeply for the decoder is reported as ``ValueError`` like any other
+    invalid document.
     """
-    value: JsonValue = json.loads(text)
+    try:
+        value: JsonValue = json.loads(text)
+    except RecursionError as err:
+        raise ValueError("The JSON document is nested too deeply") from err
     return value
 
 
@@ -58,27 +56,6 @@ def object_items(value: object) -> list[JsonObject]:
     if items is None:
         return []
     return [item for item in (as_object(entry) for entry in items) if item is not None]
-
-
-def indexed_objects(value: object) -> list[JsonObject]:
-    """Return objects from a JSON list or a flattened ``{"0": {...}}`` mapping.
-
-    Flattened MQTT topics produce mappings keyed by index strings; numeric keys
-    are ordered numerically, as the coordinator did before.
-    """
-    if isinstance(value, list):
-        return object_items(value)
-    mapping = as_object(value)
-    if mapping is None:
-        return []
-    ordered = sorted(
-        mapping, key=lambda key: (0, int(key), "") if key.isdigit() else (1, 0, key)
-    )
-    return [
-        item
-        for item in (as_object(mapping[key]) for key in ordered)
-        if item is not None
-    ]
 
 
 def string_key(mapping: Mapping[str, object], key: str) -> str | None:

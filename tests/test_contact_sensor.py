@@ -1,24 +1,17 @@
-"""D5-00-01 contact readings from gateway snapshots and live MQTT traffic."""
+"""D5-00-01 contact readings from gateway device lists and live telegrams."""
 
-import asyncio
-import json
+from __future__ import annotations
 
 import pytest
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
+from custom_components.opus_greennet import protocol
 from custom_components.opus_greennet.const import DOMAIN, EEP_MAPPINGS, KNOWN_STATE_KEYS
-from custom_components.opus_greennet.coordinator import OpusGreenNetCoordinator
-from tests.ha_helpers import configure_bridge, wait_for_entity
+from tests.fake_gateway import FakeGateway, device_object, telegram
+from tests.ha_helpers import setup_bridge, wait_for_entity, wait_until
 
 EEP = "D5-00-01"
-
-
-async def wait_for_state(hass, entity_id, expected):
-    """Wait for fragment buffering or background discovery to reach HA state."""
-    async with asyncio.timeout(6):
-        while (state := hass.states.get(entity_id)) is None or state.state != expected:
-            await asyncio.sleep(0.01)
-            await hass.async_block_till_done()
 
 
 def test_contact_profile_is_discovered(make_device):
@@ -71,14 +64,14 @@ def test_contact_state_is_scoped_to_its_profile(make_device, eep):
 @pytest.mark.parametrize(
     "states,expected",
     [
-        ({"contact": "closed"}, False),
+        ([{"key": "contact", "value": "closed"}], False),
         ([{"key": "contact", "value": "open"}], True),
         ([{"key": "contact", "value": "notAvailable"}], None),
     ],
 )
 def test_gateway_snapshot_applies_contact_state(make_device, states, expected):
     device = make_device(EEP)
-    functions = OpusGreenNetCoordinator._device_state_functions(
+    functions = protocol.device_state_functions(
         {"eeps": [{"eep": EEP}], "states": states}
     )
     device.update_from_telegram({"functions": functions})
@@ -86,21 +79,20 @@ def test_gateway_snapshot_applies_contact_state(make_device, states, expected):
 
 
 @pytest.mark.parametrize("initial", [None, "closed", "open", "unknown"])
-@pytest.mark.parametrize("message_format", ["json", "flattened"])
 async def test_contact_entity_tracks_live_telegrams(
-    hass, mqtt_transport, initial, message_format
-):
-    definition = {
-        "deviceId": "CONTACT1",
-        "friendlyId": "Window",
-        "eeps": [{"eep": EEP}],
-        "batteryLevel": None,
-        "transmitModes": [{"key": "contact", "transmitOnEvent": True}],
-    }
-    if initial is not None:
-        definition["states"] = [{"key": "contact", "value": initial}]
-    mqtt_transport.devices = [definition]
-    await configure_bridge(hass)
+    hass: HomeAssistant, gateway: FakeGateway, initial: str | None
+) -> None:
+    gateway.devices = [
+        device_object(
+            "CONTACT1",
+            EEP,
+            friendly_id="Window",
+            states=None if initial is None else [{"key": "contact", "value": initial}],
+            batteryLevel=None,
+            transmitModes=[{"key": "contact", "transmitOnEvent": True}],
+        )
+    ]
+    await setup_bridge(hass, gateway)
     contact = await wait_for_entity(hass, "binary_sensor", "AABB0011_CONTACT1_contact")
     expected = {"open": "on", "closed": "off"}.get(initial, "unknown")
     state = hass.states.get(contact)
@@ -122,35 +114,25 @@ async def test_contact_entity_tracks_live_telegrams(
         ("closed", "off"),
         ("notAvailable", "unknown"),
     ]:
-        topic = "EnOcean/AABB0011/stream/telegram/CONTACT1"
-        if message_format == "json":
-            mqtt_transport.receive(
-                topic,
-                {
-                    "telegramInfo": {"rorg": "D5"},
-                    "functions": [{"key": "contact", "value": value}],
-                },
+        await gateway.push(
+            telegram(
+                "CONTACT1",
+                [{"key": "contact", "value": value}],
+                telegramInfo={"rorg": "D5", "dbm": -70},
             )
-        else:
-            mqtt_transport.receive(f"{topic}/functions/0/key", "contact")
-            mqtt_transport.receive(f"{topic}/functions/0/value", value)
-        await wait_for_state(hass, contact, expected)
-        assert hass.states.get(contact).state == expected
-    await mqtt_transport.set_connected(False)
-    assert hass.states.get(contact).state == "unavailable"
+        )
+        await wait_until(lambda: hass.states.get(contact).state == expected)
+    await gateway.stop()
+    await wait_until(lambda: hass.states.get(contact).state == "unavailable")
 
 
 async def test_contact_id_survives_reload_and_device_stream_updates(
-    hass, mqtt_transport
-):
-    mqtt_transport.devices = [
-        {
-            "deviceId": "CONTACT1",
-            "eeps": [{"eep": EEP}],
-            "states": {"contact": "closed"},
-        }
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    gateway.devices = [
+        device_object("CONTACT1", EEP, states=[{"key": "contact", "value": "closed"}])
     ]
-    entry = (await configure_bridge(hass))["result"]
+    entry = await setup_bridge(hass, gateway)
     contact = await wait_for_entity(hass, "binary_sensor", "AABB0011_CONTACT1_contact")
     assert hass.states.get(contact).state == "off"
     assert await hass.config_entries.async_reload(entry.entry_id)
@@ -158,10 +140,17 @@ async def test_contact_id_survives_reload_and_device_stream_updates(
         await wait_for_entity(hass, "binary_sensor", "AABB0011_CONTACT1_contact")
         == contact
     )
-    await wait_for_state(hass, contact, "off")
-    mqtt_transport.receive(
-        "EnOcean/AABB0011/stream/device/CONTACT1/states/contact",
-        json.dumps("open"),
+    await wait_until(lambda: hass.states.get(contact).state == "off")
+    await gateway.wait_for_stream()
+    # A new stream starts with the current device list (full resync).
+    gateway.devices = [
+        device_object("CONTACT1", EEP, states=[{"key": "contact", "value": "open"}])
+    ]
+    await gateway.close_streams()
+    await wait_until(lambda: hass.states.get(contact).state == "on")
+    assert (
+        er.async_get(hass).async_get_entity_id(
+            "binary_sensor", DOMAIN, "AABB0011_CONTACT1_contact"
+        )
+        == contact
     )
-    await wait_for_state(hass, contact, "on")
-    assert hass.states.get(contact).state == "on"

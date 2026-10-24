@@ -7,7 +7,9 @@ from typing import Any
 from homeassistant.components.light import LightEntity
 from homeassistant.components.light.const import (
     ATTR_BRIGHTNESS,
+    ATTR_TRANSITION,
     ColorMode,
+    LightEntityFeature,
 )
 from homeassistant.components.light.const import (
     DOMAIN as LIGHT_DOMAIN,
@@ -26,7 +28,7 @@ from .coordinator import (
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanDevice
-from .entity import OpusGreenNetEntity, migrate_legacy_multichannel_entity
+from .entity import OpusGreenNetEntity, migrate_output_entities
 
 # The coordinator serializes commands per device; entities receive pushed state.
 PARALLEL_UPDATES = 0
@@ -49,7 +51,7 @@ async def async_setup_entry(
         if device.entity_type != "light":
             return
 
-        migrate_legacy_multichannel_entity(
+        migrate_output_entities(
             entity_registry,
             LIGHT_DOMAIN,
             eag_id,
@@ -119,6 +121,10 @@ class OpusGreenNetLight(OpusGreenNetEntity, LightEntity):
         else:
             self._attr_color_mode = ColorMode.ONOFF
             self._attr_supported_color_modes = {ColorMode.ONOFF}
+        # Commands switch at once; a transition uses the dimmer's own fade
+        # (its configured ramping time, not the requested duration).
+        if device.supports_ramping_mode:
+            self._attr_supported_features = LightEntityFeature.TRANSITION
 
     @property
     def is_on(self) -> bool | None:
@@ -141,8 +147,9 @@ class OpusGreenNetLight(OpusGreenNetEntity, LightEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
         brightness = kwargs.get(ATTR_BRIGHTNESS)
+        transition = bool(kwargs.get(ATTR_TRANSITION))
         if brightness == 0 and self._device.is_dimmable:
-            await self.async_turn_off()
+            await self.async_turn_off(**kwargs)
             return
         snapshot = self._device.snapshot_channel_state(self._channel_id)
 
@@ -153,17 +160,19 @@ class OpusGreenNetLight(OpusGreenNetEntity, LightEntity):
                 self._channel_id,
                 brightness_pct,
                 is_dimmable=self._device.is_dimmable,
+                transition=transition,
             )
         else:
             delivery = await self._coordinator.async_turn_on(
                 self._device.device_id,
                 self._channel_id,
                 is_dimmable=self._device.is_dimmable,
+                transition=transition,
             )
-
         if delivery is CommandDelivery.DEFERRED:
-            # Queued by the gateway (ACK 201): keep the last reported state.
+            # Queued for a sleeping device (201): keep the reported state.
             return
+
         if self._device.is_dimmable:
             applied = self._device.apply_dim_estimate(
                 snapshot, 100 if brightness is None else brightness_pct
@@ -180,6 +189,7 @@ class OpusGreenNetLight(OpusGreenNetEntity, LightEntity):
             self._device.device_id,
             self._channel_id,
             is_dimmable=self._device.is_dimmable,
+            transition=bool(kwargs.get(ATTR_TRANSITION)),
         )
         if delivery is CommandDelivery.DEFERRED:
             return

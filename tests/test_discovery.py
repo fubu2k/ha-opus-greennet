@@ -1,372 +1,315 @@
-"""MQTT discovery of OPUS gateways (quality-scale rule ``discovery``).
-
-A device-model publication only identifies a candidate gateway. These tests
-assert that discovery shares the unique ID with manual setup, never publishes
-before the user confirms, keeps the existing fresh gateway check and creates
-exactly one entry per gateway, including duplicate and racing announcements.
-"""
+"""Finding the gateway in the local network (mDNS) for setup and migration."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from types import MappingProxyType
-from unittest.mock import AsyncMock, patch
+from collections.abc import Iterator
+from ipaddress import ip_address
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant import config_entries, loader
+from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.helpers.discovery_flow import DiscoveryKey
-from homeassistant.helpers.service_info.mqtt import MqttServiceInfo
-from paho.mqtt.client import topic_matches_sub
+from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
+from zeroconf import IPVersion, ServiceStateChange
 
 from custom_components.opus_greennet.const import DOMAIN
 from custom_components.opus_greennet.discovery import (
-    DISCOVERY_TOPIC_FILTER,
-    eag_id_from_discovery,
-    normalize_eag_id,
+    ZEROCONF_TYPE,
+    LocatedGateway,
+    async_browse_gateway_hosts,
+    async_locate_gateway,
 )
-from tests.ha_helpers import configure_bridge
+from tests.fake_gateway import FakeGateway, device_object
+from tests.ha_helpers import setup_bridge
 
-MANIFEST = json.loads(
-    (
-        Path(__file__).resolve().parents[1]
-        / "custom_components/opus_greennet/manifest.json"
-    ).read_text(encoding="utf-8")
-)
-TOPIC = "EnOcean/AABB0011/stream/devices/DEV1/friendlyId"
+DISCOVERY = "custom_components.opus_greennet.discovery"
 
 
-def _info(
-    topic: str = TOPIC, payload: str | bytes = "Living room", *, retain: bool = True
-) -> MqttServiceInfo:
-    return MqttServiceInfo(
-        topic=topic,
-        payload=payload,
-        qos=0,
-        retain=retain,
-        subscribed_topic=DISCOVERY_TOPIC_FILTER,
-        timestamp=0.0,
+async def _legacy_entry(hass: HomeAssistant, eag_id: str) -> config_entries.ConfigEntry:
+    """Add an entry as the former MQTT transport created it, and set it up."""
+    entry = config_entries.ConfigEntry(
+        version=1,
+        minor_version=1,
+        domain=DOMAIN,
+        title=f"Opus GreenNet ({eag_id})",
+        data={"eag_id": eag_id},
+        source=config_entries.SOURCE_USER,
+        options={},
+        unique_id=eag_id,
+        discovery_keys={},
+        subentries_data=None,
+    )
+    await hass.config_entries.async_add(entry)
+    await hass.async_block_till_done()
+    return entry
+
+
+@pytest.fixture
+def found_hosts() -> Iterator[list[str]]:
+    """Addresses the mDNS search reports; the REST port is the fake's port."""
+    hosts: list[str] = []
+    with patch(
+        f"{DISCOVERY}.async_browse_gateway_hosts", AsyncMock(return_value=hosts)
+    ):
+        yield hosts
+
+
+@pytest.fixture(autouse=True)
+def rest_port(gateway: FakeGateway) -> Iterator[None]:
+    """Default credentials use the fake gateway's port instead of 8080."""
+    with patch(f"{DISCOVERY}.DEFAULT_PORT", gateway.port):
+        yield
+
+
+def _announcement(host: str, **properties: str) -> ZeroconfServiceInfo:
+    address = ip_address(host)
+    return ZeroconfServiceInfo(
+        ip_address=address,
+        ip_addresses=[address],
+        port=80,
+        hostname="opusshgw.local.",
+        type=ZEROCONF_TYPE,
+        name=f"opusshgw.{ZEROCONF_TYPE}",
+        properties=properties,
     )
 
 
-async def _discover(hass: HomeAssistant, info: MqttServiceInfo | None = None):
-    info = info or _info()
+async def _discover(hass: HomeAssistant, host: str, **properties: str) -> Any:
     return await hass.config_entries.flow.async_init(
         DOMAIN,
-        context={
-            "source": config_entries.SOURCE_MQTT,
-            "discovery_key": DiscoveryKey(domain="mqtt", key=info.topic, version=1),
-        },
-        data=info,
+        context={"source": config_entries.SOURCE_ZEROCONF},
+        data=_announcement(host, **properties),
     )
 
 
-def _flows(hass: HomeAssistant) -> list:
-    return hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+# ── mDNS search ─────────────────────────────────────────────────────────────
 
 
-def _entry(
-    unique_id: str,
-    *,
-    source: str = config_entries.SOURCE_USER,
-    disabled: bool = False,
-) -> config_entries.ConfigEntry:
-    """A registry-only entry that Home Assistant does not set up."""
-    return config_entries.ConfigEntry(
-        data={} if source == config_entries.SOURCE_IGNORE else {"eag_id": unique_id},
-        discovery_keys=MappingProxyType({}),
-        disabled_by=config_entries.ConfigEntryDisabler.USER if disabled else None,
-        domain=DOMAIN,
-        minor_version=1,
-        options={},
-        source=source,
-        subentries_data=None,
-        title=f"Opus GreenNet ({unique_id})",
-        unique_id=unique_id,
-        version=1,
-    )
+async def test_search_needs_the_zeroconf_integration(hass: HomeAssistant) -> None:
+    assert await async_browse_gateway_hosts(hass) == []
 
 
-# ── Candidate validation (no Home Assistant flow needed) ─────────────────────
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ("AABB0011", "AABB0011"),
-        (" aabb0011 ", "AABB0011"),
-        ("AABB001", None),
-        ("AABB00111", None),
-        ("AABB00G1", None),
-        ("", None),
-    ],
-)
-def test_normalize_eag_id(value: str, expected: str | None) -> None:
-    assert normalize_eag_id(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("topic", "payload", "expected"),
-    [
-        (TOPIC, "Living room", "AABB0011"),
-        (TOPIC, b"123", "AABB0011"),
-        (TOPIC, "", None),
-        (TOPIC, b"", None),
-        # Topics are case sensitive; the entry subscribes in upper case.
-        ("EnOcean/aabb0011/stream/devices/DEV1/friendlyId", "x", None),
-        ("EnOcean/AABB001/stream/devices/DEV1/friendlyId", "x", None),
-        ("EnOcean/AABB00G1/stream/devices/DEV1/friendlyId", "x", None),
-        ("EnOcean/AABB0011/stream/device/DEV1/friendlyId", "x", None),
-        ("EnOcean/AABB0011/stream/devices/DEV1/states/switch", "on", None),
-        ("EnOcean/AABB0011/stream/devices/DEV1/x/friendlyId", "x", None),
-        ("Other/AABB0011/stream/devices/DEV1/friendlyId", "x", None),
-    ],
-)
-def test_candidate_validation(topic: str, payload, expected: str | None) -> None:
-    assert eag_id_from_discovery(topic, payload) == expected
-
-
-def test_manifest_filter_is_the_validated_filter() -> None:
-    assert MANIFEST["mqtt"] == [DISCOVERY_TOPIC_FILTER]
-    # Only the narrow device-model leaf matches, never the retained snapshot's
-    # state topics or the live delta stream.
-    assert topic_matches_sub(DISCOVERY_TOPIC_FILTER, TOPIC)
-    for topic in (
-        "EnOcean/AABB0011/stream/devices/DEV1/states/switch",
-        "EnOcean/AABB0011/stream/device/DEV1/friendlyId",
-        "EnOcean/AABB0011/stream/telegram/DEV1/from",
-        "EnOcean/AABB0011/getAnswer/config/system/uptime",
-    ):
-        assert not topic_matches_sub(DISCOVERY_TOPIC_FILTER, topic), topic
-
-
-async def test_home_assistant_loads_the_manifest_filter(hass: HomeAssistant) -> None:
-    mqtt_topics = await loader.async_get_mqtt(hass)
-    assert mqtt_topics[DOMAIN] == [DISCOVERY_TOPIC_FILTER]
-
-
-# ── Config flow ──────────────────────────────────────────────────────────────
-
-
-async def test_discovery_confirms_then_probes_and_creates_one_entry(
-    hass: HomeAssistant, mqtt_transport
+async def test_search_collects_ipv4_addresses_of_announced_gateways(
+    hass: HomeAssistant,
 ) -> None:
-    result = await _discover(hass)
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "discovery_confirm"
-    assert result["description_placeholders"] == {"eag_id": "AABB0011"}
-    assert result["errors"] == {}
-    (flow,) = _flows(hass)
-    assert flow["context"]["unique_id"] == "AABB0011"
-    assert flow["context"]["title_placeholders"] == {"eag_id": "AABB0011"}
-    assert flow["context"]["confirm_only"] is True
-    # A retained announcement is a candidate only: nothing is published.
-    assert mqtt_transport.published == []
+    hass.config.components.add("zeroconf")
+    aiozc = MagicMock()
 
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Opus GreenNet (AABB0011)"
-    assert result["data"] == {"eag_id": "AABB0011"}
-    entry = result["result"]
-    assert entry.unique_id == "AABB0011"
-    assert entry.source == config_entries.SOURCE_MQTT
-    assert entry.discovery_keys == {
-        "mqtt": (DiscoveryKey(domain="mqtt", key=TOPIC, version=1),)
-    }
-    # The fresh gateway check comes first; no device command or status query.
-    topics = [topic for topic, _ in mqtt_transport.published]
-    assert topics[0] == "EnOcean/AABB0011/get/config/system/uptime"
-    assert not [topic for topic in topics if "/put/" in topic]
-    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
-    assert _flows(hass) == []
-
-
-async def test_invalid_announcement_is_ignored_without_publish(
-    hass: HomeAssistant, mqtt_transport
-) -> None:
-    for info in (
-        _info(payload=""),
-        _info(topic="EnOcean/aabb0011/stream/devices/DEV1/friendlyId"),
-        _info(topic="EnOcean/AABB0011/stream/devices/DEV1/states/switch"),
-    ):
-        result = await _discover(hass, info)
-        assert result["type"] is FlowResultType.ABORT
-        assert result["reason"] == "invalid_discovery_info"
-    assert mqtt_transport.published == []
-    assert _flows(hass) == []
-    assert hass.config_entries.async_entries(DOMAIN) == []
-
-
-async def test_configured_gateway_aborts_without_side_effects(
-    hass: HomeAssistant, mqtt_transport
-) -> None:
-    entry = (await configure_bridge(hass))["result"]
-    await hass.async_block_till_done()
-    mqtt_transport.published.clear()
-    with patch.object(hass.config_entries, "async_schedule_reload") as reload:
-        for device in ("DEV1", "DEV2", "DEV3"):
-            result = await _discover(
-                hass,
-                _info(topic=f"EnOcean/AABB0011/stream/devices/{device}/friendlyId"),
+    def browser(zc: Any, types: list[str], handlers: list[Any]) -> MagicMock:
+        assert types == [ZEROCONF_TYPE]
+        for name, change in (
+            ("a._enocean._tcp.local.", ServiceStateChange.Added),
+            ("b._enocean._tcp.local.", ServiceStateChange.Updated),
+            ("c._enocean._tcp.local.", ServiceStateChange.Added),
+            ("gone._enocean._tcp.local.", ServiceStateChange.Removed),
+        ):
+            handlers[0](
+                zeroconf=zc, service_type=ZEROCONF_TYPE, name=name, state_change=change
             )
-            assert result["type"] is FlowResultType.ABORT
-            assert result["reason"] == "already_configured"
-    reload.assert_not_called()
-    # Device announcements neither publish nor rewrite the entry's discovery keys.
-    assert mqtt_transport.published == []
-    assert entry.discovery_keys == {}
-    assert hass.config_entries.async_entries(DOMAIN) == [entry]
+        return MagicMock(async_cancel=AsyncMock())
 
+    addresses = {
+        "a._enocean._tcp.local.": ["192.0.2.10"],
+        "b._enocean._tcp.local.": ["192.0.2.10", "192.0.2.11"],
+    }
 
-@pytest.mark.parametrize(
-    "existing",
-    [
-        {"source": config_entries.SOURCE_IGNORE},
-        {"disabled": True},
-    ],
-    ids=["ignored", "disabled"],
-)
-async def test_ignored_or_disabled_gateway_is_not_offered_again(
-    hass: HomeAssistant, mqtt_transport, existing
-) -> None:
-    await hass.config_entries.async_add(_entry("AABB0011", **existing))
-    result = await _discover(hass)
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_configured"
-    assert mqtt_transport.published == []
-    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    def service_info(service_type: str, name: str) -> MagicMock:
+        info = MagicMock()
+        # c does not answer the resolution request.
+        info.async_request = AsyncMock(return_value=name in addresses)
 
+        def parsed(version: IPVersion) -> list[str]:
+            assert version is IPVersion.V4Only
+            return addresses[name]
 
-async def test_announcements_of_one_gateway_create_one_flow(
-    hass: HomeAssistant, mqtt_transport
-) -> None:
-    first = await _discover(hass)
-    assert first["type"] is FlowResultType.FORM
-    for device in ("DEV2", "DEV3"):
-        result = await _discover(
-            hass, _info(topic=f"EnOcean/AABB0011/stream/devices/{device}/friendlyId")
-        )
-        assert result["type"] is FlowResultType.ABORT
-        assert result["reason"] == "already_in_progress"
-    assert [flow["flow_id"] for flow in _flows(hass)] == [first["flow_id"]]
-    assert mqtt_transport.published == []
+        info.parsed_addresses = parsed
+        return info
 
-
-async def test_multiple_gateways_are_offered_separately(
-    hass: HomeAssistant, mqtt_transport
-) -> None:
-    for eag_id in ("AABB0011", "CCDD0022"):
-        result = await _discover(
-            hass, _info(topic=f"EnOcean/{eag_id}/stream/devices/DEV1/friendlyId")
-        )
-        assert result["type"] is FlowResultType.FORM
-    assert sorted(flow["context"]["unique_id"] for flow in _flows(hass)) == [
-        "AABB0011",
-        "CCDD0022",
-    ]
-    assert mqtt_transport.published == []
-
-
-async def test_manual_setup_during_pending_discovery_creates_no_duplicate(
-    hass: HomeAssistant, mqtt_transport
-) -> None:
-    discovered = await _discover(hass)
-    result = await configure_bridge(hass, "aabb0011")
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_in_progress"
-    assert mqtt_transport.published == []
-    assert hass.config_entries.async_entries(DOMAIN) == []
-    # A different gateway can still be set up manually at the same time.
-    other = await configure_bridge(hass, "ccdd0022")
-    assert other["type"] is FlowResultType.CREATE_ENTRY
-    result = await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert sorted(
-        entry.unique_id for entry in hass.config_entries.async_entries(DOMAIN)
-    ) == ["AABB0011", "CCDD0022"]
-
-
-async def test_entry_added_while_confirm_is_open_aborts_without_probe(
-    hass: HomeAssistant, mqtt_transport
-) -> None:
-    discovered = await _discover(hass)
-    await hass.config_entries.async_add(_entry("AABB0011", disabled=True))
-    result = await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_configured"
-    assert mqtt_transport.published == []
-    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
-
-
-async def test_confirm_recovers_from_disconnected_broker(
-    hass: HomeAssistant, mqtt_transport
-) -> None:
-    discovered = await _discover(hass)
-    mqtt_transport.connected = False
-    result = await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
-    assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "discovery_confirm"
-    assert result["errors"] == {"base": "cannot_connect"}
-    assert mqtt_transport.published == []
-    mqtt_transport.connected = True
-    result = await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["result"].unique_id == "AABB0011"
-
-
-async def test_confirm_recovers_from_unresponsive_gateway(
-    hass: HomeAssistant, mqtt_transport
-) -> None:
-    """A retained announcement of a gateway that is offline creates no entry."""
-    discovered = await _discover(hass)
-    mqtt_transport.reply = False
-    with patch(
-        "custom_components.opus_greennet.mqtt_transport.SETUP_REQUEST_TIMEOUT", 0.01
+    with (
+        patch(
+            f"{DISCOVERY}.ha_zeroconf.async_get_async_instance",
+            AsyncMock(return_value=aiozc),
+        ),
+        patch(f"{DISCOVERY}.AsyncServiceBrowser", side_effect=browser),
+        patch(f"{DISCOVERY}.AsyncServiceInfo", side_effect=service_info),
+        patch(f"{DISCOVERY}.BROWSE_SECONDS", 0),
     ):
-        result = await hass.config_entries.flow.async_configure(
-            discovered["flow_id"], {}
-        )
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "gateway_unavailable"}
-    # Exactly the one probe; no retry and no device request.
-    assert [topic for topic, _ in mqtt_transport.published] == [
-        "EnOcean/AABB0011/get/config/system/uptime"
-    ]
-    assert hass.config_entries.async_entries(DOMAIN) == []
-    mqtt_transport.reply = True
-    result = await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
-    assert result["type"] is FlowResultType.CREATE_ENTRY
+        assert await async_browse_gateway_hosts(hass) == ["192.0.2.10", "192.0.2.11"]
 
 
-async def test_confirm_recovers_from_unexpected_exception(
-    hass: HomeAssistant, mqtt_transport, caplog: pytest.LogCaptureFixture
+async def test_locate_accepts_the_gateway_with_the_same_eurid(
+    hass: HomeAssistant, gateway: FakeGateway, found_hosts: list[str]
 ) -> None:
-    discovered = await _discover(hass)
-    with patch(
-        "custom_components.opus_greennet.config_flow.async_probe_gateway",
-        new=AsyncMock(side_effect=RuntimeError("boom")),
-    ):
-        result = await hass.config_entries.flow.async_configure(
-            discovered["flow_id"], {}
-        )
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "unknown"}
-    assert "Unexpected exception" in caplog.text
-    result = await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
-    assert result["type"] is FlowResultType.CREATE_ENTRY
+    other = FakeGateway(eurid="11223344", password="11223344")
+    await other.start()
+    try:
+        with patch(f"{DISCOVERY}.DEFAULT_PORT", other.port):
+            found_hosts[:] = ["192.0.2.1", other.host]
+            # Unreachable candidates and other gateways are skipped.
+            assert await async_locate_gateway(hass, gateway.eurid) is None
+            assert await async_locate_gateway(hass, "11223344") == LocatedGateway(
+                other.host, verified=True
+            )
+    finally:
+        await other.stop()
 
 
-async def test_discovered_entry_blocks_a_second_manual_entry(
-    hass: HomeAssistant, mqtt_transport
+async def test_locate_keeps_a_single_gateway_that_rejects_the_default_password(
+    hass: HomeAssistant, gateway: FakeGateway, found_hosts: list[str]
 ) -> None:
-    discovered = await _discover(hass)
-    await hass.config_entries.flow.async_configure(discovered["flow_id"], {})
+    gateway.password = "changed"
+    found_hosts[:] = [gateway.host]
+    assert await async_locate_gateway(hass, gateway.eurid) == LocatedGateway(
+        gateway.host, verified=False
+    )
+    # With several candidates the rejecting one cannot be attributed.
+    found_hosts[:] = [gateway.host, "192.0.2.1"]
+    assert await async_locate_gateway(hass, gateway.eurid) is None
+
+
+# ── migration of former MQTT entries at setup ───────────────────────────────
+
+
+async def test_legacy_entry_finds_its_gateway_without_asking(
+    hass: HomeAssistant, gateway: FakeGateway, found_hosts: list[str]
+) -> None:
+    gateway.devices = [device_object("DEV1", "D2-01-01")]
+    found_hosts[:] = [gateway.host]
+    entry = await _legacy_entry(hass, gateway.eurid)
+    await gateway.wait_for_stream()
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.data == {"eag_id": gateway.eurid, **gateway.config}
+    assert entry.runtime_data.coordinator.get_device("DEV1") is not None
+    assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+
+
+async def test_legacy_entry_asks_only_for_the_password_when_it_was_changed(
+    hass: HomeAssistant, gateway: FakeGateway, found_hosts: list[str]
+) -> None:
+    gateway.password = "changed"
+    found_hosts[:] = [gateway.host]
+    entry = await _legacy_entry(hass, gateway.eurid)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.data["host"] == gateway.host
+    flow_id = hass.config_entries.flow.async_progress_by_handler(DOMAIN)[0]["flow_id"]
+    form = await hass.config_entries.flow.async_configure(flow_id)
+    host = next(key for key in form["data_schema"].schema if str(key) == "host")
+    assert host.default() == gateway.host
+    result = await hass.config_entries.flow.async_configure(flow_id, gateway.config)
+    assert result["reason"] == "reauth_successful"
     await hass.async_block_till_done()
-    mqtt_transport.published.clear()
-    result = await configure_bridge(hass, " aabb0011 ")
+    assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_legacy_entry_asks_for_the_address_when_nothing_is_found(
+    hass: HomeAssistant, gateway: FakeGateway, found_hosts: list[str]
+) -> None:
+    entry = await _legacy_entry(hass, gateway.eurid)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert "host" not in entry.data
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert [flow["context"]["source"] for flow in flows] == ["reauth"]
+
+
+# ── zeroconf discovery flow ─────────────────────────────────────────────────
+
+
+async def test_discovery_completes_a_legacy_entry_and_ends_its_reauth(
+    hass: HomeAssistant, gateway: FakeGateway, found_hosts: list[str]
+) -> None:
+    gateway.devices = [device_object("DEV1", "D2-01-01")]
+    entry = await _legacy_entry(hass, gateway.eurid)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+
+    result = await _discover(hass, gateway.host, serial="2109201800000128")
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
-    assert mqtt_transport.published == []
-    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    await hass.async_block_till_done()
+    await gateway.wait_for_stream()
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.data == {"eag_id": gateway.eurid, **gateway.config}
+    # The reload ended the reauthentication that asked for the address.
+    assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+
+
+async def test_discovery_updates_a_changed_address(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    with patch.object(gateway, "host", "localhost"):
+        entry = await setup_bridge(hass, gateway)
+    assert entry.data["host"] == "localhost"
+    result = await _discover(hass, "127.0.0.1")
+    assert result["reason"] == "already_configured"
+    await hass.async_block_till_done()
+    await gateway.wait_for_stream()
+    assert entry.data["host"] == "127.0.0.1"
+    assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_discovery_of_the_known_address_changes_nothing(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    entry = await setup_bridge(hass, gateway)
+    requests = len(gateway.requests)
+    result = await _discover(hass, gateway.host)
+    assert result["reason"] == "already_configured"
+    assert entry.state is ConfigEntryState.LOADED
+    # No request: the address alone identifies the entry.
+    assert len(gateway.requests) == requests
+
+
+async def test_discovery_offers_a_new_gateway_with_its_address(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    result = await _discover(hass, gateway.host, serial="2109201800000128")
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    host = next(key for key in result["data_schema"].schema if str(key) == "host")
+    assert host.default() == gateway.host
+    flow = hass.config_entries.flow.async_get(result["flow_id"])
+    assert flow["context"]["title_placeholders"] == {"host": gateway.host}
+    assert flow["context"]["unique_id"] == "serial-2109201800000128"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], gateway.config
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == gateway.eurid
+    await hass.async_block_till_done()
+
+
+async def test_discovery_of_another_gateway_leaves_entries_alone(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    """A gateway that is not the configured one is offered as a new one."""
+    unreachable = await _legacy_entry(hass, "55667788")
+    # The default credentials of entry 11223344 work, but the EURID differs.
+    gateway.password = "11223344"
+    entry = await _legacy_entry(hass, "11223344")
+    result = await _discover(hass, gateway.host)
+    assert result["type"] is FlowResultType.FORM
+    assert "host" not in entry.data
+    assert "host" not in unreachable.data
+
+
+async def test_ignored_gateway_stays_ignored(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    result = await _discover(hass, gateway.host, serial="2109201800000128")
+    await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_IGNORE},
+        data={"unique_id": "serial-2109201800000128", "title": "OPUS"},
+    )
+    result = await _discover(hass, gateway.host, serial="2109201800000128")
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_discovery_ignores_ipv6_announcements(hass: HomeAssistant) -> None:
+    result = await _discover(hass, "fe80::1")
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "not_ipv4_address"

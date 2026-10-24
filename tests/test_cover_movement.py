@@ -1,30 +1,33 @@
 """Estimated cover travel is separate from command echoes and confirmed state."""
 
 import asyncio
-import json
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.opus_greennet import protocol
 from custom_components.opus_greennet.cover import OpusGreenNetCover
-from tests.ha_helpers import configure_bridge, wait_for_entity
-from tests.test_coordinator_transport import broker as broker
-from tests.test_coordinator_transport import (
+from tests.fake_gateway import device_object, telegram
+from tests.ha_helpers import setup_bridge, wait_for_entity, wait_until
+from tests.test_coordinator_commands import (
     connected_coordinator as connected_coordinator,
 )
+from tests.test_coordinator_commands import radio as radio
 from tests.test_reconciliation_feedback import (
-    ANSWER_TOPIC,
-    MQTT_SHAPES,
+    assert_status_queries,
+    fire_timer,
     receive_feedback,
 )
 from tests.test_reconciliation_feedback import (
     feedback_coordinator as feedback_coordinator,
 )
-from tests.test_reconciliation_feedback import (
-    timers as timers,
-)
+from tests.test_reconciliation_feedback import timers as timers
+
+
+def command_echo(coord, functions):
+    """Deliver an outbound command telegram (HomeKit, gateway logic, us)."""
+    coord._handle_document(telegram("DEV1", functions, direction="to"))
 
 
 @pytest.fixture
@@ -115,27 +118,18 @@ async def test_late_outbound_echo_does_not_finish_or_extend_movement(motion, tim
     await coord.async_set_cover_position("DEV1", 0)
     movement = coord._cover_movements["DEV1", 0]
     clock[0] += 3
-    coord._handle_telegram_property_message(
-        SimpleNamespace(
-            topic="EnOcean/AABB0011/stream/telegram/DEV1/to",
-            payload=json.dumps(
-                {"direction": "to", "functions": [{"key": "position", "value": 0}]}
-            ),
-            retain=False,
-        )
-    )
+    command_echo(coord, [{"key": "position", "value": 0}])
     assert channel.position == 100
     assert coord._cover_movements["DEV1", 0] is movement
     assert movement.ends_at == 130
     assert [delay for delay, _, _ in timers[-2:]] == [37, 47]
 
 
-@pytest.mark.parametrize("shape", MQTT_SHAPES)
-async def test_numeric_feedback_ends_estimate_and_reconciliation(motion, timers, shape):
+async def test_numeric_feedback_ends_estimate_and_reconciliation(motion, timers):
     coord, channel, _ = motion
     await coord.async_set_cover_position("DEV1", 0)
     pending = timers[:]
-    receive_feedback(coord, [{"key": "position", "value": 40}], shape=shape)
+    receive_feedback(coord, [{"key": "position", "value": 40}])
     assert channel.position == 40
     assert channel.movement is None
     assert not coord._cover_movements
@@ -155,13 +149,13 @@ async def test_invalid_feedback_does_not_end_estimate(motion, timers, value):
     assert not timers[1][2].called
 
 
-async def test_feedback_before_ack_prevents_new_delayed_queries(motion, broker, timers):
+async def test_feedback_before_ack_prevents_new_delayed_queries(motion, radio, timers):
     coord, channel, _ = motion
-    broker.auto_respond = False
+    radio.auto_respond = False
     task = asyncio.create_task(coord.async_set_cover_position("DEV1", 0))
-    await asyncio.sleep(0)
+    await radio.wait_sent(1)
     receive_feedback(coord, [{"key": "position", "value": 0}])
-    broker.receive(ANSWER_TOPIC, {"header": {"httpStatus": 200}})
+    radio.respond()
     await task
     assert channel.movement is None
     assert len(timers) == 1
@@ -169,34 +163,32 @@ async def test_feedback_before_ack_prevents_new_delayed_queries(motion, broker, 
 
 
 async def test_stop_clears_motion_before_ack_and_preserves_stop_protocol(
-    motion, broker, timers
+    motion, radio, timers
 ):
     coord, channel, _ = motion
     await coord.async_set_cover_position("DEV1", 0)
     old = timers[:]
-    broker.auto_respond = False
+    radio.auto_respond = False
     task = asyncio.create_task(coord.async_stop_cover("DEV1"))
-    await asyncio.sleep(0)
+    await radio.wait_sent(2)
     assert channel.movement is None
     assert channel.position == 100  # Stop does not invent a final position.
     assert all(cancel.called for _, _, cancel in old)
-    assert json.loads(broker.published[-1][1])["state"]["functions"] == [
-        {"key": "stop", "value": "true"}
-    ]
-    broker.receive(ANSWER_TOPIC, {"header": {"httpStatus": 200}})
+    assert radio.functions()[-1] == [{"key": "stop", "value": "true"}]
+    radio.respond()
     await task
     assert [delay for delay, _, _ in timers[-2:]] == [5, 20]
 
 
 async def test_rejected_command_does_not_clear_another_channels_motion(
-    motion, broker, timers
+    motion, radio, timers
 ):
     coord, channel, _ = motion
     other = coord.devices["DEV1"].get_or_create_channel(1)
     other.position = 100
     other.vertical_movement_time = 25
     await coord.async_set_cover_position("DEV1", 0, 1)
-    broker.response = {"header": {"httpStatus": 400}}
+    radio.response = {"header": {"httpStatus": 400}}
     with pytest.raises(HomeAssistantError):
         await coord.async_set_cover_position("DEV1", 0, 0)
     assert channel.movement is None
@@ -211,7 +203,7 @@ async def test_cleanup_cancels_motion_and_queries(motion, timers, operation):
     coord, channel, _ = motion
     await coord.async_set_cover_position("DEV1", 0)
     if operation == "disconnect":
-        coord._handle_bridge_status(SimpleNamespace(payload="0"))
+        coord._set_gateway_available(False)
     elif operation == "remove":
         coord.async_forget_device("DEV1")
     else:
@@ -246,20 +238,21 @@ def test_invalid_travel_time_keeps_known_configuration(make_device, value):
     assert channel.vertical_movement_time == 25
 
 
-async def test_real_ha_cover_shows_motion_and_accepts_configuration_deltas(
-    hass, mqtt_transport
+async def test_real_ha_cover_shows_motion_and_accepts_configuration_updates(
+    hass, gateway
 ):
-    mqtt_transport.devices = [
-        {
-            "deviceId": "COVER",
-            "eeps": [{"eep": "D2-05-00"}],
-            "states": {"position": 100},
-            "configuration": {
-                "parameters": [{"key": "verticalMovementTime", "value": 25}]
+    def cover(travel: float) -> dict:
+        return device_object(
+            "COVER",
+            "D2-05-00",
+            states=[{"key": "position", "value": 100}],
+            configuration={
+                "parameters": [{"key": "verticalMovementTime", "value": travel}]
             },
-        }
-    ]
-    entry = (await configure_bridge(hass))["result"]
+        )
+
+    gateway.devices = [cover(25)]
+    entry = await setup_bridge(hass, gateway)
     entity = await wait_for_entity(hass, "cover", "AABB0011_COVER")
     channel = entry.runtime_data.coordinator.devices["COVER"].channels[0]
     assert channel.vertical_movement_time == 25
@@ -269,66 +262,59 @@ async def test_real_ha_cover_shows_motion_and_accepts_configuration_deltas(
     await hass.async_block_till_done()
     assert hass.states.get(entity).state == "opening"
     assert hass.states.get(entity).attributes["current_position"] == 0
-    mqtt_transport.receive(
-        "EnOcean/AABB0011/stream/telegram/COVER/from",
-        {"functions": [{"key": "position", "value": 0}]},
-    )
-    await hass.async_block_till_done()
+    assert gateway.requests_to("PUT", "/devices/COVER/state") == [
+        {"state": {"functions": [{"key": "position", "value": "0"}]}}
+    ]
+    await gateway.push(telegram("COVER", [{"key": "position", "value": 0}]))
+    await wait_until(lambda: hass.states.get(entity).state == "open")
+    # A changed movement time arrives with the next device list.
+    gateway.devices = [{**cover(40), "states": [{"key": "position", "value": 0}]}]
+    await gateway.close_streams()
+    await wait_until(lambda: channel.vertical_movement_time == 40)
     assert hass.states.get(entity).state == "open"
-    mqtt_transport.receive(
-        "EnOcean/AABB0011/stream/device/COVER/configuration/parameters/0/value", "40"
-    )
-    await asyncio.sleep(0.04)
-    await hass.async_block_till_done()
-    assert channel.vertical_movement_time == 40
 
 
-async def test_retarget_cancels_old_queries_before_ack(motion, broker, timers):
+async def test_retarget_cancels_old_queries_before_ack(motion, radio, timers):
     coord, channel, clock = motion
     await coord.async_set_cover_position("DEV1", 0)
     old = timers[:]
     clock[0] += 10
-    broker.auto_respond = False
+    radio.auto_respond = False
     task = asyncio.create_task(coord.async_set_cover_position("DEV1", 100))
-    await asyncio.sleep(0)
+    await radio.wait_sent(2)
     assert channel.movement == "closing"
     assert all(cancel.called for _, _, cancel in old)
-    broker.receive(ANSWER_TOPIC, {"header": {"httpStatus": 200}})
+    radio.respond()
     await task
     assert [delay for delay, _, _ in timers[-2:]] == [25, 35]
 
 
-async def test_queued_target_starts_only_when_published(motion, broker, timers):
+async def test_queued_target_starts_only_when_sent(motion, radio, timers):
     coord, channel, clock = motion
-    broker.auto_respond = False
+    radio.auto_respond = False
     first = asyncio.create_task(coord.async_set_cover_position("DEV1", 0))
-    await asyncio.sleep(0)
+    await radio.wait_sent(1)
     second = asyncio.create_task(coord.async_set_cover_position("DEV1", 100))
     await asyncio.sleep(0)
     assert channel.movement == "opening"
-    assert len(broker.published) == 1
+    assert len(radio.sent) == 1
     clock[0] += 10
-    broker.receive(ANSWER_TOPIC, {"header": {"httpStatus": 200}})
+    radio.respond()
     await first
-    await asyncio.sleep(0)
-    assert len(broker.published) == 2
+    await radio.wait_sent(2)
     assert channel.movement == "closing"
     assert coord._cover_movements["DEV1", 0].started_at == 110
-    broker.receive(ANSWER_TOPIC, {"header": {"httpStatus": 200}})
+    radio.respond()
     await second
 
 
 @pytest.mark.parametrize("failure", ["cancel", "timeout"])
-async def test_failed_request_clears_estimate(
-    motion, broker, timers, monkeypatch, failure
-):
+async def test_failed_request_clears_estimate(motion, radio, timers, failure):
     coord, channel, _ = motion
-    monkeypatch.setattr(
-        "custom_components.opus_greennet.mqtt_transport.REQUEST_TIMEOUT", 0.01
-    )
-    broker.auto_respond = False
+    radio.timeout = 0.01
+    radio.auto_respond = False
     task = asyncio.create_task(coord.async_set_cover_position("DEV1", 0))
-    await asyncio.sleep(0)
+    await radio.wait_sent(1)
     assert channel.movement == "opening"
     if failure == "cancel":
         task.cancel()
@@ -338,7 +324,8 @@ async def test_failed_request_clears_estimate(
     assert not coord._cover_movements
     assert not coord._pending_reconciliation_queries
     assert timers[0][2].called
-    broker.assert_clean()
+    assert not coord._radio_queue.locked()
+    assert not coord._command_waiters
 
 
 async def test_feedback_and_native_commands_are_channel_scoped(motion, timers):
@@ -347,19 +334,8 @@ async def test_feedback_and_native_commands_are_channel_scoped(motion, timers):
     other.position = 100
     other.vertical_movement_time = 40
     await coord.async_set_cover_position("DEV1", 0)
-    coord._handle_telegram_property_message(
-        SimpleNamespace(
-            topic="EnOcean/AABB0011/stream/telegram/DEV1/to",
-            payload=json.dumps(
-                {
-                    "functions": [
-                        {"key": "channel", "value": 1},
-                        {"key": "position", "value": 0},
-                    ]
-                }
-            ),
-            retain=False,
-        )
+    command_echo(
+        coord, [{"key": "channel", "value": 1}, {"key": "position", "value": 0}]
     )
     assert other.movement == "opening"
     assert other.position == 100
@@ -377,28 +353,26 @@ async def test_feedback_and_native_commands_are_channel_scoped(motion, timers):
     assert ("DEV1", 1) not in coord._pending_reconciliation_queries
 
 
-async def test_delayed_queries_publish_after_fallback(motion, broker, timers):
-    from tests.test_reconciliation_feedback import assert_status_queries, fire_timer
-
+async def test_delayed_queries_are_sent_after_fallback(motion, radio, timers):
     coord, channel, clock = motion
     await coord.async_set_cover_position("DEV1", 0)
     movement, first, second = timers[:]
     clock[0] = 130
     movement[1](None)
     assert channel.movement is None
-    assert_status_queries(broker, 0)
+    assert_status_queries(radio, 0)
     clock[0] = 140
     await fire_timer(coord, first)
-    assert_status_queries(broker, 1)
+    assert_status_queries(radio, 1)
     clock[0] = 150
     await fire_timer(coord, second)
-    assert_status_queries(broker, 2)
+    assert_status_queries(radio, 2)
 
 
 def test_configured_travel_is_channel_scoped_and_ignores_default_values(motion):
     coord, channel, _ = motion
     device = coord.devices["DEV1"]
-    functions = coord._configuration_state_functions(
+    functions = protocol.configuration_state_functions(
         {
             "configuration": {
                 "parameters": [
@@ -419,19 +393,19 @@ def test_configured_travel_is_channel_scoped_and_ignores_default_values(motion):
 
 @pytest.mark.parametrize("status", [200, 400])
 async def test_short_travel_waits_for_ack_before_assuming_target(
-    motion, broker, timers, status
+    motion, radio, timers, status
 ):
     coord, channel, clock = motion
     channel.position = 1
-    broker.auto_respond = False
+    radio.auto_respond = False
     task = asyncio.create_task(coord.async_set_cover_position("DEV1", 0))
-    await asyncio.sleep(0)
+    await radio.wait_sent(1)
     assert timers[0][0] == 5.25
     clock[0] += 6
     timers[0][1](None)
     assert channel.position == 1
     assert channel.movement == "opening"
-    broker.receive(ANSWER_TOPIC, {"header": {"httpStatus": status}})
+    radio.respond({"header": {"httpStatus": status}})
     if status == 400:
         with pytest.raises(HomeAssistantError):
             await task

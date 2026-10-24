@@ -57,7 +57,8 @@ async def test_description_inventory_matches_stable(hass, make_device, eep, keys
         ) == METADATA[key]
         assert entity.entity_registry_enabled_default is True
         assert entity.should_poll is False
-        assert entity.is_on is None
+        # The water sensor shows "dry" until it reports water.
+        assert entity.is_on is (False if key == "liquid_detected" else None)
         assert entity.available is True
     coordinator.available = False
     assert all(entity.available is False for entity in entities)
@@ -83,12 +84,14 @@ def test_description_states_match_stable(make_device, key, value):
     entity = OpusGreenNetDescriptiveBinarySensor(
         MagicMock(), "AABB0011", "gateway", device, description
     )
-    assert entity.is_on is None
+    assert entity.is_on is (False if key == "liquid_detected" else None)
     channel = device.get_or_create_channel()
     setattr(channel, key, value)
     expected = (
-        value
-        if key in ("liquid_detected", "window_open")
+        value is True
+        if key == "liquid_detected"
+        else value
+        if key == "window_open"
         else None
         if value is None
         else value != "reset"

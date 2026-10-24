@@ -7,7 +7,13 @@ from dataclasses import dataclass
 
 import probatio as vol
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.const import Platform
+from homeassistant.const import (
+    CONF_HOST,
+    CONF_PASSWORD,
+    CONF_PORT,
+    CONF_USERNAME,
+    Platform,
+)
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -15,17 +21,28 @@ from homeassistant.core import (
     SupportsResponse,
 )
 from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
     ConfigEntryNotReady,
-    HomeAssistantError,
     ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_EAG_ID, DOMAIN
-from .coordinator import OpusGreenNetCoordinator
+from .api import OpusApiError, OpusAuthError, OpusGatewayClient
+from .const import (
+    CONF_EAG_ID,
+    DEFAULT_PORT,
+    DEFAULT_USERNAME,
+    DOMAIN,
+    REPOSITIONING_DIRECT,
+    REPOSITIONING_FIRST_DOWN,
+    REPOSITIONING_FIRST_UP,
+)
+from .coordinator import GatewayMismatchError, OpusGreenNetCoordinator
+from .discovery import async_locate_gateway, default_connection
 from .entity import async_delete_config_entry_issues
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,6 +50,7 @@ _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS: list[Platform] = [
+    Platform.BUTTON,
     Platform.LIGHT,
     Platform.SWITCH,
     Platform.COVER,
@@ -47,7 +65,17 @@ SERVICE_GET_DEVICE_CONFIG = "get_device_configuration"
 SERVICE_SET_DEVICE_CONFIG = "set_device_configuration"
 SERVICE_GET_DEVICE_PARAMS = "get_device_parameters"
 SERVICE_RELOAD_ENTRY = "reload_entry"
+SERVICE_SET_COVER_POSITION = "set_cover_position"
 ATTR_DEVICE_ID = "device_id"
+ATTR_POSITION = "position"
+ATTR_REPOSITIONING = "repositioning"
+ATTR_CHANNEL = "channel"
+# Service values (snake case for the selector translations) -> wire values.
+REPOSITIONING_OPTIONS: dict[str, str] = {
+    "direct": REPOSITIONING_DIRECT,
+    "first_up": REPOSITIONING_FIRST_UP,
+    "first_down": REPOSITIONING_FIRST_DOWN,
+}
 ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 ATTR_CONFIGURATION = "configuration"
 
@@ -62,6 +90,21 @@ SERVICE_SET_CONFIG_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Required(ATTR_CONFIGURATION): dict,
+        vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
+    }
+)
+
+
+SERVICE_SET_COVER_POSITION_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): cv.string,
+        vol.Required(ATTR_POSITION): vol.All(vol.Coerce(int), vol.Range(0, 100)),
+        vol.Optional(ATTR_REPOSITIONING, default="direct"): vol.In(
+            REPOSITIONING_OPTIONS
+        ),
+        vol.Optional(ATTR_CHANNEL, default=0): vol.All(
+            vol.Coerce(int), vol.Range(min=0)
+        ),
         vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
     }
 )
@@ -139,12 +182,30 @@ def _validate_service_device(
         )
 
 
-def _describe_setup_failure(err: Exception) -> str:
-    """Return a short, payload-free description of why gateway setup failed."""
-    if isinstance(err, HomeAssistantError) and err.translation_key:
-        reason = (err.translation_placeholders or {}).get("reason")
-        return f"{err.translation_key} ({reason})" if reason else err.translation_key
-    return f"{type(err).__name__}: {err}" if str(err) else type(err).__name__
+async def _async_locate_legacy_gateway(
+    hass: HomeAssistant, entry: OpusGreenNetConfigEntry
+) -> None:
+    """Store the address of a former MQTT entry's gateway if it can be found.
+
+    A gateway that only rejected the default credentials is stored as well, so
+    the reauthentication form shows its address and only asks for the password.
+    """
+    eag_id = entry.data[CONF_EAG_ID]
+    located = await async_locate_gateway(hass, eag_id)
+    if located is None:
+        _LOGGER.info("OPUS gateway %s was not found in the local network", eag_id)
+        return
+    if located.verified:
+        _LOGGER.info("OPUS gateway %s found in the local network", eag_id)
+    else:
+        _LOGGER.info(
+            "OPUS gateway %s probably found in the local network; it rejected "
+            "the default credentials",
+            eag_id,
+        )
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, **default_connection(located.host, eag_id)}
+    )
 
 
 async def async_setup_entry(
@@ -152,21 +213,47 @@ async def async_setup_entry(
 ) -> bool:
     """Set up Opus GreenNet Bridge from a config entry."""
     eag_id = entry.data[CONF_EAG_ID]
-    coordinator = OpusGreenNetCoordinator(hass, eag_id)
+    if CONF_HOST not in entry.data:
+        # Entries created for the former MQTT transport only know the EAG
+        # identifier. Look for the gateway in the local network first; the
+        # reauthentication flow asks for the address only if it is not found.
+        await _async_locate_legacy_gateway(hass, entry)
+    if CONF_HOST not in entry.data:
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="gateway_address_required"
+        )
+    client = OpusGatewayClient(
+        async_get_clientsession(hass),
+        entry.data[CONF_HOST],
+        entry.data.get(CONF_PORT, DEFAULT_PORT),
+        entry.data.get(CONF_USERNAME, DEFAULT_USERNAME),
+        entry.data[CONF_PASSWORD],
+    )
+    coordinator = OpusGreenNetCoordinator(
+        hass, client, eag_id, on_auth_failed=lambda: entry.async_start_reauth(hass)
+    )
 
     try:
         await coordinator.async_setup()
-    except (HomeAssistantError, OSError) as err:
+    except OpusAuthError as err:
         await coordinator.async_unload()
-        # The translated ConfigEntryNotReady text is deliberately generic.
-        # Record the precise cause so request_timeout, mqtt_unavailable and
-        # an unreachable gateway can be told apart in the log.
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="invalid_auth"
+        ) from err
+    except GatewayMismatchError as err:
+        await coordinator.async_unload()
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="wrong_gateway"
+        ) from err
+    except OpusApiError as err:
+        await coordinator.async_unload()
+        # The translated ConfigEntryNotReady text is deliberately generic;
+        # the log keeps the precise cause.
         _LOGGER.warning(
             "OPUS gateway %s is not ready, Home Assistant will retry: %s",
             eag_id,
-            _describe_setup_failure(err),
+            err,
         )
-        _LOGGER.debug("Setup failure details for %s", eag_id, exc_info=err)
         raise ConfigEntryNotReady(
             translation_domain=DOMAIN,
             translation_key="gateway_unavailable",
@@ -176,6 +263,7 @@ async def async_setup_entry(
         raise
 
     try:
+        version = coordinator.gateway_info.get("version")
         device_registry = dr.async_get(hass)
         gateway_device = device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
@@ -184,6 +272,7 @@ async def async_setup_entry(
             model="GreenNet Bridge",
             name=entry.title,
             serial_number=eag_id,
+            sw_version=version if isinstance(version, str) else None,
         )
         entry.runtime_data = OpusGreenNetRuntimeData(
             coordinator=coordinator,
@@ -254,14 +343,7 @@ def _register_services(hass: HomeAssistant) -> None:
         coordinator = _coordinator_for_call(hass, call)
         device_id = call.data[ATTR_DEVICE_ID]
         _validate_service_device(coordinator, device_id)
-        result = await coordinator.async_get_device_configuration(device_id)
-        if result is None:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="device_request_timeout",
-                translation_placeholders={"device_id": device_id},
-            )
-        return result
+        return await coordinator.async_get_device_configuration(device_id)
 
     async def handle_set_device_configuration(call: ServiceCall) -> None:
         coordinator = _coordinator_for_call(hass, call)
@@ -275,14 +357,38 @@ def _register_services(hass: HomeAssistant) -> None:
         coordinator = _coordinator_for_call(hass, call)
         device_id = call.data[ATTR_DEVICE_ID]
         _validate_service_device(coordinator, device_id)
-        result = await coordinator.async_get_device_parameters(device_id)
-        if result is None:
-            raise HomeAssistantError(
+        return await coordinator.async_get_device_parameters(device_id)
+
+    async def handle_set_cover_position(call: ServiceCall) -> None:
+        coordinator = _coordinator_for_call(hass, call)
+        device_id = call.data[ATTR_DEVICE_ID]
+        _validate_service_device(coordinator, device_id)
+        device = coordinator.get_device(device_id)
+        repositioning = REPOSITIONING_OPTIONS[call.data[ATTR_REPOSITIONING]]
+        channel = call.data[ATTR_CHANNEL]
+        if (
+            device is None
+            or not device.is_cover
+            or channel >= device.channel_count
+            or (
+                repositioning != REPOSITIONING_DIRECT
+                and not device.supports_repositioning
+            )
+        ):
+            raise ServiceValidationError(
                 translation_domain=DOMAIN,
-                translation_key="device_request_timeout",
+                translation_key="repositioning_not_supported",
                 translation_placeholders={"device_id": device_id},
             )
-        return result
+        # Home Assistant position (100 = open) -> OPUS position (0 = open).
+        await coordinator.async_set_cover_position(
+            device_id,
+            100 - call.data[ATTR_POSITION],
+            channel,
+            repositioning=(
+                None if repositioning == REPOSITIONING_DIRECT else repositioning
+            ),
+        )
 
     async def handle_reload_entry(call: ServiceCall) -> None:
         config_entry_id = call.data.get(ATTR_CONFIG_ENTRY_ID)
@@ -316,6 +422,12 @@ def _register_services(hass: HomeAssistant) -> None:
         handle_get_device_parameters,
         schema=SERVICE_DEVICE_SCHEMA,
         supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_COVER_POSITION,
+        handle_set_cover_position,
+        schema=SERVICE_SET_COVER_POSITION_SCHEMA,
     )
     async_register_admin_service(
         hass,

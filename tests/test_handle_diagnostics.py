@@ -22,7 +22,8 @@ from custom_components.opus_greennet.binary_sensor import (
 )
 from custom_components.opus_greennet.const import DOMAIN
 from custom_components.opus_greennet.sensor import OpusGreenNetHandleSensor
-from tests.ha_helpers import MQTTTransport, configure_bridge, wait_for_entity
+from tests.fake_gateway import FakeGateway, telegram
+from tests.ha_helpers import setup_bridge, wait_for_entity
 
 PREFIX = "AABB0011_HANDLE"
 HANDLE_STATES = {
@@ -44,15 +45,25 @@ NORMAL_ENTITIES = (
 
 
 def _handle(eep: str) -> dict:
-    return {"deviceId": "HANDLE", "eeps": [{"eep": eep}], "states": HANDLE_STATES}
+    return {
+        "deviceId": "HANDLE",
+        "eeps": [{"eep": eep}],
+        # The gateway's stored answer to the next unlock request.
+        "targetState": [{"key": "unlock", "value": "notAllowed"}],
+        "states": [
+            {"key": key, "value": value} for key, value in HANDLE_STATES.items()
+        ],
+    }
 
 
-def _device_requests(transport: MQTTTransport, start: int = 0) -> list[str]:
-    """Return topics addressed to the handle itself (potential radio traffic)."""
+def _device_requests(gateway: FakeGateway, start: int = 0) -> list[str]:
+    """Return requests addressed to the handle itself (potential radio traffic)."""
     return [
-        topic
-        for topic, _payload in transport.published[start:]
-        if "/devices/HANDLE" in topic
+        path
+        for _method, path, _body in gateway.requests[start:]
+        if path.startswith("/devices/HANDLE")
+        # The profile read at setup is gateway data, not radio traffic.
+        and not path.endswith("/profile")
     ]
 
 
@@ -106,22 +117,30 @@ def test_entity_metadata_is_limited_to_the_two_diagnostics(make_device) -> None:
     assert fault.unique_id == f"{PREFIX}_mechanics_fault"
     assert fault.device_class is BinarySensorDeviceClass.PROBLEM
     # Normal handle entities and other boolean sensors keep their defaults.
-    for normal in (position, motion, opened):
+    for normal in (position, motion):
         assert normal.entity_category is None
         assert normal.entity_registry_enabled_default is True
+    # Handle position binary sensors serve automations: diagnostic, enabled,
+    # visible.
+    assert opened.entity_category is EntityCategory.DIAGNOSTIC
+    assert opened.entity_registry_enabled_default is True
+    assert opened.entity_registry_visible_default is True
 
 
 @pytest.mark.parametrize("eep", ["D2-06-40", "F6-10-00", "D2-03-10"])
-async def test_new_handle_registers_disabled_diagnostics(hass, mqtt_transport, eep):
-    mqtt_transport.devices = [_handle(eep)]
-    await configure_bridge(hass)
+async def test_new_handle_registers_disabled_diagnostics(hass, gateway, eep):
+    gateway.devices = [_handle(eep)]
+    await setup_bridge(hass, gateway)
     registry = er.async_get(hass)
 
     for domain, suffix, expected in NORMAL_ENTITIES:
         entity_id = await wait_for_entity(hass, domain, f"{PREFIX}_{suffix}")
         entry = registry.async_get(entity_id)
         assert entry.disabled_by is None
-        assert entry.entity_category is None
+        assert entry.hidden_by is None
+        assert entry.entity_category is (
+            EntityCategory.DIAGNOSTIC if domain == "binary_sensor" else None
+        )
         assert hass.states.get(entity_id).state == expected
 
     if eep == "D2-06-40":
@@ -144,14 +163,12 @@ async def test_new_handle_registers_disabled_diagnostics(hass, mqtt_transport, e
                 is None
             )
 
-    assert _device_requests(mqtt_transport) == []
+    assert _device_requests(gateway) == []
 
 
 @pytest.mark.parametrize("variant", ["enabled", "user_disabled"])
-async def test_existing_diagnostic_entries_keep_user_settings(
-    hass, mqtt_transport, variant
-):
-    entry = (await configure_bridge(hass))["result"]
+async def test_existing_diagnostic_entries_keep_user_settings(hass, gateway, variant):
+    entry = await setup_bridge(hass, gateway)
     await hass.async_block_till_done()
     registry = er.async_get(hass)
     disabled_by = er.RegistryEntryDisabler.USER if variant == "user_disabled" else None
@@ -170,12 +187,9 @@ async def test_existing_diagnostic_entries_keep_user_settings(
         )
         existing[suffix] = original.entity_id
 
-    start = len(mqtt_transport.published)
-    mqtt_transport.devices = [_handle("D2-06-40")]
-    mqtt_transport.receive(
-        "EnOcean/AABB0011/getAnswer/devices",
-        {"header": {"httpStatus": 200}, "devices": mqtt_transport.devices},
-    )
+    start = len(gateway.requests)
+    gateway.devices = [_handle("D2-06-40")]
+    await gateway.push(gateway.devices_document())
     # Pre-created entries already exist, so wait for the normal entities of the
     # same discovery batches before inspecting the updated diagnostic entries.
     await wait_for_entity(hass, "sensor", f"{PREFIX}_handle_state")
@@ -200,8 +214,8 @@ async def test_existing_diagnostic_entries_keep_user_settings(
         assert await _wait_for_state(hass, unlock) == "not_requested"
         assert await _wait_for_state(hass, fault) == "off"
         # An unrecognised mechanics value is unknown, never a healthy "off".
-        mqtt_transport.receive(
-            "EnOcean/AABB0011/stream/devices/HANDLE/states/mechanics", "invalid"
+        await gateway.push(
+            telegram("HANDLE", [{"key": "mechanics", "value": "invalid"}])
         )
         await hass.async_block_till_done()
         assert hass.states.get(fault).state == "unknown"
@@ -209,23 +223,27 @@ async def test_existing_diagnostic_entries_keep_user_settings(
         for entity_id in existing.values():
             assert hass.states.get(entity_id) is None
 
-    assert _device_requests(mqtt_transport, start) == []
+    assert _device_requests(gateway, start) == []
 
 
-async def test_activating_diagnostics_sends_no_device_request(hass, mqtt_transport):
-    mqtt_transport.devices = [_handle("D2-06-40")]
-    entry = (await configure_bridge(hass))["result"]
+async def test_activating_diagnostics_sends_no_device_request(hass, gateway):
+    gateway.devices = [_handle("D2-06-40")]
+    entry = await setup_bridge(hass, gateway)
     registry = er.async_get(hass)
     entity_ids = [
         await wait_for_entity(hass, domain, f"{PREFIX}_{suffix}")
         for domain, suffix in DIAGNOSTICS
     ]
-    start = len(mqtt_transport.published)
+    start = len(gateway.requests)
 
     # User activation for troubleshooting; HA reloads the entry to load them.
     for entity_id in entity_ids:
         registry.async_update_entity(entity_id, disabled_by=None)
     assert await hass.config_entries.async_reload(entry.entry_id)
+    coordinator = entry.runtime_data.coordinator
+    async with asyncio.timeout(5):
+        while not coordinator._stream_connected:  # noqa: SLF001
+            await asyncio.sleep(0.01)
 
     unlock, fault = entity_ids
     assert await _wait_for_state(hass, unlock) == "not_requested"
@@ -235,13 +253,9 @@ async def test_activating_diagnostics_sends_no_device_request(hass, mqtt_transpo
             EntityCategory.DIAGNOSTIC
         )
     # Pushed updates reach the activated entities without any device request.
-    mqtt_transport.receive(
-        "EnOcean/AABB0011/stream/devices/HANDLE/states/unlock", "requested"
-    )
-    mqtt_transport.receive(
-        "EnOcean/AABB0011/stream/devices/HANDLE/states/mechanics", "error"
-    )
+    await gateway.push(telegram("HANDLE", [{"key": "unlock", "value": "requested"}]))
+    await gateway.push(telegram("HANDLE", [{"key": "mechanics", "value": "error"}]))
     await hass.async_block_till_done()
     assert hass.states.get(unlock).state == "requested"
     assert hass.states.get(fault).state == "on"
-    assert _device_requests(mqtt_transport, start) == []
+    assert _device_requests(gateway, start) == []

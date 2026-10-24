@@ -28,6 +28,7 @@ from homeassistant.util.yaml import load_yaml_dict
 import custom_components.opus_greennet as integration_package
 from custom_components.opus_greennet import (
     binary_sensor,
+    button,
     climate,
     cover,
     diagnostics,
@@ -45,7 +46,17 @@ QUALITY_SCALE = INTEGRATION / "quality_scale.yaml"
 EVIDENCE = ROOT / "docs/quality/quality-scale-evidence.md"
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 MANIFEST = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
-PLATFORM_MODULES = [binary_sensor, climate, cover, event, light, lock, sensor, switch]
+PLATFORM_MODULES = [
+    binary_sensor,
+    button,
+    climate,
+    cover,
+    event,
+    light,
+    lock,
+    sensor,
+    switch,
+]
 
 # ALL_RULES of the official hassfest module, in its order and tiers.
 OFFICIAL_RULES: dict[str, list[str]] = {
@@ -285,7 +296,7 @@ def test_unique_config_entry_validator() -> None:
 
 
 def test_discovery_status_matches_the_code() -> None:
-    """The official discovery validator decides between todo and done."""
+    """discovery is done exactly when a manifest matcher or step exists."""
     manifest_keys = {
         "bluetooth",
         "dhcp",
@@ -316,14 +327,20 @@ def test_discovery_status_matches_the_code() -> None:
     assert implemented is (STATUS["discovery"] == "done")
 
 
-def test_reconfiguration_exemption_matches_the_code() -> None:
-    """Exempt because the only field is the unique ID of the entry."""
-    assert STATUS["reconfiguration-flow"] == "exempt"
-    flow_source = (INTEGRATION / "config_flow.py").read_text(encoding="utf-8")
-    assert "async_step_reconfigure" not in flow_source
-    schema_fields = re.findall(r"vol\.(?:Required|Optional)\((\w+)\)", flow_source)
-    assert schema_fields == ["CONF_EAG_ID"]
-    assert "async_set_unique_id(eag_id)" in flow_source
+def test_reauth_and_reconfigure_flows_verify_the_gateway_identity() -> None:
+    """reauthentication-flow and reconfiguration-flow are implemented."""
+    assert STATUS["reauthentication-flow"] == STATUS["reconfiguration-flow"] == "done"
+    flow = _module("config_flow")
+    steps = {
+        node.name for node in ast.walk(flow) if isinstance(node, ast.AsyncFunctionDef)
+    }
+    assert {"async_step_reauth", "async_step_reauth_confirm"} <= steps
+    assert "async_step_reconfigure" in steps
+    source = (INTEGRATION / "config_flow.py").read_text(encoding="utf-8")
+    assert 'errors["base"] = "wrong_gateway"' in source
+    assert _calls(flow, "async_update_reload_and_abort")
+    init_source = (INTEGRATION / "__init__.py").read_text(encoding="utf-8")
+    assert "raise ConfigEntryAuthFailed(" in init_source
 
 
 # ── Rule-specific evidence ───────────────────────────────────────────────────
@@ -343,10 +360,11 @@ def test_common_modules() -> None:
         assert "from .entity import" in source, module.__name__
 
 
-def test_no_requirements_for_dependency_rules() -> None:
+def test_no_requirements_and_injected_websession() -> None:
     """dependency-transparency, async-dependency and inject-websession."""
     assert MANIFEST["requirements"] == []
-    forbidden = {"aiohttp", "httpx", "requests", "urllib3"}
+    assert "dependencies" not in MANIFEST
+    forbidden = {"httpx", "requests", "urllib3", "paho"}
     for path in INTEGRATION.glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -357,6 +375,22 @@ def test_no_requirements_for_dependency_rules() -> None:
             else:
                 continue
             assert not names & forbidden, (path.name, names)
+            if "aiohttp" in names:
+                assert path.name == "api.py", path.name
+        # Never create an own session; use Home Assistant's shared one.
+        assert not _calls(tree, "ClientSession"), path.name
+    clients = [
+        path
+        for path in INTEGRATION.glob("*.py")
+        if "OpusGatewayClient(" in path.read_text(encoding="utf-8")
+        and path.name != "api.py"
+    ]
+    assert {path.stem for path in clients} == {"__init__", "discovery"}
+    for path in clients:
+        source = path.read_text(encoding="utf-8")
+        assert "async_get_clientsession(hass" in source or (
+            "async_get_clientsession(self.hass" in source
+        ), path.stem
 
 
 def test_integration_owner() -> None:
@@ -400,7 +434,16 @@ def test_every_entity_class_has_entity_name_and_no_polling() -> None:
 def test_stale_devices_and_diagnostics_entry_points() -> None:
     assert callable(integration_package.async_remove_config_entry_device)
     assert callable(diagnostics.async_get_config_entry_diagnostics)
-    assert {"eagid", "deviceid", "password", "token"} <= diagnostics.TO_REDACT
+    assert {
+        "eagid",
+        "deviceid",
+        "homekitpin",
+        "homekitqr",
+        "host",
+        "password",
+        "token",
+        "username",
+    } <= diagnostics.TO_REDACT
 
 
 def test_actions_are_set_up_in_async_setup() -> None:
@@ -420,25 +463,33 @@ def test_actions_are_set_up_in_async_setup() -> None:
 
 
 @pytest.mark.parametrize(
-    ("rule", "heading"),
+    ("rule", "document", "heading"),
     [
-        ("docs-actions", "## Services"),
-        ("docs-high-level-description", "## Features"),
-        ("docs-installation-instructions", "## Installation"),
-        ("docs-removal-instructions", "## Removing the integration"),
-        ("docs-installation-parameters", "## Configuration"),
-        ("docs-data-update", "## Availability and command behavior"),
-        ("docs-known-limitations", "## Known limitations"),
-        ("docs-supported-devices", "## Supported Device Types"),
-        ("docs-supported-functions", "## Features"),
-        ("docs-troubleshooting", "## Troubleshooting"),
-        ("docs-examples", "## Examples"),
-        ("docs-use-cases", "## Use cases"),
+        ("docs-actions", "docs/devices.md", "## Actions"),
+        ("docs-high-level-description", "README.md", "## Features"),
+        ("docs-installation-instructions", "README.md", "## Installation"),
+        ("docs-removal-instructions", "README.md", "## Removing the integration"),
+        ("docs-installation-parameters", "README.md", "## Configuration"),
+        ("docs-data-update", "docs/how-it-works.md", "## Updates and availability"),
+        ("docs-known-limitations", "README.md", "## Known limitations"),
+        ("docs-known-limitations", "docs/how-it-works.md", "## Known limitations"),
+        ("docs-supported-devices", "README.md", "## Supported devices"),
+        ("docs-supported-functions", "README.md", "## Features"),
+        ("docs-troubleshooting", "README.md", "## Troubleshooting"),
+        ("docs-troubleshooting", "docs/troubleshooting.md", "# Troubleshooting"),
     ],
 )
-def test_documentation_rules_point_to_existing_sections(rule, heading) -> None:
+def test_documentation_rules_point_to_existing_sections(
+    rule, document, heading
+) -> None:
     assert STATUS[rule] == "done"
-    assert re.search(rf"^{re.escape(heading)}$", README, re.M), heading
+    text = (ROOT / document).read_text(encoding="utf-8")
+    assert re.search(rf"^{re.escape(heading)}$", text, re.M), heading
+
+
+def test_readme_links_to_existing_documents() -> None:
+    for target in re.findall(r"\]\((docs/[^)#]+)", README):
+        assert (ROOT / target).is_file(), target
 
 
 def test_ci_enforces_the_promised_gates() -> None:
@@ -460,32 +511,17 @@ def test_ci_enforces_the_promised_gates() -> None:
     assert "omit" not in pyproject
 
 
-def test_examples_cover_the_planned_use_cases() -> None:
-    """docs-examples: rocker control, handle state and an alarm, as YAML."""
-    examples = README.split("## Examples", 1)[1].split("\n## ", 1)[0]
-    for heading in ("### Rocker control", "### Handle state", "### Alarm"):
-        assert heading in examples, heading
-    assert examples.count("```yaml") >= 4
-    # Examples never schedule ReCom device access.
-    assert "get_device_configuration" not in examples
-    assert "get_device_parameters" not in examples
-
-
-def test_icon_translations_are_provided() -> None:
-    assert STATUS["icon-translations"] == "done"
-    icons = json.loads((INTEGRATION / "icons.json").read_text(encoding="utf-8"))
-    assert icons["entity"]
-
-
-def test_repair_issues_are_raised_and_translated() -> None:
-    assert STATUS["repair-issues"] == "done"
-    assert _calls(_module("entity"), "async_create_issue")
-    strings = json.loads((INTEGRATION / "strings.json").read_text(encoding="utf-8"))
-    assert "duplicate_beta_entity" in strings["issues"]
-    # Outages are availability, not repairs: only the migration raises one.
-    raising = [
-        path.name
-        for path in INTEGRATION.glob("*.py")
-        if _calls(ast.parse(path.read_text(encoding="utf-8")), "async_create_issue")
-    ]
-    assert raising == ["entity.py"]
+def test_ci_pins_one_fixed_reference() -> None:
+    """The fixed reference job, its requirements and hassfest agree."""
+    workflow = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+    requirements = (ROOT / "requirements_test_reference.txt").read_text(
+        encoding="utf-8"
+    )
+    version = re.search(r'REFERENCE_HA_VERSION: "([\d.]+)"', workflow).group(1)
+    sha = re.search(r'REFERENCE_HA_CORE_SHA: "([0-9a-f]{40})"', workflow).group(1)
+    assert f"homeassistant=={version}" in requirements
+    assert sha in requirements
+    assert f"Home Assistant {version} (fixed reference)" in workflow
+    assert f"Hassfest at Home Assistant {version} (fixed reference)" in workflow
+    assert "python3 integration/script/check_icons.py" in workflow
+    assert (ROOT / "script/check_icons.py").is_file()

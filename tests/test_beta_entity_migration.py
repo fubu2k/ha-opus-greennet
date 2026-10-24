@@ -12,7 +12,8 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from custom_components.opus_greennet.const import DOMAIN
 from custom_components.opus_greennet.coordinator import SIGNAL_DEVICE_DISCOVERED
 from custom_components.opus_greennet.entity import migrate_legacy_entity_suffix
-from tests.ha_helpers import configure_bridge, wait_for_entity
+from tests.fake_gateway import FakeGateway, device_object
+from tests.ha_helpers import setup_bridge, wait_for_entity
 
 
 @pytest.mark.parametrize(
@@ -24,10 +25,16 @@ from tests.ha_helpers import configure_bridge, wait_for_entity
 )
 @pytest.mark.parametrize("variant", ["legacy", "duplicate", "disabled", "upstream"])
 async def test_migration_preserves_entity_id_and_settings(
-    hass, mqtt_transport, domain, eep, legacy_suffix, current_suffix, state, variant
+    hass,
+    gateway: FakeGateway,
+    domain,
+    eep,
+    legacy_suffix,
+    current_suffix,
+    state,
+    variant,
 ):
-    entry = (await configure_bridge(hass))["result"]
-    await hass.async_block_till_done()
+    entry = await setup_bridge(hass, gateway)
     prefix = "AABB0011_MIGRATE"
     device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id, identifiers={(DOMAIN, prefix)}
@@ -52,17 +59,22 @@ async def test_migration_preserves_entity_id_and_settings(
             device_id=device.id,
             suggested_object_id="unwanted_beta_duplicate",
         )
-    mqtt_transport.devices = [
-        {
-            "deviceId": "MIGRATE",
-            "eeps": [{"eep": eep}],
-            "states": {"illumination": 120, "lock": "locked", "unlock": False},
-        }
+    # The device appears in a complete device list, the document every
+    # stream starts with.
+    gateway.devices = [
+        device_object(
+            "MIGRATE",
+            eep,
+            states=[
+                {"key": "illumination", "value": 120},
+                {"key": "lock", "value": "locked"},
+                {"key": "unlock", "value": False},
+            ],
+            # The lock entity shows the gateway's stored unlock answer.
+            targetState=[{"key": "unlock", "value": "notAllowed"}],
+        )
     ]
-    mqtt_transport.receive(
-        "EnOcean/AABB0011/getAnswer/devices",
-        {"header": {"httpStatus": 200}, "devices": mqtt_transport.devices},
-    )
+    await gateway.push(gateway.devices_document())
     await wait_for_entity(hass, "sensor", f"{prefix}_signal_strength")
     entity_id = await wait_for_entity(hass, domain, f"{prefix}_{current_suffix}")
     assert entity_id == original.entity_id
@@ -96,10 +108,9 @@ async def test_migration_preserves_entity_id_and_settings(
 
 @pytest.mark.parametrize("foreign", ["legacy_device", "current_device", "config_entry"])
 async def test_migration_does_not_remove_unrelated_entries(
-    hass, mqtt_transport, foreign
+    hass, gateway: FakeGateway, foreign
 ):
-    entry = (await configure_bridge(hass))["result"]
-    await hass.async_block_till_done()
+    entry = await setup_bridge(hass, gateway)
     registry = er.async_get(hass)
     devices = dr.async_get(hass)
     expected = devices.async_get_or_create(

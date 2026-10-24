@@ -1,4 +1,4 @@
-"""Phase 5: typed MQTT/JSON boundaries keep the existing wire contract.
+"""Typed REST/JSON boundaries keep the existing wire contract.
 
 These tests pin the behaviour of the typed boundary helpers and parsers:
 valid string and numeric representations, channel zero, ``notAvailable``,
@@ -6,33 +6,38 @@ proprietary HeatArea profiles and unknown additive fields are accepted
 exactly as before, while wrong container/field types, booleans in numeric
 fields, NaN/Infinity and malformed JSON are rejected per field.
 
-They are unit/mock tests. They do not verify real OPUS hardware.
+They are unit tests plus a few requests against the in-process fake gateway.
+They do not verify real OPUS hardware.
 """
 
 from __future__ import annotations
 
 import json
 import math
-from types import SimpleNamespace
+from collections.abc import AsyncIterator
 from unittest.mock import MagicMock
 
+import aiohttp
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.opus_greennet.coordinator import OpusGreenNetCoordinator
-from custom_components.opus_greennet.enocean_device import EnOceanDevice
-from custom_components.opus_greennet.mqtt_transport import (
+from custom_components.opus_greennet import protocol
+from custom_components.opus_greennet.api import (
+    OpusGatewayClient,
+    OpusResponseError,
     decode_response,
     response_status,
 )
+from custom_components.opus_greennet.coordinator import OpusGreenNetCoordinator
+from custom_components.opus_greennet.enocean_device import EnOceanDevice
 from custom_components.opus_greennet.wire import (
     as_list,
     as_object,
-    indexed_objects,
     object_items,
     parse_json,
-    payload_text,
     string_key,
 )
+from tests.fake_gateway import FakeGateway
 
 
 @pytest.fixture
@@ -44,11 +49,24 @@ def coord(monkeypatch: pytest.MonkeyPatch) -> OpusGreenNetCoordinator:
         "custom_components.opus_greennet.coordinator.async_dispatcher_send",
         MagicMock(),
     )
-    return OpusGreenNetCoordinator(MagicMock(), "AABB0011")
+    return OpusGreenNetCoordinator(MagicMock(), MagicMock(), "AABB0011")
 
 
-def message(topic: str, payload: str | bytes) -> SimpleNamespace:
-    return SimpleNamespace(topic=topic, payload=payload, retain=False, qos=0)
+@pytest.fixture
+async def gateway_coord(
+    coord: OpusGreenNetCoordinator, gateway: FakeGateway
+) -> AsyncIterator[OpusGreenNetCoordinator]:
+    """Return the coordinator talking HTTP to the fake gateway."""
+    async with aiohttp.ClientSession() as session:
+        coord.client = OpusGatewayClient(
+            session,
+            gateway.host,
+            gateway.port,
+            gateway.username,
+            gateway.password,
+        )
+        coord._gateway_available = True  # noqa: SLF001
+        yield coord
 
 
 def apply(eep: str, *functions: dict[str, object]) -> EnOceanDevice:
@@ -57,13 +75,12 @@ def apply(eep: str, *functions: dict[str, object]) -> EnOceanDevice:
     return device
 
 
+def from_device(functions: object, **fields: object) -> dict[str, object]:
+    """Return a ``from`` telegram object as the event stream nests it."""
+    return {"deviceId": "DEV", "direction": "from", "functions": functions, **fields}
+
+
 # ── Wire helpers ────────────────────────────────────────────────────────────
-
-
-def test_payload_text_decodes_bytes_and_keeps_text():
-    assert payload_text("on") == "on"
-    assert payload_text(b"on") == "on"
-    assert payload_text(bytearray(b"50")) == "50"
 
 
 def test_parse_json_keeps_non_finite_literals_for_field_validation():
@@ -75,6 +92,12 @@ def test_parse_json_keeps_non_finite_literals_for_field_validation():
     assert parse_json('[1, 2.5, "x", true, null]') == [1, 2.5, "x", True, None]
     with pytest.raises(json.JSONDecodeError):
         parse_json("{")
+
+
+def test_parse_json_reports_deep_nesting_as_invalid_json():
+    # The decoder raises RecursionError; callers only map ValueError.
+    with pytest.raises(ValueError, match="nested too deeply"):
+        parse_json("[" * 200_000 + "]" * 200_000)
 
 
 def test_container_helpers_reject_wrong_container_types():
@@ -89,13 +112,6 @@ def test_container_helpers_reject_wrong_container_types():
         {"b": 2},
     ]
     assert object_items({"0": {"a": 1}}) == []
-
-
-def test_indexed_objects_orders_flattened_indices_numerically():
-    mapping = {"10": {"i": 10}, "2": {"i": 2}, "x": {"i": "x"}, "1": "skip"}
-    assert indexed_objects(mapping) == [{"i": 2}, {"i": 10}, {"i": "x"}]
-    assert indexed_objects([{"i": 0}, 1]) == [{"i": 0}]
-    assert indexed_objects("x") == []
 
 
 def test_string_key_only_returns_strings():
@@ -138,22 +154,25 @@ def test_valid_status_representations_are_accepted(status):
     ],
 )
 def test_invalid_status_container_and_json_are_rejected(raw, error):
-    with pytest.raises(ValueError, match=error):
+    with pytest.raises(OpusResponseError, match=error):
         decode_response(raw, require_status=True)
 
 
-def test_status_is_optional_without_header_and_bytes_are_accepted():
-    assert decode_response('{"device": {"deviceId": "D"}}') == {
+def test_status_is_optional_only_when_not_required():
+    assert decode_response('{"device": {"deviceId": "D"}}', require_status=False) == {
         "device": {"deviceId": "D"}
     }
-    assert decode_response(b'{"header": {"httpStatus": 201}}') == {
+    assert decode_response('{"header": {"httpStatus": 201}}') == {
         "header": {"httpStatus": 201}
     }
-    assert decode_response(bytearray(b'{"a": 1}')) == {"a": 1}
-    with pytest.raises(ValueError, match="missing its status"):
-        decode_response('{"a": 1}', require_status=True)
-    with pytest.raises(ValueError, match="invalid JSON"):
-        decode_response(b"\xff")
+    # A present header is always checked, even when the status is optional.
+    with pytest.raises(OpusResponseError, match="status 500"):
+        decode_response('{"header": {"httpStatus": 500}}', require_status=False)
+    with pytest.raises(OpusResponseError, match="missing its status"):
+        decode_response('{"a": 1}')
+    # The client decodes response bodies with errors="replace".
+    with pytest.raises(OpusResponseError, match="invalid JSON"):
+        decode_response("\ufffd")
 
 
 # ── Valid fixtures of all supported profile families ────────────────────────
@@ -410,114 +429,156 @@ def test_from_device_object_tolerates_wrapper_and_wrong_field_types():
     assert device.heat_area_type == "cositherm"
 
 
-# ── Coordinator MQTT boundaries ─────────────────────────────────────────────
+# ── Coordinator REST boundaries ─────────────────────────────────────────────
 
 
-def test_flattened_discovery_keeps_string_and_numeric_representations(coord):
-    base = "EnOcean/AABB0011/stream/devices/DEV"
-    for path, payload in (
-        ("eeps/0/eep", "D2-05-00"),
-        ("friendlyId", "123"),
-        ("manufacturer", "OPUS"),
-        ("dbm", "-61"),
-        ("states/0/key", "position"),
-        ("states/0/value", "notAvailable"),
-        ("states/1/key", "angle"),
-        ("states/1/value", "40"),
-        ("futureField", "kept"),
-    ):
-        coord._handle_device_property_message(message(f"{base}/{path}", payload))
-    coord._finalize_discovery()
+def test_device_object_keeps_string_and_numeric_representations(coord):
+    coord._apply_device_object(  # noqa: SLF001
+        {
+            "deviceId": "DEV",
+            "eeps": [{"eep": "D2-05-00"}, "junk"],
+            "friendlyId": 123,
+            "manufacturer": "OPUS",
+            "dbm": "-61",
+            "states": [
+                {"key": "position", "value": "notAvailable"},
+                {"key": "angle", "value": "40"},
+            ],
+            "futureField": "kept",
+        },
+        authoritative=True,
+    )
     device = coord.devices["DEV"]
-    # A numeric name arrives parsed as a number and is rendered as text again.
+    # A numeric name is rendered as text again.
     assert device.friendly_id == "123"
     assert device.manufacturer == "OPUS"
+    assert device.eeps == [{"eep": "D2-05-00"}]
     assert device.dbm == -61
     assert device.channels[0].position is None
     assert device.channels[0].angle == 40
-    assert coord._device_data["DEV"]["futureField"] == "kept"
 
 
-def test_flattened_path_conflicts_are_dropped_like_before(coord):
-    data: dict[str, object] = {"deviceId": "D", "dbm": 5}
-    with pytest.raises(ValueError, match="conflicts"):
-        coord._set_nested_property(data, "dbm/value", "1")  # scalar mid-path
-    data["eeps"] = [{"eep": "D2-01-00"}]
-    with pytest.raises(ValueError, match="conflicts"):
-        coord._set_nested_property(data, "eeps/eep", "1")  # key into a list
-    assert data == {"deviceId": "D", "dbm": 5, "eeps": [{"eep": "D2-01-00"}]}
-    # A numeric property below an object is kept under its index text.
-    coord._set_nested_property(data, "0", "7")
-    assert data["0"] == 7
+@pytest.mark.parametrize("name", [None, True, [], {"a": 1}, ""], ids=repr)
+def test_device_object_without_usable_name_falls_back_to_the_id(coord, name):
+    coord._apply_device_object(  # noqa: SLF001
+        {"deviceId": "DEV", "friendlyId": name, "manufacturer": 5, "eeps": "x"},
+        authoritative=True,
+    )
+    device = coord.devices["DEV"]
+    assert device.friendly_id == "DEV"
+    assert device.manufacturer == "5"
+    assert device.eeps == []
+
+
+@pytest.mark.parametrize("device_id", [None, 5, "", ["DEV"]], ids=repr)
+def test_device_object_without_valid_id_is_ignored(coord, device_id):
+    coord._apply_device_object(  # noqa: SLF001
+        {"deviceId": device_id, "eeps": [{"eep": "D2-01-00"}]}, authoritative=True
+    )
+    assert coord.devices == {}
 
 
 @pytest.mark.parametrize(
-    "payload",
+    "functions",
     [
-        '{"functions": [{"key": "dimValue", "value": "50"}]}',
-        '{"functions": [{"key": "dimValue", "value": 50}]}',
-        '{"telegram": {"functions": [{"key": "dimValue", "value": 50.0}]}}',
-        '{"state": {"functions": [{"key": "dimValue", "value": "50"}]}}',
-        '{"functions": {"0": {"key": "dimValue", "value": "50"}}, "future": 1}',
-        b'{"functions": [{"key": "dimValue", "value": "50", "unit": "%"}]}',
+        [{"key": "dimValue", "value": "50"}],
+        [{"key": "dimValue", "value": 50}],
+        [{"key": "dimValue", "value": 50.0}],
+        {"key": "dimValue", "value": "50"},
+        [{"key": "dimValue", "value": "50", "unit": "%", "meta": {"x": [1]}}],
+        ["junk", None, 5, {"key": "dimValue", "value": "50"}],
     ],
+    ids=repr,
 )
-def test_complete_telegram_representations(coord, payload):
+def test_complete_telegram_representations(coord, functions):
     coord.devices["DEV"] = EnOceanDevice("DEV", "Light", [{"eep": "D2-01-02"}])
-    coord._handle_telegram_property_message(
-        message("EnOcean/AABB0011/stream/telegram/DEV/from", payload)
-    )
+    coord._handle_telegram(from_device(functions, future=1))  # noqa: SLF001
     assert coord.devices["DEV"].channels[0].brightness == 50
 
 
-@pytest.mark.parametrize(
-    "payload",
-    ["not json", "[]", '"text"', "5", '{"telegram": 5}', '{"functions": "x"}', "{"],
-)
-def test_malformed_complete_telegram_is_ignored(coord, payload):
+def test_stream_document_carries_the_telegram_object(coord):
     coord.devices["DEV"] = EnOceanDevice("DEV", "Light", [{"eep": "D2-01-02"}])
-    coord._handle_telegram_property_message(
-        message("EnOcean/AABB0011/stream/telegram/DEV/from", payload)
+    coord._handle_document(  # noqa: SLF001
+        {
+            "header": {"content": "telegram", "future": True},
+            "telegram": from_device(
+                [{"key": "dimValue", "value": "50"}], telegramInfo={"dbm": "-48"}
+            ),
+        }
     )
+    assert coord.devices["DEV"].channels[0].brightness == 50
+    assert coord.devices["DEV"].dbm == -48
+
+
+@pytest.mark.parametrize(
+    "telegram",
+    [
+        from_device([{"key": "dimValue", "value": "50"}], direction=None),
+        from_device([{"key": "dimValue", "value": "50"}], direction="both"),
+        from_device([{"key": "dimValue", "value": "50"}], deviceId=5),
+        from_device("x"),
+        from_device(None),
+        from_device([]),
+        from_device([{"key": 5, "value": "50"}]),
+        from_device([{"key": "dimValue"}]),
+        from_device([{"key": "dimValue", "value": None}]),
+    ],
+    ids=repr,
+)
+def test_malformed_telegram_is_ignored(coord, telegram):
+    coord.devices["DEV"] = EnOceanDevice("DEV", "Light", [{"eep": "D2-01-02"}])
+    coord._handle_telegram(telegram)  # noqa: SLF001
+    assert coord.devices["DEV"].channels == {}
+    assert coord.devices["DEV"].last_update_source == ""
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {},
+        {"header": "telegram"},
+        {"header": {"content": "telegram"}, "telegram": 5},
+        {"header": {"content": "telegram"}, "telegram": [from_device([])]},
+        {"header": {"content": "device"}, "device": "DEV"},
+        {"header": {"content": "devices"}, "devices": "x"},
+        {"telegram": from_device([{"key": "dimValue", "value": "50"}])},
+    ],
+    ids=repr,
+)
+def test_malformed_stream_document_is_ignored(coord, document):
+    coord.devices["DEV"] = EnOceanDevice("DEV", "Light", [{"eep": "D2-01-02"}])
+    coord._handle_document(document)  # noqa: SLF001
+    assert set(coord.devices) == {"DEV"}
     assert coord.devices["DEV"].channels == {}
 
 
 @pytest.mark.parametrize(
-    ("payload", "expected"),
+    ("document", "expected"),
     [
-        ('[{"deviceId": "A1", "eeps": [{"eep": "D2-01-00"}]}]', {"A1"}),
+        ({"devices": [{"deviceId": "A1", "eeps": [{"eep": "D2-01-00"}]}]}, {"A1"}),
         (
-            json.dumps(
-                {
-                    "devices": [
-                        {"device": {"deviceId": "A2", "eeps": [{"eep": "D1-4B-05"}]}}
-                    ]
-                }
-            ),
+            {"devices": [{"device": {"deviceId": "A2", "eeps": [{"eep": "D1"}]}}]},
             {"A2"},
         ),
-        ('{"deviceId": "A3", "eeps": [{"eep": "D2-05-00"}], "future": {}}', {"A3"}),
         (
-            '{"header": {"httpStatus": 200}, "devices": [{"deviceId": "A4"}]}',
-            {"A4"},
+            {"devices": [{"deviceId": "A3", "eeps": [{"eep": "D2-05-00"}], "f": {}}]},
+            {"A3"},
         ),
-        ('{"header": {"httpStatus": 500}, "devices": [{"deviceId": "A5"}]}', set()),
-        ('{"devices": "x"}', set()),
-        ('[1, "x", null, {"device": "str"}]', set()),
-        ("not json", set()),
-        ('"text"', set()),
+        ({"header": {"httpStatus": 200}, "devices": [{"deviceId": "A4"}]}, {"A4"}),
+        ({"devices": "x"}, set()),
+        ({"devices": {"0": {"deviceId": "A5"}}}, set()),
+        ({"devices": [1, "x", None, {"device": "str"}, {"deviceId": 7}]}, set()),
+        ({}, set()),
     ],
+    ids=repr,
 )
-def test_get_answer_devices_validates_containers(coord, payload, expected):
-    coord._handle_get_answer_devices(
-        message("EnOcean/AABB0011/getAnswer/devices", payload)
-    )
-    coord._finalize_discovery()
+def test_device_list_validates_containers(coord, document, expected):
+    coord._apply_device_list(document, authoritative=True)  # noqa: SLF001
     assert set(coord.devices) == expected
 
 
 @pytest.mark.parametrize(
-    ("payload", "accepted"),
+    ("body", "accepted"),
     [
         ('{"header": {"httpStatus": 200}}', True),
         ('{"header": {"httpStatus": "201"}}', True),
@@ -525,34 +586,76 @@ def test_get_answer_devices_validates_containers(coord, payload, expected):
         ('{"header": {"httpStatus": true}}', False),
         ('{"header": {"httpStatus": 409}}', False),
         ('{"header": "x"}', False),
+        ('{"a": 1}', False),
         ("not json", False),
     ],
 )
-def test_put_answer_state_status_contract(coord, payload, accepted):
+async def test_put_response_status_contract(
+    gateway_coord: OpusGreenNetCoordinator,
+    gateway: FakeGateway,
+    body: str,
+    accepted: bool,
+):
+    """The HTTP response body of the state PUT is the acknowledgement."""
     device = EnOceanDevice("DEV", "Light", [{"eep": "D2-01-02"}])
     device.last_command_error = "previous"
-    coord.devices["DEV"] = device
-    coord._handle_put_answer_state(
-        message("EnOcean/AABB0011/putAnswer/devices/DEV/state", payload)
+    gateway_coord.devices["DEV"] = device
+    gateway.responses["/devices/DEV/state"] = body
+    command = gateway_coord.async_send_command(
+        "DEV", [{"key": "dimValue", "value": "50"}]
     )
-    assert (device.last_command_error is None) is accepted
+    if accepted:
+        await command
+        assert device.last_command_error is None
+    else:
+        with pytest.raises(HomeAssistantError) as error:
+            await command
+        assert error.value.translation_key == "request_rejected"
+        assert device.last_command_error not in (None, "previous")
+    assert gateway.requests_to("PUT", "/devices/DEV/state") == [
+        {"state": {"functions": [{"key": "dimValue", "value": "50"}]}}
+    ]
 
 
 @pytest.mark.parametrize(
-    ("payload", "expected"),
-    [("-55", -55), ("-55.0", -55), ('"-55"', -55), ("NaN", -70), ("true", -70)],
+    ("value", "expected"),
+    [
+        ("-55", -55),
+        (-55.0, -55),
+        (" -55 ", -55),
+        (-55.5, -70),
+        ("NaN", -70),
+        (True, -70),
+        (None, -70),
+        ("notAvailable", -70),
+    ],
+    ids=repr,
 )
-def test_scalar_dbm_telemetry_boundary(coord, payload, expected):
+@pytest.mark.parametrize("authoritative", [True, False])
+def test_device_list_dbm_boundary(coord, value, expected, authoritative):
+    """Device lists only replace the signal with a valid reading."""
     coord.devices["DEV"] = EnOceanDevice("DEV", "Light", [{"eep": "D2-01-02"}], dbm=-70)
-    coord._handle_device_stream_message(
-        message("EnOcean/AABB0011/stream/device/DEV/dbm", payload)
+    coord._apply_device_object(  # noqa: SLF001
+        {"deviceId": "DEV", "eeps": [{"eep": "D2-01-02"}], "dbm": value},
+        authoritative=authoritative,
     )
     assert coord.devices["DEV"].dbm == expected
 
 
-def test_scalar_not_available_clears_dbm(coord):
-    coord.devices["DEV"] = EnOceanDevice("DEV", "Light", [{"eep": "D2-01-02"}], dbm=-70)
-    coord._handle_device_stream_message(
-        message("EnOcean/AABB0011/stream/device/DEV/dbm", "notAvailable")
+def test_protocol_helpers_reject_wrong_types():
+    assert protocol.metadata_text(12.5) == "12.5"
+    assert protocol.metadata_text(False) == ""
+    assert protocol.telegram_timestamp("2026-10-19T18:06:03.990+0200") == (
+        pytest.approx(1792426563.99)
     )
-    assert coord.devices["DEV"].dbm is None
+    assert protocol.telegram_timestamp("19.10.2026") is None
+    assert protocol.telegram_timestamp(1792426563) is None
+    assert protocol.channel_from_functions([{"key": "channel", "value": "x"}]) is None
+    assert protocol.channel_from_functions([{"key": "channel", "value": 2.0}]) == 2
+    assert protocol.function_channel({"channel": True}, 0) is None
+    assert protocol.device_state_functions({"states": "x", "state": []}) == []
+    assert protocol.configuration_state_functions({"configuration": []}) == []
+    assert (
+        protocol.configuration_state_functions({"configuration": {"parameters": "x"}})
+        == []
+    )

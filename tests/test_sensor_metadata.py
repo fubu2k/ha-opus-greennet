@@ -23,7 +23,8 @@ from homeassistant.helpers import entity_registry as er
 
 from custom_components.opus_greennet.const import DOMAIN
 from custom_components.opus_greennet.sensor import OpusGreenNetMeasurementSensor
-from tests.ha_helpers import MQTTTransport, configure_bridge, wait_for_entity
+from tests.fake_gateway import FakeGateway
+from tests.ha_helpers import setup_bridge, wait_for_entity
 
 SENSOR_OPTIONS = "sensor"
 SMS_PREFIX = "AABB0011_SMS"
@@ -33,12 +34,14 @@ OPUS_MOTION_EEPS = [
 ]
 
 
-def _device_requests(transport: MQTTTransport, device_id: str, start: int = 0):
-    """Return topics addressed to the device itself (potential radio traffic)."""
+def _device_requests(gateway: FakeGateway, device_id: str, start: int = 0):
+    """Return requests addressed to the device itself (potential radio traffic)."""
     return [
-        topic
-        for topic, _payload in transport.published[start:]
-        if f"/devices/{device_id}" in topic
+        path
+        for _method, path, _body in gateway.requests[start:]
+        if path.startswith(f"/devices/{device_id}")
+        # The profile read at setup is gateway data, not radio traffic.
+        and not path.endswith("/profile")
     ]
 
 
@@ -96,21 +99,34 @@ def test_measurement_metadata_is_scoped(make_device) -> None:
         assert sensor.entity_registry_enabled_default is True
         assert sensor.device_class is SensorDeviceClass.BATTERY
     assert illuminance.entity_category is None
-    assert illuminance.suggested_display_precision is None
+    # Illuminance is shown in whole lux (display only).
+    assert illuminance.suggested_display_precision == 0
 
 
 @pytest.mark.parametrize("eep", ["A5-07-01", "A5-07-03"])
 async def test_new_sms_registers_voltage_diagnostic_and_whole_battery(
-    hass, mqtt_transport, eep
+    hass, gateway, eep
 ):
-    mqtt_transport.devices = [_sms(eep)]
-    await configure_bridge(hass)
+    gateway.devices = [_sms(eep)]
+    await setup_bridge(hass, gateway)
     registry = er.async_get(hass)
 
     voltage = await wait_for_entity(hass, "sensor", f"{SMS_PREFIX}_supply_voltage")
     battery = await wait_for_entity(hass, "sensor", f"{SMS_PREFIX}_battery_level")
-    illuminance = await wait_for_entity(hass, "sensor", f"{SMS_PREFIX}_illuminance")
     motion = await wait_for_entity(hass, "binary_sensor", f"{SMS_PREFIX}_motion")
+    normal = [motion]
+    if eep == "A5-07-03":
+        # Only A5-07-03 reports illumination (EEP profile).
+        normal.append(
+            await wait_for_entity(hass, "sensor", f"{SMS_PREFIX}_illuminance")
+        )
+    else:
+        assert (
+            er.async_get(hass).async_get_entity_id(
+                "sensor", DOMAIN, f"{SMS_PREFIX}_illuminance"
+            )
+            is None
+        )
 
     voltage_entry = registry.async_get(voltage)
     assert voltage_entry.entity_category is EntityCategory.DIAGNOSTIC
@@ -127,12 +143,12 @@ async def test_new_sms_registers_voltage_diagnostic_and_whole_battery(
     assert async_rounded_state(hass, battery, battery_state) == "88"
 
     # Normal motion entities keep their metadata.
-    for entity_id in (illuminance, motion):
+    for entity_id in normal:
         entry = registry.async_get(entity_id)
         assert entry.entity_category is None
         assert entry.disabled_by is None
 
-    assert _device_requests(mqtt_transport, "SMS") == []
+    assert _device_requests(gateway, "SMS") == []
 
 
 @pytest.mark.parametrize(
@@ -159,10 +175,10 @@ async def test_new_sms_registers_voltage_diagnostic_and_whole_battery(
     ],
 )
 async def test_every_battery_level_suggests_whole_percent(
-    hass, mqtt_transport, device, unique_id
+    hass, gateway, device, unique_id
 ):
-    mqtt_transport.devices = [device]
-    await configure_bridge(hass)
+    gateway.devices = [device]
+    await setup_bridge(hass, gateway)
     registry = er.async_get(hass)
 
     battery = await wait_for_entity(hass, "sensor", unique_id)
@@ -170,12 +186,12 @@ async def test_every_battery_level_suggests_whole_percent(
     assert entry.options[SENSOR_OPTIONS]["suggested_display_precision"] == 0
     assert entry.entity_category is None
     assert entry.disabled_by is None
-    assert _device_requests(mqtt_transport, device["deviceId"]) == []
+    assert _device_requests(gateway, device["deviceId"]) == []
 
 
 @pytest.mark.parametrize("variant", ["enabled", "user_disabled"])
-async def test_existing_sms_entries_keep_user_settings(hass, mqtt_transport, variant):
-    entry = (await configure_bridge(hass))["result"]
+async def test_existing_sms_entries_keep_user_settings(hass, gateway, variant):
+    entry = await setup_bridge(hass, gateway)
     await hass.async_block_till_done()
     registry = er.async_get(hass)
     disabled_by = er.RegistryEntryDisabler.USER if variant == "user_disabled" else None
@@ -201,12 +217,9 @@ async def test_existing_sms_entries_keep_user_settings(hass, mqtt_transport, var
         battery.entity_id, SENSOR_OPTIONS, {"display_precision": 1}
     )
 
-    start = len(mqtt_transport.published)
-    mqtt_transport.devices = [_sms()]
-    mqtt_transport.receive(
-        "EnOcean/AABB0011/getAnswer/devices",
-        {"header": {"httpStatus": 200}, "devices": mqtt_transport.devices},
-    )
+    start = len(gateway.requests)
+    gateway.devices = [_sms()]
+    await gateway.push(gateway.devices_document())
     # Wait for an entity of the same discovery batch before inspecting entries.
     await wait_for_entity(hass, "sensor", f"{SMS_PREFIX}_illuminance")
 
@@ -235,4 +248,4 @@ async def test_existing_sms_entries_keep_user_settings(hass, mqtt_transport, var
     else:
         assert hass.states.get(voltage.entity_id) is None
 
-    assert _device_requests(mqtt_transport, "SMS", start) == []
+    assert _device_requests(gateway, "SMS", start) == []

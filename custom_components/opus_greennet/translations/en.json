@@ -1,32 +1,69 @@
 {
   "config": {
-    "flow_title": "{eag_id}",
+    "flow_title": "{host}",
     "step": {
       "user": {
         "title": "Opus GreenNet Bridge",
-        "description": "Configure the bridge connected to your MQTT broker. Setup checks that the specified bridge responds.",
+        "description": "Connect to the OPUS gateway in your network. Home Assistant talks to it directly over its REST API; no MQTT broker is needed. A gateway found in the local network is filled in automatically.",
         "data": {
-          "eag_id": "EAG identifier"
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password"
         },
         "data_description": {
-          "eag_id": "The eight-character bridge identifier used in MQTT topics, for example A1B2C3D4 (fictional)."
+          "host": "IP address or host name of the OPUS gateway in your network.",
+          "port": "Port of the gateway's REST API (8080 by default).",
+          "username": "API user of the gateway (admin by default).",
+          "password": "API password. By default this is the gateway's EURID in capital letters, as printed on the gateway."
         }
       },
-      "discovery_confirm": {
-        "title": "Opus GreenNet Bridge",
-        "description": "Set up the gateway {eag_id}? It was found in device data on your MQTT broker. Before the entry is created, setup checks that this gateway responds. No EnOcean device is queried."
+      "reauth_confirm": {
+        "title": "Connect to gateway {eag_id}",
+        "description": "Enter the address and API credentials of gateway {eag_id}. Gateways set up with an earlier version of this integration were connected through MQTT; this version connects to the gateway directly. The gateway could not be found in the local network with its default credentials, so enter its address once, or the password if you changed it. All devices and entities are kept.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "IP address or host name of the OPUS gateway in your network.",
+          "port": "Port of the gateway's REST API (8080 by default).",
+          "username": "API user of the gateway (admin by default).",
+          "password": "API password. By default this is the gateway's EURID in capital letters, as printed on the gateway."
+        }
+      },
+      "reconfigure": {
+        "title": "Change the connection to gateway {eag_id}",
+        "description": "Update the address or API credentials of gateway {eag_id}.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "IP address or host name of the OPUS gateway in your network.",
+          "port": "Port of the gateway's REST API (8080 by default).",
+          "username": "API user of the gateway (admin by default).",
+          "password": "API password. By default this is the gateway's EURID in capital letters, as printed on the gateway."
+        }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to the MQTT broker",
-      "invalid_eag_id": "The EAG identifier must contain exactly eight hexadecimal characters",
-      "unknown": "Unexpected error",
-      "gateway_unavailable": "The MQTT broker is connected, but the bridge did not respond. Check its identifier and the MQTT bridge connection."
+      "cannot_connect": "Failed to connect to the gateway. Check the host and port.",
+      "invalid_host": "Enter only the gateway's IP address or host name, without http://, port or path.",
+      "invalid_auth": "The gateway rejected the username or password.",
+      "unsupported_gateway": "The device at this address did not answer like an OPUS gateway.",
+      "wrong_gateway": "This address belongs to a different gateway than {eag_id}.",
+      "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "This bridge is already configured",
-      "mqtt_not_configured": "Set up and connect the MQTT integration before adding this bridge",
-      "invalid_discovery_info": "The MQTT message does not identify an OPUS gateway"
+      "already_configured": "This gateway is already configured. Its connection settings were updated.",
+      "reauth_successful": "The gateway connection was updated.",
+      "reconfigure_successful": "The gateway connection was updated.",
+      "not_ipv4_address": "Only gateways with an IPv4 address are supported."
     }
   },
   "entity": {
@@ -75,6 +112,15 @@
       },
       "mechanics_fault": {
         "name": "Mechanics fault"
+      },
+      "local_control": {
+        "name": "Local control"
+      },
+      "sensor_error": {
+        "name": "Sensor error"
+      },
+      "lock_bolt": {
+        "name": "Lock bolt"
       }
     },
     "cover": {
@@ -126,16 +172,35 @@
           "requested": "Requested",
           "not_requested": "Not requested"
         }
+      },
+      "last_run_time": {
+        "name": "Last run time"
       }
     },
     "switch": {
       "channel": {
         "name": "Channel {channel}"
+      },
+      "blockage": {
+        "name": "Blockage"
       }
     },
     "lock": {
       "autolock": {
         "name": "AutoLock"
+      }
+    },
+    "button": {
+      "reference_run_up": {
+        "name": "Reference run via top"
+      },
+      "reference_run_down": {
+        "name": "Reference run via bottom"
+      }
+    },
+    "event": {
+      "buttons": {
+        "name": "Buttons"
       }
     }
   },
@@ -152,20 +217,20 @@
     "device_not_found": {
       "message": "Device {device_id} was not discovered on the selected gateway."
     },
-    "device_request_timeout": {
-      "message": "The gateway did not answer the request for device {device_id}."
+    "gateway_address_required": {
+      "message": "This version connects to the OPUS gateway directly instead of through MQTT. Enter the gateway's address to continue."
     },
-    "mqtt_setup_failed": {
-      "message": "Could not subscribe to or publish on MQTT."
+    "gateway_unavailable": {
+      "message": "The OPUS gateway is unavailable. Check its network connection and try again."
+    },
+    "invalid_auth": {
+      "message": "The OPUS gateway rejected the configured credentials."
     },
     "no_loaded_config_entry": {
       "message": "No Opus GreenNet gateway is loaded."
     },
-    "gateway_unavailable": {
-      "message": "The OPUS gateway is unavailable. Check the bridge connection and try again."
-    },
-    "mqtt_unavailable": {
-      "message": "The Home Assistant MQTT connection is unavailable."
+    "request_cancelled": {
+      "message": "The request was cancelled because the integration is unloading, the device was removed or the gateway became unavailable."
     },
     "request_rejected": {
       "message": "The gateway rejected the request for {device_id}: {reason}"
@@ -173,24 +238,11 @@
     "request_timeout": {
       "message": "The gateway did not acknowledge the request for {device_id}. Its outcome is unknown; check the device before trying again."
     },
-    "request_cancelled": {
-      "message": "The request was cancelled because the integration is unloading or its connection was lost."
+    "wrong_gateway": {
+      "message": "The configured address answers as a different OPUS gateway."
     },
-    "autolock_read_only": {
-      "message": "AutoLock control via MQTT is disabled pending manufacturer clarification. Only the reported lock state is available."
-    }
-  },
-  "issues": {
-    "duplicate_beta_entity": {
-      "title": "Duplicate entity {removed_entity_id} was removed",
-      "fix_flow": {
-        "step": {
-          "confirm": {
-            "title": "Update references to {removed_entity_id}",
-            "description": "While adopting the upstream unique IDs, the integration found two registry entries for the same device and gateway. It kept your existing entity {preserved_entity_id} with its entity ID, name and settings, and removed the duplicate entity {removed_entity_id}.\n\nAutomations, scripts, scenes and dashboards that still use {removed_entity_id} no longer work. Replace that entity ID with {preserved_entity_id}, then select Submit to dismiss this message. Nothing is sent to the gateway or the device."
-          }
-        }
-      }
+    "repositioning_not_supported": {
+      "message": "Device {device_id} is not a blind with this channel and positioning mode."
     }
   },
   "services": {
@@ -249,6 +301,54 @@
         }
       },
       "name": "Set device configuration"
+    },
+    "set_cover_position": {
+      "name": "Set blind position",
+      "description": "Moves a D2-05 blind to a position, optionally after a reference run to an end position that recalibrates its position tracking.",
+      "fields": {
+        "device_id": {
+          "name": "Device ID",
+          "description": "EURID of the blind."
+        },
+        "position": {
+          "name": "Position",
+          "description": "Target position in percent, 100 is open and 0 is closed (Home Assistant scale)."
+        },
+        "repositioning": {
+          "name": "Reference run",
+          "description": "Drive to an end position first. Direct moves without a reference run."
+        },
+        "channel": {
+          "name": "Channel",
+          "description": "Output channel of the blind actuator."
+        },
+        "config_entry_id": {
+          "name": "Gateway",
+          "description": "Gateway to use. Select one when more than one gateway is loaded."
+        }
+      }
+    }
+  },
+  "issues": {
+    "duplicate_beta_entity": {
+      "title": "Duplicate entity {removed_entity_id} was removed",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Update references to {removed_entity_id}",
+            "description": "While adopting the upstream unique IDs, the integration found two registry entries for the same device and gateway. It kept your existing entity {preserved_entity_id} with its entity ID, name and settings, and removed the duplicate entity {removed_entity_id}.\n\nAutomations, scripts, scenes and dashboards that still use {removed_entity_id} no longer work. Replace that entity ID with {preserved_entity_id}, then select Submit to dismiss this message. Nothing is sent to the gateway or the device."
+          }
+        }
+      }
+    }
+  },
+  "selector": {
+    "repositioning": {
+      "options": {
+        "direct": "Direct",
+        "first_up": "First up (top end position)",
+        "first_down": "First down (bottom end position)"
+      }
     }
   }
 }

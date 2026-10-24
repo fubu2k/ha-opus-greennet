@@ -161,8 +161,7 @@ class OpusGreenNetCover(OpusGreenNetEntity, CoverEntity):
             return None
         return channel.movement == "closing"
 
-    # A deferred command (ACK 201) is queued by the gateway and has not reached
-    # the actuator: no position or tilt estimate is applied for it.
+    # A command queued for a sleeping device (201) gets no estimate.
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
@@ -170,9 +169,10 @@ class OpusGreenNetCover(OpusGreenNetEntity, CoverEntity):
         delivery = await self._coordinator.async_set_cover_position(
             self._device.device_id, 0, self._channel_id
         )
-        if delivery is CommandDelivery.DEFERRED:
-            return
-        if self._device.apply_cover_position_estimate(snapshot, 0):
+        if (
+            delivery is not CommandDelivery.DEFERRED
+            and self._device.apply_cover_position_estimate(snapshot, 0)
+        ):
             self.async_write_ha_state()
 
     async def async_close_cover(self, **kwargs: Any) -> None:
@@ -181,9 +181,10 @@ class OpusGreenNetCover(OpusGreenNetEntity, CoverEntity):
         delivery = await self._coordinator.async_set_cover_position(
             self._device.device_id, 100, self._channel_id
         )
-        if delivery is CommandDelivery.DEFERRED:
-            return
-        if self._device.apply_cover_position_estimate(snapshot, 100):
+        if (
+            delivery is not CommandDelivery.DEFERRED
+            and self._device.apply_cover_position_estimate(snapshot, 100)
+        ):
             self.async_write_ha_state()
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
@@ -202,9 +203,10 @@ class OpusGreenNetCover(OpusGreenNetEntity, CoverEntity):
             delivery = await self._coordinator.async_set_cover_position(
                 self._device.device_id, opus_position, self._channel_id
             )
-            if delivery is CommandDelivery.DEFERRED:
-                return
-            if self._device.apply_cover_position_estimate(snapshot, opus_position):
+            if (
+                delivery is not CommandDelivery.DEFERRED
+                and self._device.apply_cover_position_estimate(snapshot, opus_position)
+            ):
                 self.async_write_ha_state()
 
     async def async_set_cover_tilt_position(self, **kwargs: Any) -> None:
@@ -217,7 +219,8 @@ class OpusGreenNetCover(OpusGreenNetEntity, CoverEntity):
             delivery = await self._coordinator.async_set_cover_tilt(
                 self._device.device_id, tilt, self._channel_id
             )
-            if delivery is CommandDelivery.DEFERRED:
-                return
-            if self._device.apply_cover_tilt_estimate(snapshot, tilt):
+            if (
+                delivery is not CommandDelivery.DEFERRED
+                and self._device.apply_cover_tilt_estimate(snapshot, tilt)
+            ):
                 self.async_write_ha_state()

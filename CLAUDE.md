@@ -2,22 +2,24 @@
 
 ## Project Overview
 
-Home Assistant custom integration for OPUS GreenNet Bridge (EnOcean over IP via MQTT).
+Home Assistant custom integration for OPUS GreenNet Bridge (EnOcean over IP via the gateway REST API).
 Repository: https://github.com/kegelmeier/ha-opus-greennet
 
 ## Tech Stack
 
 - Python 3.14 (Home Assistant 2026.8+)
 - Home Assistant custom component architecture
-- MQTT (EnOcean over IP protocol)
+- EnOcean over IP REST API of the gateway (HTTP + event stream, aiohttp)
 - HACS compatible
 
 ## Project Structure
 
 - `custom_components/opus_greennet/` — all integration code
 - `manifest.json` — version (single source of truth) + metadata
-- `const.py` — all constants, EEP mappings, topic patterns
-- `coordinator.py` — MQTT communication, device discovery, command dispatch
+- `const.py` — all constants and EEP mappings
+- `api.py` — REST client (requests, error mapping, event stream splitting, request priority lock)
+- `protocol.py` — pure helpers that read gateway documents (state functions, feedback fields)
+- `coordinator.py` — connection lifecycle (event stream, health probe), device state, commands
 - `enocean_device.py` — device/channel data model
 - Platform files: `light.py`, `switch.py`, `cover.py`, `climate.py`, `sensor.py`, `binary_sensor.py`, `event.py`
 - `services.yaml` — HA service definitions (rendered in Developer Tools)
@@ -44,7 +46,7 @@ Examples:
 1. Create branch from main (`feat/` or `fix/`). Direct push to main is OK for minor changes.
 2. Make changes
 3. Run `pytest -v` — all tests must pass before proceeding
-4. Update README.md if the change affects supported devices, features, services, or project structure
+4. Update README.md (features, supported devices, compatibility, roadmap) and the matching page in docs/ (device behaviour, actions, project structure)
 5. Push branch → create PR (see PR Guidelines below)
 6. Merge to main
 7. **Version & release are done separately** (see Versioning & HACS Release below)
@@ -78,7 +80,7 @@ Examples:
 ## PR Checklist (before pushing the branch)
 
 1. **Tests pass** — Run `pytest -v`. All tests must pass. Add tests for new functionality.
-2. **README.md** — Update if the change affects supported devices, features, services, project structure, or test count.
+2. **README.md / docs/** — Update README.md for features, supported devices, compatibility or roadmap; docs/devices.md for device behaviour and actions; docs/development.md for project structure or test count.
 3. **Translation files** — If new entity types or UI strings are added:
    - `strings.json` — add entity names under `"entity"` block
    - `translations/en.json` — mirror the same entries
@@ -111,7 +113,7 @@ Versioning is done **manually and separately** from PRs. After one or more PRs a
 
 - All platforms follow the dispatcher signal pattern (see `light.py` as reference)
 - Device state is held in `EnOceanChannel` dataclass fields
-- Coordinator handles ALL MQTT communication; entities never touch MQTT directly
+- Coordinator handles ALL gateway communication; entities never call the API directly
 - Use `KNOWN_STATE_KEYS` in const.py when adding new function keys
 - Multi-channel devices require the `channel` key in command functions
 
@@ -124,5 +126,6 @@ Versioning is done **manually and separately** from PRs. After one or more PRs a
 
 ## Reference
 
-- MQTT protocol spec: `opus_mqtt_services_reference.md` in repo root
+- Gateway interface contract: `docs/quality/protocol-contract.md`
+- Former MQTT reference (payload semantics still apply): `opus_mqtt_services_reference.md`
 - EEP profiles: https://www.enocean-alliance.org/eep/
