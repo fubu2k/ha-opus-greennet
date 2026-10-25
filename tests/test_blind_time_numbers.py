@@ -1,0 +1,221 @@
+"""Travel times of blinds as number entities."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from homeassistant.components.number import NumberDeviceClass, NumberMode
+from homeassistant.const import EntityCategory
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+
+from custom_components.opus_greennet import protocol
+from custom_components.opus_greennet.enocean_device import EnOceanDevice
+from custom_components.opus_greennet.number import (
+    BLIND_TIMES,
+    OpusGreenNetBlindTimeNumber,
+    async_setup_entry,
+)
+from tests.test_coordinator_commands import (
+    connected_coordinator as connected_coordinator,
+)
+from tests.test_coordinator_commands import radio as radio
+
+EAG_ID = "AABB0011"
+CONFIG_PATH = "/devices/DEV1/configuration"
+
+
+def _blind(eep: str = "D2-05-02") -> EnOceanDevice:
+    return EnOceanDevice("DEV1", "Blind", [{"eep": eep}])
+
+
+def _document(**values: object) -> dict:
+    return {
+        "header": {"httpStatus": 200},
+        "configuration": {
+            "parameters": [
+                {"key": key, "value": value} for key, value in values.items()
+            ]
+        },
+    }
+
+
+def _entry(coordinator) -> SimpleNamespace:
+    return SimpleNamespace(
+        data={"eag_id": EAG_ID},
+        runtime_data=SimpleNamespace(
+            coordinator=coordinator, gateway_device_id="gateway"
+        ),
+        async_on_unload=MagicMock(),
+    )
+
+
+# ── protocol ───────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        (_document(verticalMovementTime=25.51), 25.51),
+        (_document(verticalMovementTime="25.51"), 25.51),
+        (_document(rotationTime=0), None),
+        (_document(verticalMovementTime=-1), None),
+        (_document(verticalMovementTime=True), None),
+        (_document(verticalMovementTime="off"), None),
+        ({"configuration": {"parameters": "x"}}, None),
+        ({"configuration": {}}, None),
+        ({"configuration": {"parameters": ["x", None]}}, None),
+        ({}, None),
+    ],
+)
+def test_configuration_parameter(document, expected) -> None:
+    assert protocol.configuration_parameter(document, "verticalMovementTime") == (
+        expected
+    )
+
+
+def test_configuration_parameter_reads_a_zero_value() -> None:
+    document = _document(rotationTime=0.0)
+    assert protocol.configuration_parameter(document, "rotationTime") == 0.0
+
+
+# ── entities ───────────────────────────────────────────────────────────────
+
+
+async def test_setup_creates_both_times_for_blinds_only(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = MagicMock()
+    coordinator.devices = {
+        "DEV1": _blind(),
+        "SW": EnOceanDevice("SW", "Switch", [{"eep": "D2-01-01"}]),
+    }
+    added: list = []
+    await async_setup_entry(
+        hass, _entry(coordinator), lambda entities, *_a, **_k: added.extend(entities)
+    )
+    assert [entity.unique_id for entity in added] == [
+        f"{EAG_ID}_DEV1_vertical_movement_time",
+        f"{EAG_ID}_DEV1_rotation_time",
+    ]
+
+
+def test_number_metadata_follows_the_gateway_parameter_catalog() -> None:
+    entity = OpusGreenNetBlindTimeNumber(
+        MagicMock(), EAG_ID, "gateway", _blind(), BLIND_TIMES[0]
+    )
+    assert entity.entity_category is EntityCategory.CONFIG
+    assert entity.entity_registry_enabled_default is False
+    assert entity.device_class is NumberDeviceClass.DURATION
+    assert entity.mode is NumberMode.BOX
+    assert (entity.native_min_value, entity.native_max_value) == (0, 655.35)
+    assert entity.native_step == 0.01
+    assert entity.native_unit_of_measurement == "s"
+
+
+def test_value_follows_the_channel_fields() -> None:
+    device = _blind()
+    vertical, rotation = (
+        OpusGreenNetBlindTimeNumber(MagicMock(), EAG_ID, "gateway", device, time)
+        for time in BLIND_TIMES
+    )
+    assert vertical.native_value is None
+    channel = device.get_or_create_channel()
+    assert vertical.native_value is None
+    channel.vertical_movement_time = 25.51
+    channel.rotation_time = 0
+    assert vertical.native_value == 25.51
+    assert rotation.native_value == 0
+
+
+async def test_setting_a_value_writes_the_gateway_parameter() -> None:
+    coordinator = MagicMock()
+    coordinator.async_set_device_parameter = AsyncMock()
+    entity = OpusGreenNetBlindTimeNumber(
+        coordinator, EAG_ID, "gateway", _blind(), BLIND_TIMES[1]
+    )
+    await entity.async_set_native_value(0.4)
+    coordinator.async_set_device_parameter.assert_awaited_once_with(
+        "DEV1", "rotationTime", 0.4
+    )
+
+
+# ── coordinator ────────────────────────────────────────────────────────────
+
+
+async def test_write_is_adopted_only_after_the_read_back(
+    radio, connected_coordinator
+) -> None:
+    coord = connected_coordinator
+    device = coord.devices["DEV1"] = _blind()
+    channel = device.get_or_create_channel()
+    channel.vertical_movement_time = 25.51
+    radio.response = _document(verticalMovementTime=30.5)
+
+    await coord.async_set_device_parameter("DEV1", "verticalMovementTime", 30.5)
+
+    assert radio.sent == [
+        (
+            "PUT",
+            CONFIG_PATH,
+            {
+                "configuration": {
+                    "parameters": [{"key": "verticalMovementTime", "value": 30.5}]
+                }
+            },
+        ),
+        ("GET", CONFIG_PATH, None),
+    ]
+    assert channel.vertical_movement_time == 30.5
+
+
+async def test_value_is_rounded_to_the_device_resolution(
+    radio, connected_coordinator
+) -> None:
+    coord = connected_coordinator
+    device = coord.devices["DEV1"] = _blind()
+    radio.response = _document(rotationTime=0.41)
+    await coord.async_set_device_parameter("DEV1", "rotationTime", 0.4099999)
+    assert radio.sent[0][2]["configuration"]["parameters"][0]["value"] == 0.41
+    assert device.channels[0].rotation_time == 0.41
+
+
+@pytest.mark.parametrize(
+    "stored", [_document(verticalMovementTime=25.51), _document(), {"header": {}}]
+)
+async def test_unconfirmed_value_keeps_the_previous_one(
+    radio, connected_coordinator, stored
+) -> None:
+    coord = connected_coordinator
+    device = coord.devices["DEV1"] = _blind()
+    channel = device.get_or_create_channel()
+    channel.vertical_movement_time = 25.51
+    radio.response = stored | {"header": {"httpStatus": 200}}
+
+    with pytest.raises(HomeAssistantError) as error:
+        await coord.async_set_device_parameter("DEV1", "verticalMovementTime", 30.5)
+
+    assert error.value.translation_key == "parameter_not_confirmed"
+    assert channel.vertical_movement_time == 25.51
+    # Neither the write nor the read-back is repeated.
+    assert [method for method, _, _ in radio.sent] == ["PUT", "GET"]
+
+
+async def test_rejected_write_is_not_read_back(radio, connected_coordinator) -> None:
+    coord = connected_coordinator
+    coord.devices["DEV1"] = _blind()
+    radio.response = {"header": {"httpStatus": 400}}
+    with pytest.raises(HomeAssistantError):
+        await coord.async_set_device_parameter("DEV1", "verticalMovementTime", 30.5)
+    assert [method for method, _, _ in radio.sent] == ["PUT"]
+
+
+async def test_unknown_device_sends_nothing(radio, connected_coordinator) -> None:
+    with pytest.raises(HomeAssistantError) as error:
+        await connected_coordinator.async_set_device_parameter(
+            "GONE", "verticalMovementTime", 30.5
+        )
+    assert error.value.translation_key == "device_not_found"
+    assert radio.sent == []

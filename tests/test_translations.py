@@ -26,6 +26,7 @@ from custom_components.opus_greennet import (
     event,
     light,
     lock,
+    number,
     sensor,
     switch,
 )
@@ -46,6 +47,7 @@ PLATFORMS = {
     "event": event,
     "light": light,
     "lock": lock,
+    "number": number,
     "sensor": sensor,
     "switch": switch,
 }
