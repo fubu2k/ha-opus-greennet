@@ -331,6 +331,12 @@
     },
     "parameter_not_confirmed": {
       "message": "{device_id} did not confirm the new value of {reason}. Home Assistant kept the previous value; read the device configuration before trying again."
+    },
+    "parameter_differs": {
+      "message": "{device_id} stored a different value for {reason} than requested. Home Assistant now shows the value stored on the device."
+    },
+    "invalid_parameter_value": {
+      "message": "The value is not a valid number."
     }
   },
   "services": {

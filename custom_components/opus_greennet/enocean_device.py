@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from math import isfinite
 from types import MappingProxyType
-from typing import ClassVar
+from typing import ClassVar, Final
 
 from .const import (
     A5_04_TEMPERATURE_RANGES,
@@ -77,6 +77,11 @@ from .wire import (
     as_object,
     object_items,
     string_key,
+)
+
+# Configured blind times: stored settings, no state reports.
+BLIND_TIME_KEYS: Final = frozenset(
+    {KEY_VERTICAL_MOVEMENT_TIME, KEY_ROTATION_TIME, KEY_MAX_HOLDING_TIME}
 )
 
 # Handle positions as the profiles report them, normalised to the entity
@@ -803,7 +808,7 @@ class EnOceanDevice:
             channel = self.get_or_create_channel(channel_id)
             # A stored setting is no feedback: reading it must not cancel the
             # estimate of a command that awaits its acknowledgement.
-            if key not in DEVICE_SETTING_KEYS:
+            if key not in DEVICE_SETTING_KEYS and key not in BLIND_TIME_KEYS:
                 channel.state_revision += 1
 
             if key in BUTTON_KEYS:

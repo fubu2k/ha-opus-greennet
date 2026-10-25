@@ -56,8 +56,9 @@ WARNING_SIGNAL_STEP_SECONDS = 0.001
 MAX_ILLUMINATION_LUX = 1500
 
 # The parameter catalogs were read from a D2-05-02 blind, a D2-01-03 dimmer and
-# a D2-01-01 and a D2-01-11 switch.
-MAX_HOLDING_TIME_EEPS = frozenset({"D2-05-02"})
+# a D2-01-01 and a D2-01-11 switch. Other types get no settings until their
+# catalog is known.
+BLIND_TIME_EEPS = frozenset({"D2-05-02"})
 DIMMER_TIME_EEPS = frozenset({"D2-01-03"})
 SWITCH_SETTING_EEPS = frozenset({"D2-01-01", "D2-01-11"})
 
@@ -77,28 +78,33 @@ class DeviceTime:
     device_class: NumberDeviceClass = NumberDeviceClass.DURATION
     # Platform type of the devices that have the parameter.
     entity_type: str = "cover"
-    # EEPs whose catalog lists the parameter; None means every such device.
-    eeps: frozenset[str] | None = None
+    # EEPs whose catalog lists the parameter.
+    eeps: frozenset[str] = frozenset()
 
     def applies_to(self, device: EnOceanDevice) -> bool:
         """Return whether the device is known to have this parameter."""
-        return device.entity_type == self.entity_type and (
-            self.eeps is None or not self.eeps.isdisjoint(device.eep_names)
+        return device.entity_type == self.entity_type and not self.eeps.isdisjoint(
+            device.eep_names
         )
 
 
 BLIND_TIMES: tuple[DeviceTime, ...] = (
     DeviceTime(
-        "vertical_movement_time", KEY_VERTICAL_MOVEMENT_TIME, "vertical_movement_time"
+        "vertical_movement_time",
+        KEY_VERTICAL_MOVEMENT_TIME,
+        "vertical_movement_time",
+        eeps=BLIND_TIME_EEPS,
     ),
-    DeviceTime("rotation_time", KEY_ROTATION_TIME, "rotation_time"),
+    DeviceTime(
+        "rotation_time", KEY_ROTATION_TIME, "rotation_time", eeps=BLIND_TIME_EEPS
+    ),
     DeviceTime(
         "max_holding_time",
         KEY_MAX_HOLDING_TIME,
         "max_holding_time",
         maximum=MAX_HOLDING_SECONDS,
         step=HOLDING_STEP_SECONDS,
-        eeps=MAX_HOLDING_TIME_EEPS,
+        eeps=BLIND_TIME_EEPS,
     ),
 )
 
@@ -255,9 +261,18 @@ class OpusGreenNetTimeNumber(OpusGreenNetEntity, NumberEntity):
         self._attr_native_min_value = device_time.minimum
         self._attr_native_max_value = device_time.maximum
         self._attr_native_step = device_time.step
+        # The translation key is part of the unique ID: never rename it.
         self._attr_unique_id = (
             f"{eag_id}_{device.device_id}_{device_time.translation_key}"
         )
+
+    @property
+    def available(self) -> bool:
+        """Return whether the gateway is reachable and reported the setting.
+
+        A setting the device never reported is never written.
+        """
+        return super().available and self.native_value is not None
 
     @property
     def native_value(self) -> float | None:
@@ -271,5 +286,9 @@ class OpusGreenNetTimeNumber(OpusGreenNetEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Write the time to the device and read it back."""
         await self._coordinator.async_set_device_parameter(
-            self._device.device_id, self._device_time.parameter, value
+            self._device.device_id,
+            self._device_time.parameter,
+            value,
+            step=self._device_time.step,
+            minimum=self._device_time.minimum,
         )

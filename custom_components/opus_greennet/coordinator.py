@@ -22,16 +22,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 from collections.abc import Callable, Coroutine, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal
 from enum import StrEnum
 from time import monotonic, time
+from typing import Any, Final
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.util import dt as dt_util
@@ -55,7 +58,6 @@ from .api import (
 from .const import (
     COVER_MOVEMENT_GRACE_SECONDS,
     COVER_RECONCILIATION_DELAYS,
-    DEFAULT_PARAMETER_DECIMALS,
     DOMAIN,
     KEY_ANGLE,
     KEY_CHANNEL,
@@ -69,7 +71,6 @@ from .const import (
     KEY_STOP,
     KEY_UNLOCK,
     KEY_VERTICAL_MOVEMENT_TIME,
-    PARAMETER_DECIMALS,
     RAMPING_MODE_FADE,
     RAMPING_MODE_SWITCH,
     REPOSITIONING_FIRST_DOWN,
@@ -79,7 +80,14 @@ from .const import (
     VALUE_UNKNOWN,
 )
 from .enocean_device import DeviceProfile, EnOceanDevice
-from .wire import JsonObject, WireFunction, WireMapping, as_object, object_items
+from .wire import (
+    JsonObject,
+    WireFunction,
+    WireMapping,
+    as_object,
+    json_body_problem,
+    object_items,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -189,6 +197,40 @@ def request_error(key: str, device_id: str, reason: str = "") -> HomeAssistantEr
     )
 
 
+# How long a setting confirmed by a read-back wins over a device list that
+# still shows the previous value (the gateway reads devices again at night).
+SETTING_HOLD_SECONDS: Final = 26 * 3600
+
+
+def snap_to_step(value: float, step: float, minimum: float = 0) -> float | int:
+    """Return ``value`` on the parameter's grid, as the device stores it.
+
+    Raises ``ServiceValidationError`` for NaN or infinity, which would not be
+    valid JSON. Whole values of a step of 1 or more are sent as integers.
+    """
+    if not math.isfinite(value):
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="invalid_parameter_value",
+        )
+    exponent = Decimal(str(step)).as_tuple().exponent
+    decimals = max(0, -exponent) if isinstance(exponent, int) else 0
+    snapped = round(minimum + round((value - minimum) / step) * step, decimals)
+    if step >= 1 and float(snapped).is_integer():
+        return int(snapped)
+    return snapped
+
+
+def _same_setting(listed: object, confirmed: object) -> bool:
+    """Return whether a listed setting equals the confirmed one."""
+    if isinstance(confirmed, str):
+        return listed == confirmed
+    try:
+        return abs(float(listed) - float(confirmed)) < 1e-6  # type: ignore[arg-type]
+    except TypeError, ValueError:
+        return False
+
+
 class GatewayMismatchError(OpusApiError):
     """The configured address answers with a different gateway identity."""
 
@@ -295,6 +337,13 @@ class OpusGreenNetCoordinator:
         # list requested before it never replaces its signal strength and
         # last-seen time (finding B-5).
         self._telegram_metadata_at: dict[str, float] = {}
+        # One settings write (with its read-back) per device at a time.
+        self._setting_locks: dict[str, asyncio.Lock] = {}
+        # Settings confirmed by a read-back: (device, key) -> (value, monotonic
+        # time). A device list that still lists another value is ignored for
+        # the key until it shows the confirmed one or SETTING_HOLD_SECONDS
+        # passed: the gateway may only read the device again at night.
+        self._confirmed_settings: dict[tuple[str, str], tuple[object, float]] = {}
         self._probe_task: asyncio.Task[None] | None = None
         self._refresh_task: asyncio.Task[None] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
@@ -803,10 +852,11 @@ class OpusGreenNetCoordinator:
             # rocker occurrence.
             device.clear_button_occurrence()
         self._record_last_movement_times(device_id, data)
-        functions = (
+        functions = self._without_stale_settings(
+            device_id,
             protocol.device_state_functions(data)
             if authoritative or existing is None
-            else protocol.configuration_functions(data)
+            else protocol.configuration_functions(data),
         )
         if functions:
             device.update_from_telegram({"functions": functions})
@@ -1897,6 +1947,12 @@ class OpusGreenNetCoordinator:
         self, device_id: str, config: WireMapping
     ) -> None:
         """Write configuration to a device and wait for the acknowledgement."""
+        if (problem := json_body_problem(config)) is not None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_configuration",
+                translation_placeholders={"device_id": device_id, "reason": problem},
+            )
         path = OpusGatewayClient.device_path(device_id, "configuration")
         await self._async_radio_request(
             device_id,
@@ -1905,57 +1961,102 @@ class OpusGreenNetCoordinator:
         )
 
     async def async_set_device_parameter(
-        self, device_id: str, key: str, value: float
+        self,
+        device_id: str,
+        key: str,
+        value: float,
+        *,
+        step: float,
+        minimum: float = 0,
     ) -> None:
         """Write one numeric parameter and show it only once the device confirms.
 
-        The acknowledgement only means that the gateway accepted the request.
-        The stored value is therefore read back, and Home Assistant adopts it
-        only when it matches. Neither the write nor the read-back is repeated
-        automatically; an unclear outcome is reported to the caller.
+        The value is snapped to the parameter's step first, because the device
+        stores it that way. The acknowledgement only means that the gateway
+        accepted the request; the stored value is therefore read back. A
+        matching value is adopted; a different one is adopted too, because it
+        is what the device now holds, and reported. Neither the write nor the
+        read-back is repeated automatically.
         """
-        device = self.get_device(device_id)
-        if device is None:
-            raise request_error("device_not_found", device_id)
-        # The step of the parameter decides how many decimals the device keeps.
-        decimals = PARAMETER_DECIMALS.get(key, DEFAULT_PARAMETER_DECIMALS)
-        value = round(value, decimals)
-        await self.async_set_device_configuration(
+        written = snap_to_step(value, step, minimum)
+        await self._async_write_setting(
             device_id,
-            {"configuration": {"parameters": [{"key": key, "value": value}]}},
+            key,
+            written,
+            read=protocol.configuration_parameter,
+            same=lambda stored: abs(stored - written) <= step / 2,
         )
-        stored = protocol.configuration_parameter(
-            await self.async_get_device_configuration(device_id), key
-        )
-        if stored is None or abs(stored - value) > 0.5 * 10**-decimals:
-            raise request_error("parameter_not_confirmed", device_id, key)
-        device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
-        self._dispatch_state(device)
 
     async def async_set_device_option(
         self, device_id: str, key: str, option: str
     ) -> None:
         """Write one text setting and show it only once the device confirms.
 
-        Same contract as ``async_set_device_parameter``: the acknowledgement
-        only means that the gateway accepted the request, the stored value is
-        read back and adopted only when it equals the written one, and neither
-        request is repeated automatically.
+        Same contract as ``async_set_device_parameter``.
         """
+        await self._async_write_setting(
+            device_id,
+            key,
+            option,
+            read=protocol.configuration_option,
+            same=lambda stored: stored == option,
+        )
+
+    async def _async_write_setting(
+        self,
+        device_id: str,
+        key: str,
+        value: float | str,
+        *,
+        read: Callable[[JsonObject, str], Any],
+        same: Callable[[Any], bool],
+    ) -> None:
         device = self.get_device(device_id)
         if device is None:
             raise request_error("device_not_found", device_id)
-        await self.async_set_device_configuration(
-            device_id,
-            {"configuration": {"parameters": [{"key": key, "value": option}]}},
-        )
-        stored = protocol.configuration_option(
-            await self.async_get_device_configuration(device_id), key
-        )
-        if stored != option:
-            raise request_error("parameter_not_confirmed", device_id, key)
-        device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
-        self._dispatch_state(device)
+        lock = self._setting_locks.setdefault(device_id, asyncio.Lock())
+        async with lock:
+            await self.async_set_device_configuration(
+                device_id,
+                {"configuration": {"parameters": [{"key": key, "value": value}]}},
+            )
+            try:
+                stored = read(await self.async_get_device_configuration(device_id), key)
+            except HomeAssistantError as err:
+                # Written, but the outcome could not be read back.
+                raise request_error("parameter_not_confirmed", device_id, key) from err
+            if stored is None:
+                raise request_error("parameter_not_confirmed", device_id, key)
+            device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
+            self._confirmed_settings[(device_id, key)] = (stored, monotonic())
+            self._dispatch_state(device)
+            if not same(stored):
+                raise request_error("parameter_differs", device_id, key)
+
+    def _without_stale_settings(
+        self, device_id: str, functions: list[WireFunction]
+    ) -> list[WireFunction]:
+        """Drop listed settings that are older than a confirmed write."""
+        if not self._confirmed_settings:
+            return functions
+        kept: list[WireFunction] = []
+        for function in functions:
+            key = function.get("key")
+            if not isinstance(key, str):
+                kept.append(function)
+                continue
+            confirmed = self._confirmed_settings.get((device_id, key))
+            if confirmed is not None:
+                value, confirmed_at = confirmed
+                if _same_setting(function.get("value"), value) or (
+                    monotonic() - confirmed_at > SETTING_HOLD_SECONDS
+                ):
+                    # The gateway caught up, or the hold expired.
+                    del self._confirmed_settings[(device_id, key)]
+                else:
+                    continue
+            kept.append(function)
+        return kept
 
     async def async_get_device_parameters(self, device_id: str) -> JsonObject:
         """Read the configurable parameters a device supports."""

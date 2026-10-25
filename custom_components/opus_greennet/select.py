@@ -149,7 +149,21 @@ class OpusGreenNetDeviceSelect(OpusGreenNetEntity, SelectEntity):
         self._values = {option_slug(value): value for value in values}
         self._attr_translation_key = select.translation_key
         self._attr_options = list(self._values)
+        # The translation key is part of the unique ID: never rename it.
         self._attr_unique_id = f"{eag_id}_{device.device_id}_{select.translation_key}"
+
+    @property
+    def available(self) -> bool:
+        """Return whether the gateway is reachable and reported the setting.
+
+        A setting the device never reported is never written.
+        """
+        channel = self._device.channels.get(self._channel_id)
+        return (
+            super().available
+            and channel is not None
+            and getattr(channel, self._select.attribute) is not None
+        )
 
     @property
     def current_option(self) -> str | None:

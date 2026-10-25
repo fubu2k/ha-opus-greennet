@@ -15,10 +15,9 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.opus_greennet import protocol
 from custom_components.opus_greennet.const import (
-    DEFAULT_PARAMETER_DECIMALS,
     DEVICE_SETTINGS,
-    PARAMETER_DECIMALS,
 )
+from custom_components.opus_greennet.coordinator import snap_to_step
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
 from custom_components.opus_greennet.number import (
     DEVICE_TIMES,
@@ -32,6 +31,11 @@ from tests.test_coordinator_commands import (
 from tests.test_coordinator_commands import radio as radio
 
 EAG_ID = "AABB0011"
+# Step and minimum the number entities pass with every write.
+STEPS = {
+    time.parameter: {"step": time.step, "minimum": time.minimum}
+    for time in DEVICE_TIMES
+}
 CONFIG_PATH = "/devices/DEV1/configuration"
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -184,7 +188,9 @@ async def test_setting_a_value_writes_the_gateway_parameter(setting, key) -> Non
     coordinator.async_set_device_parameter = AsyncMock()
     entity = OpusGreenNetTimeNumber(coordinator, EAG_ID, "gateway", _switch(), setting)
     await entity.async_set_native_value(120)
-    coordinator.async_set_device_parameter.assert_awaited_once_with("DEV1", key, 120)
+    coordinator.async_set_device_parameter.assert_awaited_once_with(
+        "DEV1", key, 120, **STEPS[key]
+    )
 
 
 def test_every_setting_has_its_model_range() -> None:
@@ -200,11 +206,13 @@ def test_every_setting_has_its_model_range() -> None:
         )
 
 
-def test_parameter_decimals_keep_every_step() -> None:
-    """A value on the step must survive the rounding before the write."""
+def test_values_on_the_step_survive_snapping() -> None:
+    """Snapping keeps a value that already is on the parameter's grid."""
     for setting in DEVICE_TIMES:
-        decimals = PARAMETER_DECIMALS.get(setting.parameter, DEFAULT_PARAMETER_DECIMALS)
-        assert round(setting.step, decimals) == setting.step
+        on_grid = setting.minimum + 3 * setting.step
+        assert snap_to_step(on_grid, setting.step, setting.minimum) == pytest.approx(
+            on_grid
+        )
 
 
 # ── data model ─────────────────────────────────────────────────────────────
@@ -328,7 +336,9 @@ async def test_warning_signal_keeps_three_decimals(
     channel.switch_off_warning_signal = 0.5
     radio.response = _document(switchOffWarningSignal=0.457)
 
-    await coord.async_set_device_parameter("DEV1", "switchOffWarningSignal", 0.4567891)
+    await coord.async_set_device_parameter(
+        "DEV1", "switchOffWarningSignal", 0.4567891, **STEPS["switchOffWarningSignal"]
+    )
 
     assert radio.sent == [
         (
@@ -345,7 +355,7 @@ async def test_warning_signal_keeps_three_decimals(
     assert channel.switch_off_warning_signal == 0.457
 
 
-async def test_a_read_back_one_step_off_is_not_confirmed(
+async def test_a_read_back_one_step_off_is_adopted_and_reported(
     radio, connected_coordinator
 ) -> None:
     coord = connected_coordinator
@@ -355,10 +365,13 @@ async def test_a_read_back_one_step_off_is_not_confirmed(
     radio.response = _document(switchOffWarningSignal=0.458)
 
     with pytest.raises(HomeAssistantError) as error:
-        await coord.async_set_device_parameter("DEV1", "switchOffWarningSignal", 0.457)
+        await coord.async_set_device_parameter(
+            "DEV1", "switchOffWarningSignal", 0.457, **STEPS["switchOffWarningSignal"]
+        )
 
-    assert error.value.translation_key == "parameter_not_confirmed"
-    assert channel.switch_off_warning_signal == 0.5
+    assert error.value.translation_key == "parameter_differs"
+    # The device holds the read-back value, so Home Assistant shows it.
+    assert channel.switch_off_warning_signal == 0.458
     assert [method for method, _, _ in radio.sent] == ["PUT", "GET"]
 
 
@@ -371,7 +384,7 @@ async def test_timer_write_is_adopted_after_the_read_back(
     channel.timer = 300.0
     radio.response = _document(timer=600.0)
 
-    await coord.async_set_device_parameter("DEV1", "timer", 600)
+    await coord.async_set_device_parameter("DEV1", "timer", 600, **STEPS["timer"])
 
     assert radio.sent[0] == (
         "PUT",
@@ -381,7 +394,7 @@ async def test_timer_write_is_adopted_after_the_read_back(
     assert channel.timer == 600.0
 
 
-async def test_unconfirmed_timer_keeps_the_previous_one(
+async def test_device_keeping_the_old_timer_is_reported(
     radio, connected_coordinator
 ) -> None:
     coord = connected_coordinator
@@ -391,8 +404,8 @@ async def test_unconfirmed_timer_keeps_the_previous_one(
     radio.response = _document(timer=300.0)
 
     with pytest.raises(HomeAssistantError) as error:
-        await coord.async_set_device_parameter("DEV1", "timer", 600)
+        await coord.async_set_device_parameter("DEV1", "timer", 600, **STEPS["timer"])
 
-    assert error.value.translation_key == "parameter_not_confirmed"
+    assert error.value.translation_key == "parameter_differs"
     assert channel.timer == 300.0
     assert [method for method, _, _ in radio.sent] == ["PUT", "GET"]

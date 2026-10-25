@@ -224,10 +224,6 @@ DEVICE_OPTIONS: Final = {
     KEY_FUNCTION_EXTERNAL_INPUT: "function_external_input",
 }
 DEVICE_SETTING_KEYS: Final = frozenset(DEVICE_SETTINGS) | frozenset(DEVICE_OPTIONS)
-# Decimals a written parameter is rounded to; the default fits every step of
-# 0.01 or more.
-DEFAULT_PARAMETER_DECIMALS: Final = 2
-PARAMETER_DECIMALS: Final = {KEY_SWITCH_OFF_WARNING_SIGNAL: 3}
 COVER_MOVEMENT_GRACE_SECONDS: Final = 5.0
 COVER_RECONCILIATION_DELAYS: Final = (10.0, 20.0)
 KEY_CHANNEL: Final = "channel"

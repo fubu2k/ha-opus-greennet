@@ -242,9 +242,9 @@ class FakeGateway:
             if path in self.chunked:
                 answer.enable_chunked_encoding()
             return answer
-        return web.json_response(self._answer(request.method, path))
+        return web.json_response(self._answer(request.method, path, body))
 
-    def _answer(self, method: str, path: str) -> dict[str, Any]:
+    def _answer(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
         ok = {"httpStatus": 200, "gateway": "OPUS-GW test"}
         if path == "/system/info":
             return {
@@ -271,13 +271,31 @@ class FakeGateway:
                 return {"header": {"httpStatus": 404, "message": "unknown device"}}
             if len(parts) == 2:
                 return {"header": {**ok, "content": "device"}, "device": device}
-            if method == "PUT":
-                return {"header": ok}
             if parts[2] == "configuration":
+                # The device's configuration: a PUT stores its parameters (like
+                # a device that accepts every value), a GET reads them back.
+                stored = device.setdefault("configuration", {}).setdefault(
+                    "parameters", []
+                )
+                if method == "PUT":
+                    written = (
+                        (body or {}).get("configuration", {}).get("parameters", [])
+                    )
+                    for parameter in written:
+                        known = next(
+                            (p for p in stored if p["key"] == parameter["key"]), None
+                        )
+                        if known is None:
+                            stored.append(dict(parameter))
+                        else:
+                            known["value"] = parameter["value"]
+                    return {"header": ok}
                 return {
                     "header": {**ok, "content": "configuration"},
-                    "configuration": {"deviceId": parts[1], "parameters": []},
+                    "configuration": {"deviceId": parts[1], "parameters": stored},
                 }
+            if method == "PUT":
+                return {"header": ok}
             if parts[2] == "profile" and parts[1] in self.profiles:
                 return {
                     "header": {**ok, "content": "profile"},

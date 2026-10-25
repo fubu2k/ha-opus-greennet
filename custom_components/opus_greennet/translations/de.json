@@ -331,6 +331,12 @@
     },
     "parameter_not_confirmed": {
       "message": "{device_id} hat den neuen Wert von {reason} nicht bestätigt. Home Assistant behält den bisherigen Wert; lies vor einem neuen Versuch die Gerätekonfiguration aus."
+    },
+    "parameter_differs": {
+      "message": "{device_id} hat für {reason} einen anderen Wert gespeichert als angefordert. Home Assistant zeigt jetzt den auf dem Gerät gespeicherten Wert."
+    },
+    "invalid_parameter_value": {
+      "message": "Der Wert ist keine gültige Zahl."
     }
   },
   "services": {

@@ -15,6 +15,7 @@ from custom_components.opus_greennet import protocol
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
 from custom_components.opus_greennet.number import (
     BLIND_TIMES,
+    DEVICE_TIMES,
     OpusGreenNetTimeNumber,
     async_setup_entry,
 )
@@ -24,6 +25,11 @@ from tests.test_coordinator_commands import (
 from tests.test_coordinator_commands import radio as radio
 
 EAG_ID = "AABB0011"
+# Step and minimum the number entities pass with every write.
+STEPS = {
+    time.parameter: {"step": time.step, "minimum": time.minimum}
+    for time in DEVICE_TIMES
+}
 CONFIG_PATH = "/devices/DEV1/configuration"
 
 
@@ -104,7 +110,7 @@ async def test_setup_creates_the_times_for_blinds_only(
     ]
 
 
-async def test_max_holding_time_only_for_blinds_with_a_catalog(
+async def test_blind_times_only_for_blinds_with_a_catalog(
     hass: HomeAssistant,
 ) -> None:
     """The parameter catalog was read from a D2-05-02 only."""
@@ -114,10 +120,7 @@ async def test_max_holding_time_only_for_blinds_with_a_catalog(
     await async_setup_entry(
         hass, _entry(coordinator), lambda entities, *_a, **_k: added.extend(entities)
     )
-    assert [entity.unique_id for entity in added] == [
-        f"{EAG_ID}_DEV1_vertical_movement_time",
-        f"{EAG_ID}_DEV1_rotation_time",
-    ]
+    assert added == []
 
 
 def test_number_metadata_follows_the_gateway_parameter_catalog() -> None:
@@ -183,7 +186,7 @@ async def test_setting_a_value_writes_the_gateway_parameter() -> None:
     )
     await entity.async_set_native_value(0.4)
     coordinator.async_set_device_parameter.assert_awaited_once_with(
-        "DEV1", "rotationTime", 0.4
+        "DEV1", "rotationTime", 0.4, **STEPS["rotationTime"]
     )
 
 
@@ -255,7 +258,9 @@ async def test_max_holding_time_write_is_adopted_after_the_read_back(
     channel.max_holding_time = 12.0
     radio.response = _document(maxHoldingTime=29.0)
 
-    await coord.async_set_device_parameter("DEV1", "maxHoldingTime", 29)
+    await coord.async_set_device_parameter(
+        "DEV1", "maxHoldingTime", 29, **STEPS["maxHoldingTime"]
+    )
 
     assert radio.sent == [
         (
@@ -268,7 +273,7 @@ async def test_max_holding_time_write_is_adopted_after_the_read_back(
     assert channel.max_holding_time == 29.0
 
 
-async def test_unconfirmed_max_holding_time_keeps_the_previous_one(
+async def test_device_keeping_the_old_holding_time_is_reported(
     radio, connected_coordinator
 ) -> None:
     coord = connected_coordinator
@@ -278,9 +283,11 @@ async def test_unconfirmed_max_holding_time_keeps_the_previous_one(
     radio.response = _document(maxHoldingTime=12.0)
 
     with pytest.raises(HomeAssistantError) as error:
-        await coord.async_set_device_parameter("DEV1", "maxHoldingTime", 29)
+        await coord.async_set_device_parameter(
+            "DEV1", "maxHoldingTime", 29, **STEPS["maxHoldingTime"]
+        )
 
-    assert error.value.translation_key == "parameter_not_confirmed"
+    assert error.value.translation_key == "parameter_differs"
     assert channel.max_holding_time == 12.0
     assert [method for method, _, _ in radio.sent] == ["PUT", "GET"]
 
@@ -294,7 +301,9 @@ async def test_write_is_adopted_only_after_the_read_back(
     channel.vertical_movement_time = 25.51
     radio.response = _document(verticalMovementTime=30.5)
 
-    await coord.async_set_device_parameter("DEV1", "verticalMovementTime", 30.5)
+    await coord.async_set_device_parameter(
+        "DEV1", "verticalMovementTime", 30.5, **STEPS["verticalMovementTime"]
+    )
 
     assert radio.sent == [
         (
@@ -317,16 +326,25 @@ async def test_value_is_rounded_to_the_device_resolution(
     coord = connected_coordinator
     device = coord.devices["DEV1"] = _blind()
     radio.response = _document(rotationTime=0.41)
-    await coord.async_set_device_parameter("DEV1", "rotationTime", 0.4099999)
+    await coord.async_set_device_parameter(
+        "DEV1", "rotationTime", 0.4099999, **STEPS["rotationTime"]
+    )
     assert radio.sent[0][2]["configuration"]["parameters"][0]["value"] == 0.41
     assert device.channels[0].rotation_time == 0.41
 
 
 @pytest.mark.parametrize(
-    "stored", [_document(verticalMovementTime=25.51), _document(), {"header": {}}]
+    ("stored", "error_key"),
+    [
+        # The device kept its old value: shown as it is, and reported.
+        (_document(verticalMovementTime=25.51), "parameter_differs"),
+        # No usable read-back: the previous value stays.
+        (_document(), "parameter_not_confirmed"),
+        ({"header": {}}, "parameter_not_confirmed"),
+    ],
 )
 async def test_unconfirmed_value_keeps_the_previous_one(
-    radio, connected_coordinator, stored
+    radio, connected_coordinator, stored, error_key
 ) -> None:
     coord = connected_coordinator
     device = coord.devices["DEV1"] = _blind()
@@ -335,9 +353,11 @@ async def test_unconfirmed_value_keeps_the_previous_one(
     radio.response = stored | {"header": {"httpStatus": 200}}
 
     with pytest.raises(HomeAssistantError) as error:
-        await coord.async_set_device_parameter("DEV1", "verticalMovementTime", 30.5)
+        await coord.async_set_device_parameter(
+            "DEV1", "verticalMovementTime", 30.5, **STEPS["verticalMovementTime"]
+        )
 
-    assert error.value.translation_key == "parameter_not_confirmed"
+    assert error.value.translation_key == error_key
     assert channel.vertical_movement_time == 25.51
     # Neither the write nor the read-back is repeated.
     assert [method for method, _, _ in radio.sent] == ["PUT", "GET"]
@@ -348,14 +368,16 @@ async def test_rejected_write_is_not_read_back(radio, connected_coordinator) -> 
     coord.devices["DEV1"] = _blind()
     radio.response = {"header": {"httpStatus": 400}}
     with pytest.raises(HomeAssistantError):
-        await coord.async_set_device_parameter("DEV1", "verticalMovementTime", 30.5)
+        await coord.async_set_device_parameter(
+            "DEV1", "verticalMovementTime", 30.5, **STEPS["verticalMovementTime"]
+        )
     assert [method for method, _, _ in radio.sent] == ["PUT"]
 
 
 async def test_unknown_device_sends_nothing(radio, connected_coordinator) -> None:
     with pytest.raises(HomeAssistantError) as error:
         await connected_coordinator.async_set_device_parameter(
-            "GONE", "verticalMovementTime", 30.5
+            "GONE", "verticalMovementTime", 30.5, **STEPS["verticalMovementTime"]
         )
     assert error.value.translation_key == "device_not_found"
     assert radio.sent == []

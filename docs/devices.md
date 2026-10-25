@@ -28,6 +28,22 @@ The settings stored on actuators, as far as the gateway's parameter catalog
 | Switches (D2-01-01) | Timer duration, Timer duration (long press), Switch-off warning, Switch-off warning signal, Illumination threshold | Operation mode, LED colour, External input function | Function of rocker A and B, routing time |
 | 2-channel switches (D2-01-11) | as D2-01-01 | as D2-01-01, plus LED channel | as D2-01-01 |
 
+How a setting is written, for every device type:
+
+- A setting is **unavailable until the device reported it**; a setting the
+  device never reported is never written.
+- The value is rounded to the parameter's step, written with one ReCom request
+  and **read back** from the device. Nothing is repeated automatically.
+- If the read-back shows the written value, it is adopted. If it shows another
+  value, Home Assistant shows that value (it is what the device now holds) and
+  reports the difference. If the read-back fails, the previous value stays and
+  an error says that the outcome is unknown.
+- Changes to one device are made one after the other.
+- The gateway may list the previous value until it reads the device again
+  (usually at night). For up to 26 hours after a confirmed write, a device list
+  with an older value is ignored for that setting; a change made in the OPUS
+  app in that time shows up once the gateway lists it.
+
 Which of these settings were written on real hardware, and which only read, is
 listed in the [README](../README.md#what-was-verified-on-hardware).
 
@@ -162,14 +178,14 @@ support follows the EEP.
 **Stop** sends the profile's stop command and then checks the reported position
 and, where supported, tilt. It does not assume a new position.
 
-**Diagnostic controls** (D2-05-00 and D2-05-02):
+**Diagnostic controls** (D2-05-00 and D2-05-02; the time settings D2-05-02 only):
 
 | Entity | What it does |
 |--------|--------------|
 | **Blockage** switch | For automations such as wind protection or an open door. On sends `lockingMode = block`, off sends `unblock`. A D2-05-00 `alarm` counts as blocked; the reported mode is the `locking_mode` attribute. **Disabled by default** because it stops the blind. |
 | **Reference run via top / bottom** buttons | Drive the blind to an end position first (`repositioning = firstUp` / `firstDown`) and then back to its last known position. This recalibrates the blind's position tracking. |
 | **Last run time** sensor (every blind) | Seconds from a position command (from HA, another controller or a reference run) to the blind's report at the target. Attributes: `direction` (`up`, `down`, `reference_up`, `reference_down`), start and end position (100 = open) and `full_travel`, the value to compare with the configured `verticalMovementTime`. Runs ended by Stop, without an end report or only confirmed by a status query record no time. The last value is kept across Home Assistant restarts. |
-| **Vertical movement time**, **Rotation time** and **Maximum holding time** numbers | The travel time and slat rotation time stored on the blind, in seconds (0 to 655.35, step 0.01), and the maximum holding time (D2-05-02 only, 0 to 65535 seconds, step 1; the longest time a run may take). The first two are used for the estimated movement; the maximum holding time is only shown and written, it changes nothing in Home Assistant. A value smaller than the vertical movement time may end a run early; this was not tested. A new value is written to the blind with the ReCom configuration request and adopted only after it was read back from the blind; if the blind does not confirm it, the previous value stays and nothing is repeated automatically. Values changed by other controllers show up with the next device list refresh. **Disabled by default.** The write (`{"configuration": {"parameters": [{"key": ..., "value": ...}]}}`) was verified for the vertical movement time and the maximum holding time on one blind each (firmware 1.21.30): the gateway answered 200, the changed value was read back and the other parameters stayed unchanged. The rotation time was not tested on hardware, so try a single blind first. |
+| **Vertical movement time**, **Rotation time** and **Maximum holding time** numbers | The travel time and slat rotation time stored on the blind, in seconds (0 to 655.35, step 0.01), and the maximum holding time (0 to 65535 seconds, step 1; the longest time a run may take). D2-05-02 only. The first two are used for the estimated movement; the maximum holding time is only shown and written, it changes nothing in Home Assistant. A value smaller than the vertical movement time may end a run early; this was not tested. Written and read back as described in [Settings entities by device type](#settings-entities-by-device-type). **Disabled by default.** The write (`{"configuration": {"parameters": [{"key": ..., "value": ...}]}}`) was verified for the vertical movement time and the maximum holding time on one blind each (firmware 1.21.30): the gateway answered 200, the changed value was read back and the other parameters stayed unchanged. The rotation time was not tested on hardware, so try a single blind first. |
 
 Movement and rotation times always come from the device list (seconds). The
 milliseconds of a D2-05-00 "Set parameters" command sent by another controller

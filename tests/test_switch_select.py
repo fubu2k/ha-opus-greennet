@@ -329,7 +329,7 @@ async def test_option_write_is_adopted_after_the_read_back(
     assert channel.operation_mode == "timer"
 
 
-async def test_unconfirmed_option_keeps_the_previous_one(
+async def test_device_keeping_the_old_option_is_reported(
     radio, connected_coordinator
 ) -> None:
     coord = connected_coordinator
@@ -341,7 +341,7 @@ async def test_unconfirmed_option_keeps_the_previous_one(
     with pytest.raises(HomeAssistantError) as error:
         await coord.async_set_device_option("DEV1", "operationMode", "timer")
 
-    assert error.value.translation_key == "parameter_not_confirmed"
+    assert error.value.translation_key == "parameter_differs"
     assert channel.operation_mode == "toggle"
     # Neither the write nor the read-back is repeated.
     assert [method for method, _, _ in radio.sent] == ["PUT", "GET"]

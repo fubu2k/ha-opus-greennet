@@ -16,6 +16,7 @@ from homeassistant.exceptions import HomeAssistantError
 from custom_components.opus_greennet import protocol
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
 from custom_components.opus_greennet.number import (
+    DEVICE_TIMES,
     DIMMER_TIMES,
     OpusGreenNetTimeNumber,
     async_setup_entry,
@@ -26,6 +27,11 @@ from tests.test_coordinator_commands import (
 from tests.test_coordinator_commands import radio as radio
 
 EAG_ID = "AABB0011"
+# Step and minimum the number entities pass with every write.
+STEPS = {
+    time.parameter: {"step": time.step, "minimum": time.minimum}
+    for time in DEVICE_TIMES
+}
 CONFIG_PATH = "/devices/DEV1/configuration"
 FIXTURE = Path(__file__).parent / "fixtures" / "configuration_d2_01_03.json"
 
@@ -176,7 +182,9 @@ async def test_setting_a_value_writes_the_gateway_parameter(time, key) -> None:
     coordinator.async_set_device_parameter = AsyncMock()
     entity = OpusGreenNetTimeNumber(coordinator, EAG_ID, "gateway", _dimmer(), time)
     await entity.async_set_native_value(0.5)
-    coordinator.async_set_device_parameter.assert_awaited_once_with("DEV1", key, 0.5)
+    coordinator.async_set_device_parameter.assert_awaited_once_with(
+        "DEV1", key, 0.5, **STEPS[key]
+    )
 
 
 # ── data model ─────────────────────────────────────────────────────────────
@@ -292,7 +300,9 @@ async def test_write_is_adopted_after_the_read_back(
     channel.ramping_time = 5.0
     radio.response = _document(rampingTime=2.5)
 
-    await coord.async_set_device_parameter("DEV1", "rampingTime", 2.5)
+    await coord.async_set_device_parameter(
+        "DEV1", "rampingTime", 2.5, **STEPS["rampingTime"]
+    )
 
     assert radio.sent == [
         (
@@ -310,13 +320,15 @@ async def test_short_press_keeps_its_two_decimals(radio, connected_coordinator) 
     device = coord.devices["DEV1"] = _dimmer()
     radio.response = _document(shortPress=0.05)
 
-    await coord.async_set_device_parameter("DEV1", "shortPress", 0.0500001)
+    await coord.async_set_device_parameter(
+        "DEV1", "shortPress", 0.0500001, **STEPS["shortPress"]
+    )
 
     assert radio.sent[0][2]["configuration"]["parameters"][0]["value"] == 0.05
     assert device.channels[0].short_press_time == 0.05
 
 
-async def test_unconfirmed_value_keeps_the_previous_one(
+async def test_device_keeping_the_old_value_is_reported(
     radio, connected_coordinator
 ) -> None:
     coord = connected_coordinator
@@ -326,9 +338,11 @@ async def test_unconfirmed_value_keeps_the_previous_one(
     radio.response = _document(longPress=0.1)
 
     with pytest.raises(HomeAssistantError) as error:
-        await coord.async_set_device_parameter("DEV1", "longPress", 0.5)
+        await coord.async_set_device_parameter(
+            "DEV1", "longPress", 0.5, **STEPS["longPress"]
+        )
 
-    assert error.value.translation_key == "parameter_not_confirmed"
+    assert error.value.translation_key == "parameter_differs"
     assert channel.long_press_time == 0.1
     # Neither the write nor the read-back is repeated.
     assert [method for method, _, _ in radio.sent] == ["PUT", "GET"]
