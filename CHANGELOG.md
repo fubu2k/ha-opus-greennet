@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.1] - 2026-10-25
+
+Maintenance release with no functional changes.
+
+### Changed
+- CI also validates the repository with the HACS action, as preparation for the HACS default store.
+
+### Unchanged
+- Integration code, entities, radio traffic and intervals are the same as in 1.0.0.
+
 ## [1.0.0] - 2026-10-24
 
 **This is a big one.** 1.0 is the largest change since the integration started, and the step from an experimental bridge setup to a stable integration you can rely on every day.
