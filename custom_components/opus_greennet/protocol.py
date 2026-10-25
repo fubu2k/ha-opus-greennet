@@ -14,17 +14,16 @@ from typing import TYPE_CHECKING
 
 from .const import (
     BUTTON_KEYS,
+    DEVICE_SETTING_KEYS,
+    DEVICE_SETTINGS,
     KEY_ANGLE,
     KEY_CHANNEL,
     KEY_DIMMER,
     KEY_HEATER_MODE,
     KEY_LOCKING_MODE,
-    KEY_LONG_PRESS,
     KEY_MAX_HOLDING_TIME,
     KEY_POSITION,
-    KEY_RAMPING_TIME,
     KEY_ROTATION_TIME,
-    KEY_SHORT_PRESS,
     KEY_STOP,
     KEY_SWITCH,
     KEY_TEMPERATURE_SETPOINT,
@@ -48,23 +47,19 @@ FEEDBACK_KEYS = frozenset(
 CONFIGURATION_KEYS = frozenset(
     {
         KEY_CHANNEL,
-        KEY_LONG_PRESS,
         KEY_MAX_HOLDING_TIME,
-        KEY_RAMPING_TIME,
         KEY_ROTATION_TIME,
-        KEY_SHORT_PRESS,
         KEY_VERTICAL_MOVEMENT_TIME,
         "batteryLevel",
+        *DEVICE_SETTING_KEYS,
     }
 )
-# Configuration parameters (cover and dimmer times) that are read as state.
+# Configuration parameters (cover times, D2-01 settings) that are read as state.
 CONFIGURATION_STATE_KEYS = (
-    KEY_LONG_PRESS,
     KEY_MAX_HOLDING_TIME,
-    KEY_RAMPING_TIME,
     KEY_ROTATION_TIME,
-    KEY_SHORT_PRESS,
     KEY_VERTICAL_MOVEMENT_TIME,
+    *DEVICE_SETTINGS,
 )
 # The RWM documents value-only slots in transmitModes: index 0 is the smoke
 # alarm, index 1 the battery state.

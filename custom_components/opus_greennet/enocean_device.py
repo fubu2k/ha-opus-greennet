@@ -14,7 +14,8 @@ from .const import (
     D2_01_CHANNEL_COUNTS,
     D2_01_DIMMER_EEPS,
     DEFAULT_CHANNEL,
-    DIMMER_SETTING_KEYS,
+    DEVICE_SETTING_KEYS,
+    DEVICE_SETTINGS,
     EEP_MAPPINGS,
     ERROR_CODE_EEPS,
     ERROR_CODE_NONE,
@@ -41,16 +42,13 @@ from .const import (
     KEY_LIQUID_DETECTED,
     KEY_LOCAL_CONTROL,
     KEY_LOCKING_MODE,
-    KEY_LONG_PRESS,
     KEY_MAX_HOLDING_TIME,
     KEY_MISSING_TEMPERATURE,
     KEY_POSITION,
     KEY_POWER,
     KEY_POWER_STATE,
-    KEY_RAMPING_TIME,
     KEY_REPOSITIONING,
     KEY_ROTATION_TIME,
-    KEY_SHORT_PRESS,
     KEY_SUMMER_MODE,
     KEY_SWITCH,
     KEY_TEMPERATURE,
@@ -131,10 +129,17 @@ class EnOceanChannel:
     rotation_time: float | None = None  # Zero means the cover has no slat rotation
     vertical_movement_time: float | None = None
     max_holding_time: float | None = None  # Seconds, D2-05-02 configuration
-    # Seconds, D2-01-03 configuration (ramping 0-25.5, presses 0-2.55)
+    # D2-01 configuration, filled from DEVICE_SETTINGS: dimmer ramping and
+    # press times (seconds), switch timers and warning (seconds), illumination
+    # threshold (lux). Device-wide, kept on the first channel.
     ramping_time: float | None = None
     short_press_time: float | None = None
     long_press_time: float | None = None
+    timer: float | None = None
+    timer_long: float | None = None
+    switch_off_warning: float | None = None
+    switch_off_warning_signal: float | None = None
+    illumination_threshold: float | None = None
     movement: str | None = None  # Estimated opening/closing, never physical feedback
     local_control: bool | None = None
     locking_mode: str | None = None  # block, unblock or alarm (D2-05)
@@ -753,7 +758,7 @@ class EnOceanDevice:
             channel = self.get_or_create_channel(channel_id)
             # A stored setting is no feedback: reading it must not cancel the
             # estimate of a command that awaits its acknowledgement.
-            if key not in DIMMER_SETTING_KEYS:
+            if key not in DEVICE_SETTING_KEYS:
                 channel.state_revision += 1
 
             if key in BUTTON_KEYS:
@@ -806,21 +811,14 @@ class EnOceanDevice:
                     channel.max_holding_time, value, minimum=0, maximum=65535
                 )
 
-            elif key == KEY_RAMPING_TIME:
-                # Ranges of the gateway's parameter catalog; anything else keeps
-                # the known value.
-                channel.ramping_time = self._float_reading(
-                    channel.ramping_time, value, minimum=0, maximum=25.5
-                )
-
-            elif key == KEY_SHORT_PRESS:
-                channel.short_press_time = self._float_reading(
-                    channel.short_press_time, value, minimum=0, maximum=2.55
-                )
-
-            elif key == KEY_LONG_PRESS:
-                channel.long_press_time = self._float_reading(
-                    channel.long_press_time, value, minimum=0, maximum=2.55
+            elif key in DEVICE_SETTINGS:
+                attribute, minimum, maximum = DEVICE_SETTINGS[key]
+                setattr(
+                    channel,
+                    attribute,
+                    self._float_reading(
+                        getattr(channel, attribute), value, minimum, maximum
+                    ),
                 )
 
             elif key == KEY_ROTATION_TIME:

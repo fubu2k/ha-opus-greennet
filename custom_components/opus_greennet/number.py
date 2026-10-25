@@ -1,4 +1,4 @@
-"""Number platform: configured times of D2-05 blinds and D2-01-03 dimmers."""
+"""Number platform: configured times and thresholds of D2-05 and D2-01 devices."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from homeassistant.components.number import (
     NumberEntity,
     NumberMode,
 )
-from homeassistant.const import EntityCategory, UnitOfTime
+from homeassistant.const import LIGHT_LUX, EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -18,11 +18,16 @@ from . import OpusGreenNetConfigEntry
 from .const import (
     CONF_EAG_ID,
     DEFAULT_CHANNEL,
+    KEY_ILLUMINATION_THRESHOLD,
     KEY_LONG_PRESS,
     KEY_MAX_HOLDING_TIME,
     KEY_RAMPING_TIME,
     KEY_ROTATION_TIME,
     KEY_SHORT_PRESS,
+    KEY_SWITCH_OFF_WARNING,
+    KEY_SWITCH_OFF_WARNING_SIGNAL,
+    KEY_TIMER,
+    KEY_TIMER_LONG,
     KEY_VERTICAL_MOVEMENT_TIME,
 )
 from .coordinator import SIGNAL_DEVICE_DISCOVERED, OpusGreenNetCoordinator
@@ -41,21 +46,35 @@ MAX_RAMPING_SECONDS = 25.5
 RAMPING_STEP_SECONDS = 0.1
 MAX_PRESS_SECONDS = 2.55
 PRESS_STEP_SECONDS = 0.01
+MIN_TIMER_SECONDS = 60
+MAX_TIMER_SECONDS = 7200
+MAX_TIMER_LONG_SECONDS = 18000
+MAX_WARNING_SECONDS = 45
+MIN_WARNING_SIGNAL_SECONDS = 0.2
+MAX_WARNING_SIGNAL_SECONDS = 2
+WARNING_SIGNAL_STEP_SECONDS = 0.001
+MAX_ILLUMINATION_LUX = 1500
 
-# The parameter catalogs were read from a D2-05-02 blind and a D2-01-03 dimmer.
+# The parameter catalogs were read from a D2-05-02 blind, a D2-01-03 dimmer and
+# a D2-01-01 and a D2-01-11 switch.
 MAX_HOLDING_TIME_EEPS = frozenset({"D2-05-02"})
 DIMMER_TIME_EEPS = frozenset({"D2-01-03"})
+SWITCH_SETTING_EEPS = frozenset({"D2-01-01", "D2-01-11"})
 
 
 @dataclass(frozen=True, slots=True)
 class DeviceTime:
-    """One time parameter of a device with the range the gateway reports."""
+    """One number parameter of a device with the range the gateway reports."""
 
     translation_key: str
     parameter: str
     attribute: str
     maximum: float = MAX_TRAVEL_SECONDS
     step: float = TRAVEL_STEP_SECONDS
+    minimum: float = 0
+    # Seconds unless the parameter is a threshold in lux.
+    unit: str = UnitOfTime.SECONDS
+    device_class: NumberDeviceClass = NumberDeviceClass.DURATION
     # Platform type of the devices that have the parameter.
     entity_type: str = "cover"
     # EEPs whose catalog lists the parameter; None means every such device.
@@ -113,7 +132,62 @@ DIMMER_TIMES: tuple[DeviceTime, ...] = (
     ),
 )
 
-DEVICE_TIMES = BLIND_TIMES + DIMMER_TIMES
+# The settings of switches belong to the device, not to a channel: the
+# gateway reports no channel for them, also not for a 2-channel switch.
+SWITCH_SETTINGS: tuple[DeviceTime, ...] = (
+    DeviceTime(
+        "timer",
+        KEY_TIMER,
+        "timer",
+        minimum=MIN_TIMER_SECONDS,
+        maximum=MAX_TIMER_SECONDS,
+        step=1,
+        entity_type="switch",
+        eeps=SWITCH_SETTING_EEPS,
+    ),
+    DeviceTime(
+        "timer_long",
+        KEY_TIMER_LONG,
+        "timer_long",
+        minimum=MIN_TIMER_SECONDS,
+        maximum=MAX_TIMER_LONG_SECONDS,
+        step=1,
+        entity_type="switch",
+        eeps=SWITCH_SETTING_EEPS,
+    ),
+    DeviceTime(
+        "switch_off_warning",
+        KEY_SWITCH_OFF_WARNING,
+        "switch_off_warning",
+        maximum=MAX_WARNING_SECONDS,
+        step=1,
+        entity_type="switch",
+        eeps=SWITCH_SETTING_EEPS,
+    ),
+    DeviceTime(
+        "switch_off_warning_signal",
+        KEY_SWITCH_OFF_WARNING_SIGNAL,
+        "switch_off_warning_signal",
+        minimum=MIN_WARNING_SIGNAL_SECONDS,
+        maximum=MAX_WARNING_SIGNAL_SECONDS,
+        step=WARNING_SIGNAL_STEP_SECONDS,
+        entity_type="switch",
+        eeps=SWITCH_SETTING_EEPS,
+    ),
+    DeviceTime(
+        "illumination_threshold",
+        KEY_ILLUMINATION_THRESHOLD,
+        "illumination_threshold",
+        maximum=MAX_ILLUMINATION_LUX,
+        step=1,
+        unit=LIGHT_LUX,
+        device_class=NumberDeviceClass.ILLUMINANCE,
+        entity_type="switch",
+        eeps=SWITCH_SETTING_EEPS,
+    ),
+)
+
+DEVICE_TIMES = BLIND_TIMES + DIMMER_TIMES + SWITCH_SETTINGS
 
 
 async def async_setup_entry(
@@ -148,7 +222,7 @@ async def async_setup_entry(
 
 
 class OpusGreenNetTimeNumber(OpusGreenNetEntity, NumberEntity):
-    """A time stored on the blind or dimmer (seconds).
+    """A time or threshold stored on the blind, dimmer or switch.
 
     The value comes from the device configuration, which the integration reads
     at setup and with every device list refresh; a change made by another
@@ -160,9 +234,6 @@ class OpusGreenNetTimeNumber(OpusGreenNetEntity, NumberEntity):
     _attr_entity_category = EntityCategory.CONFIG
     # Disabled for new registry entries only; existing entries keep their setting.
     _attr_entity_registry_enabled_default = False
-    _attr_device_class = NumberDeviceClass.DURATION
-    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
-    _attr_native_min_value = 0
     _attr_mode = NumberMode.BOX
 
     def __init__(
@@ -179,6 +250,9 @@ class OpusGreenNetTimeNumber(OpusGreenNetEntity, NumberEntity):
         )
         self._device_time = device_time
         self._attr_translation_key = device_time.translation_key
+        self._attr_device_class = device_time.device_class
+        self._attr_native_unit_of_measurement = device_time.unit
+        self._attr_native_min_value = device_time.minimum
         self._attr_native_max_value = device_time.maximum
         self._attr_native_step = device_time.step
         self._attr_unique_id = (

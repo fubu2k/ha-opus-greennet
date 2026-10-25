@@ -171,7 +171,7 @@ All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 | Status | Topic |
 |--------|-------|
 | ✅ Released | 1.0 with the REST API instead of MQTT |
-| 🚧 In progress | Device settings as Home Assistant entities (blind travel, rotation and maximum holding times and dimmer ramping and press times released as numbers; more settings planned) |
+| 🚧 In progress | Device settings as Home Assistant entities (blind travel, rotation and maximum holding times, dimmer ramping and press times and switch timers, warning and illumination threshold released as numbers; more settings planned) |
 | 🔍 Investigating | Adding and removing devices from Home Assistant |
 | 💡 Idea | HTTPS if the gateway offers it |
 
@@ -180,15 +180,16 @@ All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 The OPUS app configures every actuator and the gateway. The gateway already
 reports the current values, and the integration can read and write them with
 the ReCom actions. The travel and rotation times and the maximum holding time
-of blinds and the ramping, short-press and long-press time of D2-01-03 dimmers
-are already offered as number entities (disabled by default). The plan is to
-offer the other settings as configuration entities (select, number, switch) on
-each device in the same way, so they can be changed in the UI and in
-automations:
+of blinds, the ramping, short-press and long-press time of D2-01-03 dimmers and
+the timer durations, switch-off warning, its signal duration and the
+illumination threshold of D2-01-01/-11 switches are already offered as number
+entities (disabled by default). The plan is to offer the other settings as
+configuration entities (select, switch) on each device in the same way, so they
+can be changed in the UI and in automations:
 
 | Device | Settings |
 |--------|----------|
-| Switch actuators (D2-01-00/-01, 2-channel D2-01-11) | Operation mode of the wall rocker (e.g. toggle or timer), timer duration for short and long press, switch-off warning and its signal duration, illumination threshold for linked light sensors, function of rocker A and B and of the external input (channel assignment), LED colour and LED channel, ViNET routing time |
+| Switch actuators (D2-01-00/-01, 2-channel D2-01-11) | Operation mode of the wall rocker (e.g. toggle or timer), function of rocker A and B and of the external input (channel assignment), LED colour and LED channel, ViNET routing time (timer durations, switch-off warning, its signal duration and illumination threshold are available as numbers) |
 | Blinds (D2-05-02) | Function of rocker A and B, ViNET routing time (vertical movement time, rotation time and maximum holding time are available as numbers) |
 | All actuators | Repeater mode; linked wall switches and their role (link tables, e.g. central on/off or up/down) |
 | Gateway | Firmware, app and API version; services such as HomeKit, Alexa, MQTT, InfluxDB, scheduler and heating zones; received telegrams and average signal strength |

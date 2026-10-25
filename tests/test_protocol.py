@@ -144,7 +144,12 @@ def test_configuration_functions_tolerate_malformed_parameters(
         [{"key": "rampingTime", "defaultValue": 5}],
         [{"key": "shortPress", "defaultValue": 0.1}],
         [{"key": "longPress", "defaultValue": 0.1}],
-        [{"key": "timer", "value": 300.0}],
+        [{"key": "timer", "defaultValue": 60}],
+        [{"key": "timerLong", "defaultValue": 60}],
+        [{"key": "switchOffWarning", "defaultValue": 30}],
+        [{"key": "switchOffWarningSignal", "defaultValue": 0.5}],
+        [{"key": "illuminationThreshold", "defaultValue": 80}],
+        [{"key": "operationMode", "value": "timer"}],
     ],
 )
 def test_configuration_defaults_and_unrelated_parameters_are_not_state(

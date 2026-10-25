@@ -54,6 +54,24 @@ movement time and the maximum holding time of blinds were), so try a single
 dimmer first. The ranges are those of the parameter catalog read from one
 D2-01-03; other dimmer types get no such entities.
 
+**Switch settings.** D2-01-01 and D2-01-11 switches get five number entities
+for the settings stored on the switch: *Timer duration* (60 to 7200 s) and
+*Timer duration (long press)* (60 to 18000 s), which only act when the
+operation mode of the switch is *timer* (the second one when it was switched
+on by a long press), *Switch-off warning* (0 to 45 s, how long a warning is
+shown before the switch-off), *Switch-off warning signal* (0.2 to 2 s, step
+0.001, the duration of that warning signal) and *Illumination threshold* (0 to
+1500 lx, for linked light sensors). All steps are 1 except the warning signal.
+The settings belong to the whole device: a 2-channel switch has one set, not
+one per channel. They behave like the dimmer times above (configuration
+entities, **disabled by default**, values from the device configuration, a new
+value is adopted only after it was read back, nothing is repeated
+automatically). The warning signal is rounded to three decimals, all other
+values written by the integration to two. Writing these settings was **not
+tested on hardware**, so try a single switch first. The ranges are those of the
+parameter catalog read from one D2-01-01 and one D2-01-11; other switch types
+get no such entities.
+
 **Local control.** D2-01 actuators that report local control get a diagnostic
 *Local control* binary sensor, disabled by default.
 
