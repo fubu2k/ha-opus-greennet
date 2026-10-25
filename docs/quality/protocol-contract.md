@@ -234,6 +234,17 @@ had registered. **[HW][Test]**
 - Reauthentication and reconfiguration reject an address that answers with a
   different EURID (`wrong_gateway`); setup does the same for a stored address.
   **[Code][Test]**
+- The gateway has no TLS (plain HTTP, basic authentication), so credentials are
+  sent only to the local network. `discovery.LOCAL_NETWORKS` is an allowlist
+  (RFC 1918, link-local, loopback, `100.64.0.0/10`, `fc00::/7`, RFC 5737
+  documentation ranges). The config flow (user, reauth, reconfigure) refuses an
+  address outside it (`host_not_local`) and judges a host name by **all** its
+  addresses; a name that does not resolve is `cannot_connect`. A zeroconf
+  announcement or mDNS search result outside it is ignored
+  (`not_local_address`), so stored or default credentials are never tried on it.
+  Entries stored with a public address still set up and log a warning. The
+  check happens when the address is entered; a name that later resolves
+  elsewhere is not re-checked **[Code][Test]**.
 
 ## 10. Services (public, unchanged)
 

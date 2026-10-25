@@ -54,6 +54,7 @@
     "error": {
       "cannot_connect": "Failed to connect to the gateway. Check the host and port.",
       "invalid_host": "Enter only the gateway's IP address or host name, without http://, port or path.",
+      "host_not_local": "The address must be in the local network (private, link-local, loopback or carrier-grade NAT range). The gateway only speaks unencrypted HTTP, so public addresses are not supported.",
       "invalid_auth": "The gateway rejected the username or password.",
       "unsupported_gateway": "The device at this address did not answer like an OPUS gateway.",
       "wrong_gateway": "This address belongs to a different gateway than {eag_id}.",
@@ -63,7 +64,8 @@
       "already_configured": "This gateway is already configured. Its connection settings were updated.",
       "reauth_successful": "The gateway connection was updated.",
       "reconfigure_successful": "The gateway connection was updated.",
-      "not_ipv4_address": "Only gateways with an IPv4 address are supported."
+      "not_ipv4_address": "Only gateways with an IPv4 address are supported.",
+      "not_local_address": "The announced address is not in the local network and is ignored."
     }
   },
   "entity": {

@@ -11,8 +11,10 @@ its gateway without asking for the address.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import re
+import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
@@ -37,6 +39,77 @@ RESOLVE_TIMEOUT_MS: Final = 3000
 
 # The EAG identifier is the gateway's EURID: eight hexadecimal characters.
 EAG_ID_PATTERN = re.compile(r"[0-9A-Fa-f]{8}")
+
+type IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+
+# The gateway speaks plain HTTP with basic authentication (no TLS), so its
+# credentials must never travel beyond the local network. Allowlist, not a
+# "not global" test: Python's private/reserved flags also cover ranges that
+# are no local network (::/8 would reject ::1, 2001::/23 contains Teredo).
+LOCAL_NETWORKS: Final = tuple(
+    ipaddress.ip_network(network)
+    for network in (
+        "10.0.0.0/8",  # RFC 1918
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",  # link-local
+        "127.0.0.0/8",  # loopback (tunnels, tests)
+        "100.64.0.0/10",  # carrier-grade NAT, also VPN meshes
+        # Documentation ranges (RFC 5737): unroutable by definition; they
+        # keep the fictional examples of the documentation usable.
+        "192.0.2.0/24",
+        "198.51.100.0/24",
+        "203.0.113.0/24",
+        "::1/128",
+        "fe80::/10",  # link-local
+        "fc00::/7",  # unique local
+    )
+)
+# Upper bound for resolving a host name before the connection attempt.
+RESOLVE_HOST_SECONDS: Final = 5.0
+
+
+def parse_host_literal(host: str) -> IPAddress | None:
+    """Return ``host`` as an IP address, or None for a host name."""
+    literal = host.strip()
+    if literal.startswith("[") and literal.endswith("]"):
+        literal = literal[1:-1]
+    try:
+        return ipaddress.ip_address(literal)
+    except ValueError:
+        return None
+
+
+def is_local_address(address: IPAddress) -> bool:
+    """Return whether ``address`` lies in one of ``LOCAL_NETWORKS``.
+
+    An IPv4-mapped IPv6 address (``::ffff:192.168.1.5``) is judged by the IPv4
+    address it carries.
+    """
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return any(address in network for network in LOCAL_NETWORKS)
+
+
+async def async_resolve_host(host: str) -> list[IPAddress]:
+    """Return every address ``host`` resolves to.
+
+    A host that is an IP address answers itself. The result is empty when the
+    name does not resolve, the lookup takes longer than ``RESOLVE_HOST_SECONDS``
+    or it returns something that is no address, so the caller treats it as
+    unreachable instead of trusting it.
+    """
+    literal = parse_host_literal(host)
+    if literal is not None:
+        return [literal]
+    try:
+        async with asyncio.timeout(RESOLVE_HOST_SECONDS):
+            found = await asyncio.get_running_loop().getaddrinfo(
+                host.strip(), None, type=socket.SOCK_STREAM
+            )
+        return [ipaddress.ip_address(str(entry[4][0])) for entry in found]
+    except OSError, TimeoutError, ValueError:
+        return []
 
 
 async def async_read_gateway_id(hass: HomeAssistant, data: Mapping[str, Any]) -> str:
@@ -103,6 +176,11 @@ async def async_browse_gateway_hosts(hass: HomeAssistant) -> list[str]:
         if not await info.async_request(aiozc.zeroconf, RESOLVE_TIMEOUT_MS):
             continue
         for address in info.parsed_addresses(IPVersion.V4Only):
+            # Credentials are tried against announced addresses: a forged
+            # announcement of a public address must not receive them.
+            if not is_local_address(ipaddress.ip_address(address)):
+                _LOGGER.debug("Ignoring announced gateway address outside the LAN")
+                continue
             if address not in hosts:
                 hosts.append(address)
     return hosts

@@ -42,7 +42,12 @@ from .const import (
     REPOSITIONING_FIRST_UP,
 )
 from .coordinator import GatewayMismatchError, OpusGreenNetCoordinator
-from .discovery import async_locate_gateway, default_connection
+from .discovery import (
+    async_locate_gateway,
+    default_connection,
+    is_local_address,
+    parse_host_literal,
+)
 from .entity import async_delete_config_entry_issues
 from .wire import json_body_problem
 
@@ -222,6 +227,14 @@ async def async_setup_entry(
     if CONF_HOST not in entry.data:
         raise ConfigEntryAuthFailed(
             translation_domain=DOMAIN, translation_key="gateway_address_required"
+        )
+    configured = parse_host_literal(entry.data[CONF_HOST])
+    if configured is not None and not is_local_address(configured):
+        # Existing entries keep working. The gateway speaks unencrypted HTTP,
+        # so credentials sent to a non-local address can be read on the way.
+        _LOGGER.warning(
+            "The configured OPUS gateway address is not in a local network; "
+            "the gateway has no TLS. Use a VPN or a private address instead"
         )
     client = OpusGatewayClient(
         async_get_clientsession(hass),
