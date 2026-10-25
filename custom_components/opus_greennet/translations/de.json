@@ -154,6 +154,9 @@
       "last_seen": {
         "name": "Zuletzt gesehen"
       },
+      "wall_switch_links": {
+        "name": "Wandtaster-Verknüpfungen"
+      },
       "illuminance": {
         "name": "Beleuchtungsstärke"
       },
@@ -344,6 +347,20 @@
         }
       },
       "name": "Gerätekonfiguration abrufen"
+    },
+    "get_device_link_tables": {
+      "description": "Liest die auf einem EnOcean-Gerät gespeicherten Linktabellen über die ReCom-API: die Wandtaster, auf die es hört, und die Geräte, an die es meldet. Nur lesend. Die eigene Adresse des Gateways wird als \"gateway\" angezeigt.",
+      "fields": {
+        "config_entry_id": {
+          "description": "Zu verwendendes Gateway. Auswahl erforderlich, wenn mehrere Gateways geladen sind.",
+          "name": "Gateway"
+        },
+        "device_id": {
+          "description": "EURID des EnOcean-Geräts.",
+          "name": "Geräte-ID"
+        }
+      },
+      "name": "Linktabellen eines Geräts abrufen"
     },
     "get_device_parameters": {
       "description": "Ruft DDF-Parameter eines EnOcean-Geräts über die ReCom-API ab.",

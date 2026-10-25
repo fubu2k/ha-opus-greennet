@@ -132,6 +132,19 @@ ReCom requests travel over the radio and can take several seconds (timeout
 45 s). `set_device_configuration` writes to the device and is never retried
 automatically.
 
+### See which wall switches control a device
+
+```yaml
+action: opus_greennet.get_device_link_tables
+data:
+  device_id: AABB1122
+response_variable: links
+```
+
+`links.linkTables.inbound` lists the wall switches the device listens to,
+`outbound` the devices it reports to; the gateway itself appears as `gateway`.
+This action only reads. Link tables are changed with the OPUS app.
+
 ## Use cases
 
 - **Local, cloud-free control of an OPUS installation.** Home Assistant talks to

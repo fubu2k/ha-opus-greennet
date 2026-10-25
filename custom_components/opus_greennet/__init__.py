@@ -72,6 +72,7 @@ PLATFORMS: list[Platform] = [
 SERVICE_GET_DEVICE_CONFIG = "get_device_configuration"
 SERVICE_SET_DEVICE_CONFIG = "set_device_configuration"
 SERVICE_GET_DEVICE_PARAMS = "get_device_parameters"
+SERVICE_GET_DEVICE_LINK_TABLES = "get_device_link_tables"
 SERVICE_RELOAD_ENTRY = "reload_entry"
 SERVICE_SET_COVER_POSITION = "set_cover_position"
 ATTR_DEVICE_ID = "device_id"
@@ -382,6 +383,12 @@ def _register_services(hass: HomeAssistant) -> None:
         _validate_service_device(coordinator, device_id)
         return await coordinator.async_get_device_parameters(device_id)
 
+    async def handle_get_device_link_tables(call: ServiceCall) -> ServiceResponse:
+        coordinator = _coordinator_for_call(hass, call)
+        device_id = call.data[ATTR_DEVICE_ID]
+        _validate_service_device(coordinator, device_id)
+        return await coordinator.async_get_device_link_tables(device_id)
+
     async def handle_set_cover_position(call: ServiceCall) -> None:
         coordinator = _coordinator_for_call(hass, call)
         device_id = call.data[ATTR_DEVICE_ID]
@@ -443,6 +450,14 @@ def _register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_GET_DEVICE_PARAMS,
         handle_get_device_parameters,
+        schema=SERVICE_DEVICE_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    async_register_admin_service(
+        hass,
+        DOMAIN,
+        SERVICE_GET_DEVICE_LINK_TABLES,
+        handle_get_device_link_tables,
         schema=SERVICE_DEVICE_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )

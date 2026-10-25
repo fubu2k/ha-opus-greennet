@@ -224,6 +224,15 @@ battery percentage is invented when the gateway publishes none.
   value without a UTC offset or in an unknown format stays unknown. Devices
   that only send on a change (for example leak sensors) can legitimately stay
   unchanged for a long time.
+- Actuators whose device list contains a link table also have a diagnostic
+  **Wall switch links** sensor (disabled by default): the number of wall
+  switches the actuator listens to. The table is read from the device list
+  every 30 minutes without a radio request and reflects what the gateway has
+  stored (it reads the tables from the devices itself, typically at night). A
+  table without inbound entries is shown as 0; if the gateway lists no table,
+  the value stays unknown instead of 0. The downloaded diagnostics list the
+  same table per device (device addresses redacted); the integration never
+  writes link tables.
 - Climate activity uses actuator feedback where available; enabling a heating
   zone does not by itself mean it is heating.
 
@@ -254,6 +263,7 @@ device (fictional example: `AABB1122`). Select a gateway with
 | `opus_greennet.get_device_configuration` | `device_id` | Admin only. Read the configuration stored on a device (ReCom) |
 | `opus_greennet.set_device_configuration` | `device_id`, `configuration` | Admin only. Write configuration to a device (ReCom). The integration checks only that the object can be sent as JSON (string keys, finite numbers, at most 16 levels and 64 KiB) and refuses anything else before a request is queued; the content is not interpreted |
 | `opus_greennet.get_device_parameters` | `device_id` | Admin only. Read the parameters a device supports (ReCom) |
+| `opus_greennet.get_device_link_tables` | `device_id` | Admin only. Read the link tables stored on a device (ReCom): `inbound` lists the wall switches it listens to (with rocker and central on/off flags), `outbound` the devices it reports to. The gateway's own address is shown as `gateway`. Read only: there is deliberately no action to write link tables, because a wrong table can cut a device off its wall switches |
 | `opus_greennet.reload_entry` | optional `config_entry_id` | Admin only. Reload the integration without restarting Home Assistant |
 
 The read actions return their data directly as the action response. ReCom

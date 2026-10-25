@@ -154,6 +154,9 @@
       "last_seen": {
         "name": "Last seen"
       },
+      "wall_switch_links": {
+        "name": "Wall switch links"
+      },
       "illuminance": {
         "name": "Illuminance"
       },
@@ -344,6 +347,20 @@
         }
       },
       "name": "Get device configuration"
+    },
+    "get_device_link_tables": {
+      "description": "Reads the link tables stored on an EnOcean device through the ReCom API: the wall switches it listens to and the devices it reports to. Read only. The gateway's own address is shown as \"gateway\".",
+      "fields": {
+        "config_entry_id": {
+          "description": "Gateway to use. Select one when more than one gateway is loaded.",
+          "name": "Gateway"
+        },
+        "device_id": {
+          "description": "EURID of the EnOcean device.",
+          "name": "Device ID"
+        }
+      },
+      "name": "Get device link tables"
     },
     "get_device_parameters": {
       "description": "Retrieves DDF parameters for an EnOcean device through the ReCom API.",

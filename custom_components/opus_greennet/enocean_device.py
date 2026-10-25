@@ -203,6 +203,30 @@ class ChannelStateSnapshot:
     revision: int
 
 
+@dataclass(frozen=True, slots=True)
+class LinkedDevice:
+    """One entry of a link table: a device and how it is linked.
+
+    ``parameters`` are the entry's settings as the gateway reports them
+    (rocker, central on/off, channel), values as text.
+    """
+
+    device_id: str
+    eep: str
+    parameters: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class LinkTables:
+    """What a device listens to (inbound) and reports to (outbound).
+
+    Read only: the integration never writes link tables.
+    """
+
+    inbound: tuple[LinkedDevice, ...] = ()
+    outbound: tuple[LinkedDevice, ...] = ()
+
+
 @dataclass
 class EnOceanDevice:
     """Represents an EnOcean device from the gateway."""
@@ -227,6 +251,8 @@ class EnOceanDevice:
     channels: dict[int, EnOceanChannel] = field(default_factory=dict)
     # Gateway profile read at setup; None means the EEP tables decide.
     profile: DeviceProfile | None = field(default=None, repr=False, compare=False)
+    # Link tables of the gateway's device list; None until one was read.
+    link_tables: LinkTables | None = None
 
     # Fields a gateway device list owns. ``apply_listed_metadata`` replaces
     # them in place; every other field is runtime state of this integration
@@ -239,6 +265,7 @@ class EnOceanDevice:
         "first_seen",
         "last_seen",
         "dbm",
+        "link_tables",
     )
 
     def apply_listed_metadata(
@@ -264,6 +291,9 @@ class EnOceanDevice:
             self.last_seen = listed.last_seen
         if listed.dbm is not None and not keep_signal:
             self.dbm = listed.dbm
+        # A list without a table says nothing; it never clears a known one.
+        if listed.link_tables is not None:
+            self.link_tables = listed.link_tables
 
     @property
     def primary_eep(self) -> str | None:

@@ -154,6 +154,7 @@ PUT  /devices/{deviceId}/state         # Commands and status queries
 GET  /devices/{deviceId}/configuration # ReCom: stored configuration
 PUT  /devices/{deviceId}/configuration # ReCom: write configuration
 GET  /devices/{deviceId}/parameters    # ReCom: supported parameters
+GET  /devices/{deviceId}/linkTables    # ReCom: link tables (read only)
 ```
 
 Each telegram on the stream is one JSON document (fictional values):

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.redact import REDACTED
 
-from .enocean_device import EnOceanDevice
+from .enocean_device import EnOceanDevice, LinkedDevice, LinkTables
 from .wire import JsonList, JsonObject, parse_json
 
 if TYPE_CHECKING:
@@ -123,6 +123,28 @@ def _redact_diagnostics(
     }
 
 
+def _linked_devices(linked: tuple[LinkedDevice, ...]) -> list[dict[str, object]]:
+    return [
+        {
+            # Redacted with the other identifiers by ``_redact_diagnostics``.
+            "device_id": entry.device_id,
+            "eep": entry.eep,
+            "parameters": dict(entry.parameters),
+        }
+        for entry in linked
+    ]
+
+
+def _link_tables(tables: LinkTables | None) -> dict[str, object] | None:
+    """Return the link tables of a device; None while none was read."""
+    if tables is None:
+        return None
+    return {
+        "inbound": _linked_devices(tables.inbound),
+        "outbound": _linked_devices(tables.outbound),
+    }
+
+
 def _duration_ms(start: float | None, end: float) -> str:
     """Return a displayable millisecond duration."""
     if start is None:
@@ -178,6 +200,7 @@ async def async_get_config_entry_diagnostics(
                 "last_update_source": device.last_update_source,
                 "dbm": device.dbm,
                 "last_command_error": device.last_command_error,
+                "link_tables": _link_tables(device.link_tables),
                 "channels": {
                     channel_id: asdict(channel)
                     for channel_id, channel in device.channels.items()
