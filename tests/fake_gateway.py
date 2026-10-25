@@ -72,8 +72,8 @@ class FakeGateway:
     request with 401 when False), ``stream_framing`` (how a stream answers the
     ``delimited=newLine`` parameter: ``"legacy"`` ignores it like older
     firmware and writes pretty-printed documents without delimiter, ``"ndjson"``
-    writes one document per line ending in CRLF, ``"reject"`` answers HTTP
-    400) and ``stream_queries`` (the query string of every stream request).
+    writes one document per line ending in CRLF, ``"reject"`` answers
+    ``reject_status``, by default HTTP 400) and ``stream_queries`` (the query string of every stream request).
     """
 
     def __init__(self, eurid: str = EURID, password: str = PASSWORD) -> None:
@@ -98,6 +98,7 @@ class FakeGateway:
         self.stream_preamble: list[str] = []
         self.close_after_snapshot = False
         self.stream_framing = "legacy"
+        self.reject_status = 400
         self.stream_queries: list[str] = []
         self.snapshot_delay = 0.0
         # Real gateways stream the device list without ``configuration``
@@ -229,8 +230,13 @@ class FakeGateway:
             self.stream_queries.append(request.query_string)
             if self.stream_framing == "reject" and "delimited" in request.query:
                 return web.json_response(
-                    {"header": {"httpStatus": 400, "message": "bad parameter"}},
-                    status=400,
+                    {
+                        "header": {
+                            "httpStatus": self.reject_status,
+                            "message": "bad parameter",
+                        }
+                    },
+                    status=self.reject_status,
                 )
             return await self._stream(request)
         if path in self.responses:

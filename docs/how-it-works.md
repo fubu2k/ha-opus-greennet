@@ -61,12 +61,14 @@ The stream is requested with `delimited=newLine` (one JSON document per line).
 This was verified on a gateway with firmware 1.21.30; the other stream
 parameters (`direction`, `output`, `levelOfDetail`) are deliberately not
 requested. Firmware that ignores the parameter answers in the older multi-line
-format, which the same reader handles. Only a gateway that refuses the
-parameter itself (HTTP 400, 405, 422 or 501 before any document) switches the
-integration to the plain stream. The choice is remembered until the gateway
-restarts, when line delimiting is offered again. Rejected credentials, timeouts
-and connection errors never count as missing firmware support. Telegrams in
-the `to` direction have not been observed on the verified gateway.
+format, which the same reader handles. If the gateway answers the request
+with any other status than 200 (except rejected credentials and 429), the
+integration asks once more without the parameter. Once that plain stream
+delivers, the choice is remembered until the gateway restarts, when line
+delimiting is offered again. Timeouts and connection errors never switch the
+format. Telegrams in the `to` direction (commands of other controllers, such as
+Apple Home) were observed on a gateway with firmware 1.21.30, each followed by
+the actuator's own report about 0.1 s later.
 
 ### Connections and state writes
 

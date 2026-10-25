@@ -95,10 +95,10 @@ pretty-printed JSON documents back to back without delimiters
    `output=singleLine` only changes whitespace, `levelOfDetail=high` is an open
    candidate. Firmware that ignores the parameter answers in the legacy format;
    the same splitter reads both (blank lines, LF/CRLF and a last document
-   without terminator are accepted). Only HTTP 400/405/422/501 on the request
-   with the parameter, before any document, switches the client to the plain
-   stream for the rest of its life; 401/403, 5xx, timeouts and connection
-   errors never do. A gateway restart (falling uptime) offers the parameter
+   without terminator are accepted). Any status other than 200 on the request
+   with the parameter (except 401/403 and 429) gets one plain request in the
+   same attempt; the plain stream is kept once it delivered a document.
+   Timeouts and connection errors never switch. A gateway restart (falling uptime) offers the parameter
    again. A stream that ends inside a document raises
    `OpusResponseError` instead of ending silently. The splitter holds at most
    one unfinished document (8 MB) plus the documents of one network chunk.

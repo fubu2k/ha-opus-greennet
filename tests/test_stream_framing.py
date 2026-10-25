@@ -252,7 +252,8 @@ async def test_framing_choice_is_logged_without_host_or_credentials(
     messages = [record.getMessage() for record in caplog.records]
     assert messages == [
         "OPUS event stream requested with line framing",
-        "OPUS gateway refused line framing (HTTP 400); using the plain event stream",
+        "OPUS gateway answered the line-framed stream with HTTP 400; "
+        "trying the plain event stream",
         "OPUS event stream requested with plain framing",
     ]
     text = "\n".join(messages)
@@ -271,18 +272,47 @@ async def test_ignored_parameter_needs_no_fallback(
     assert gateway.stream_queries == [QUERY, QUERY]
 
 
-async def test_other_statuses_do_not_switch_the_framing(
+async def test_a_failing_gateway_is_offered_line_framing_again(
     session: aiohttp.ClientSession, gateway: FakeGateway
 ) -> None:
-    """Server errors say nothing about the firmware."""
+    """A status that also fails the plain stream is no missing support."""
     gateway.status["/devices/stream"] = 503
     client = _client(session, gateway)
     with pytest.raises(OpusResponseError, match="status 503"):
         await _drain(client)
-    assert len(gateway.requests_to("GET", "/devices/stream")) == 1
+    # Line framed, then once plain, in the same attempt.
+    assert len(gateway.requests_to("GET", "/devices/stream")) == 2
     del gateway.status["/devices/stream"]
     gateway.close_after_snapshot = True
+    gateway.stream_queries.clear()
     await _drain(client)
+    assert gateway.stream_queries == [QUERY]
+
+
+@pytest.mark.parametrize("status", [404, 500])
+async def test_any_refusal_of_the_parameter_falls_back(
+    session: aiohttp.ClientSession, gateway: FakeGateway, status: int
+) -> None:
+    """Unknown firmware may refuse the parameter with any status."""
+    gateway.stream_framing = "reject"
+    gateway.reject_status = status
+    gateway.close_after_snapshot = True
+    client = _client(session, gateway)
+    assert await _drain(client)
+    assert gateway.stream_queries == [QUERY, ""]
+    # The plain stream delivered: it is remembered.
+    await _drain(client)
+    assert gateway.stream_queries == [QUERY, "", ""]
+
+
+async def test_rate_limiting_does_not_fall_back(
+    session: aiohttp.ClientSession, gateway: FakeGateway
+) -> None:
+    gateway.stream_framing = "reject"
+    gateway.reject_status = 429
+    client = _client(session, gateway)
+    with pytest.raises(OpusResponseError, match="status 429"):
+        await _drain(client)
     assert gateway.stream_queries == [QUERY]
 
 

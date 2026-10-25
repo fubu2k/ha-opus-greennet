@@ -57,10 +57,11 @@ _STREAM_PATH: Final = "/devices/stream"
 # (hardware-verified on OPUS-IQ-DOT 1.21.30). ``direction``, ``output`` and
 # ``levelOfDetail`` are deliberately not requested (docs/quality/phases).
 _LINE_FRAMING_QUERY: Final = "delimited=newLine"
-# HTTP statuses with which a gateway refuses the unknown parameter itself.
-# Everything else (401/403, 5xx, timeouts, connection errors) says nothing
-# about the firmware and must not switch the framing.
-_LINE_FRAMING_REFUSED: Final = frozenset({400, 405, 422, 501})
+# A line-framed request answered with any other status than 200 is tried once
+# more without the parameter, in the same attempt: firmware that does not know
+# it may answer 400, 404 or 500 alike. Rejected credentials (401/403) and rate
+# limiting (429) say nothing about the parameter and never fall back.
+_NO_FALLBACK_STATUSES: Final = frozenset({429})
 
 # Queue priorities: lower values are dispatched first. User-initiated control
 # commands must never wait behind status queries, and delayed (background)
@@ -446,11 +447,11 @@ class OpusGatewayClient:
         The stream is first requested with ``delimited=newLine`` (one document
         per line, hardware-verified on 1.21.30). Firmware that ignores the
         parameter answers in the legacy format, which the same splitter cuts.
-        Only a refusal of the parameter itself (``_LINE_FRAMING_REFUSED``,
-        before any document) switches this client to the plain stream; it is
-        remembered until ``reset_stream_framing``. Authentication errors,
-        timeouts, connection errors and other statuses are never taken for
-        missing firmware support and raise as before.
+        Any other status than 200 (except rejected credentials and 429) gets
+        one plain request in the same attempt; the plain stream is remembered
+        until ``reset_stream_framing`` only once it delivered a document, so a
+        gateway that was merely failing is offered line framing again next
+        time. Timeouts and connection errors never switch the framing.
 
         Closing the generator (``aclose``) releases the HTTP response at once.
         """
@@ -461,7 +462,13 @@ class OpusGatewayClient:
                         yield document
                 return
             except _LineFramingRefused:
-                self._line_framing_rejected = True
+                pass
+            async with aclosing(self._async_stream_documents(False)) as documents:
+                async for document in documents:
+                    # Plain works where line framing did not: remember it.
+                    self._line_framing_rejected = True
+                    yield document
+            return
         async with aclosing(self._async_stream_documents(False)) as documents:
             async for document in documents:
                 yield document
@@ -491,10 +498,14 @@ class OpusGatewayClient:
                 ),
             ) as response:
                 _raise_for_auth(response)
-                if line_framing and response.status in _LINE_FRAMING_REFUSED:
+                if (
+                    line_framing
+                    and response.status != 200
+                    and response.status not in _NO_FALLBACK_STATUSES
+                ):
                     _LOGGER.debug(
-                        "OPUS gateway refused line framing (HTTP %s); "
-                        "using the plain event stream",
+                        "OPUS gateway answered the line-framed stream with "
+                        "HTTP %s; trying the plain event stream",
                         response.status,
                     )
                     raise _LineFramingRefused
