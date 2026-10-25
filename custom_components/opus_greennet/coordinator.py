@@ -281,6 +281,10 @@ class OpusGreenNetCoordinator:
         # hold documents it parsed before its cancellation takes effect; it
         # drops them instead of applying stale state (phase R4).
         self._stream_generation = 0
+        # Opened stream requests and streams that delivered a document since
+        # this coordinator was created (diagnostics only; a reload resets them).
+        self.stream_attempts = 0
+        self.stream_connects = 0
         # Resolved by the stream with its first device list during setup, or
         # failed with the error of the first stream attempt (phase R5).
         self._first_device_list: asyncio.Future[None] | None = None
@@ -496,6 +500,22 @@ class OpusGreenNetCoordinator:
         self._stream_connected = False
         self._start_stream()
 
+    def stream_diagnostics(self) -> dict[str, object]:
+        """Return cached stream facts for diagnostics.
+
+        Reads counters only: no request, no new stream and no radio telegram.
+        ``reconnects`` counts streams after the first one that delivered a
+        document; attempts that failed before any document are in ``attempts``.
+        """
+        return {
+            "connected": self._stream_connected,
+            "framing_requested": self.client.stream_framing,
+            "attempts": self.stream_attempts,
+            "connects": self.stream_connects,
+            "reconnects": max(self.stream_connects - 1, 0),
+            "radio_queue_depth": self._radio_queue.queue_depth,
+        }
+
     def _is_current_stream(self, generation: int) -> bool:
         """Return whether ``generation`` is the reader that may apply state."""
         return not self._unloaded and generation == self._stream_generation
@@ -512,6 +532,7 @@ class OpusGreenNetCoordinator:
         failures = 0
         while self._is_current_stream(generation):
             connected_at: float | None = None
+            self.stream_attempts += 1
             try:
                 # ``aclosing`` releases the HTTP response as soon as a replaced
                 # reader leaves the loop, not only when the generator is
@@ -523,6 +544,7 @@ class OpusGreenNetCoordinator:
                         if connected_at is None:
                             connected_at = monotonic()
                             self._stream_connected = True
+                            self.stream_connects += 1
                             _LOGGER.debug(
                                 "OPUS event stream connected for %s", self.eag_id
                             )

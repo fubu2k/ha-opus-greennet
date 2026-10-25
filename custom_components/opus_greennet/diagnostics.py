@@ -188,6 +188,8 @@ async def async_get_config_entry_diagnostics(
     # REST phase 02: last vertical run duration and position origin per
     # channel, for diagnostics only.
     movement_times = getattr(coordinator, "last_vertical_movement_times", None)
+    stream_facts = getattr(coordinator, "stream_diagnostics", None)
+    stream = stream_facts() if callable(stream_facts) else None
     origin = getattr(coordinator, "position_origin", None)
     for device in coordinator.devices.values():
         devices.append(
@@ -250,6 +252,9 @@ async def async_get_config_entry_diagnostics(
                 "first_device_list_seconds": getattr(
                     coordinator, "first_device_list_seconds", None
                 ),
+                # Cached stream facts: connection state, requested framing,
+                # attempt and reconnect counters, waiting radio requests.
+                "stream": stream if isinstance(stream, dict) else None,
             },
             "devices": devices,
         },

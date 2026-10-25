@@ -66,6 +66,19 @@ Useful fields:
 
 - `first_device_list_seconds` (gateway): time from opening the event stream to
   its first device list at startup.
+- `stream` (gateway): facts about the event stream, read from the integration's
+  memory (no request to the gateway):
+  - `connected`: whether the stream is open now.
+  - `framing_requested`: `line` (one document per line) or `plain` (the
+    gateway refused the line request). It is the request the gateway accepted;
+    firmware that ignores the parameter answers in the plain format anyway.
+  - `attempts`: opened stream requests since the integration was loaded.
+  - `connects` and `reconnects`: streams that delivered a device list, and
+    those after the first one. Many attempts with few connects point to a
+    gateway or network that is often unreachable.
+  - `radio_queue_depth`: requests waiting for the gateway's radio queue at the
+    moment of the download. Values above 0 for long are worth reporting.
+  The counters start at 0 whenever the integration is reloaded.
 - `last_vertical_movement_time` (covers): the last run duration the gateway
   reports.
 - `position_origin` (covers, per channel): `device list`, `reported`,
