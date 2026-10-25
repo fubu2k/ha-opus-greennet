@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] - 2026-10-25
+
+Device settings become entities, and the diagnostics say more about the event stream. Devices, entities, entity IDs, names, areas, dashboards and automations are kept.
+
+### Added
+- **Device settings as entities.** They are configuration entities and **disabled by default**; enable the ones you need. A new value is written to the device and adopted only after it was read back; if the device does not confirm it, the previous value stays and nothing is repeated automatically.
+  - **Blinds:** *Vertical movement time*, *Rotation time* and *Maximum holding time* (D2-05-02 only).
+  - **Dimmers (D2-01-03):** *Ramping time*, *Short-press time* and *Long-press time*.
+  - **Switches (D2-01-01, D2-01-11):** *Timer duration*, *Timer duration (long press)*, *Switch-off warning*, *Switch-off warning signal* and *Illumination threshold*, and the selections *Operation mode*, *LED colour*, *External input function* and, for 2-channel switches, *LED channel*.
+  - Verified on hardware (firmware 1.21.30): writing the vertical movement time and the maximum holding time of a blind, and the LED colour of a switch. The other settings were not written on hardware: try a single device first.
+- **Wall switch links (read only).** The new action `opus_greennet.get_device_link_tables` returns the link table of an actuator (for administrators), a diagnostic sensor *Wall switch links* counts the linked wall switches, and the diagnostics download lists the tables. Link tables are never written.
+- **Last seen** diagnostic sensor for every device.
+- **Uptime** of the gateway on the gateway's device, as a diagnostic sensor.
+- **Event stream in the diagnostics download:** whether the stream is open, the framing the gateway accepted, attempts, reconnects and the number of requests waiting for the radio queue. Nothing is requested from the gateway for it.
+- Examples and use cases in the documentation.
+
+### Changed
+- The **Signal strength** and **Last seen** sensors are enabled by default for new installations. An entity that was disabled before stays disabled.
+- **The gateway address must be in the local network** (private, link-local, loopback or carrier-grade NAT range), because the gateway only speaks unencrypted HTTP. Existing entries with another address keep working; re-authentication and reconfiguration ask for a local address.
+- A **notice in Repairs** appears for an entry whose gateway address is outside the local network. The entry keeps working; the notice goes away when it is loaded again with a local address.
+- The event stream asks for one document per line. Gateways that do not support it (the parameter is refused) are served in the previous format; the choice is renewed after a gateway restart.
+
+### Security
+- The action `opus_greennet.set_device_configuration` rejects bodies that cannot be sent as valid JSON (non-finite numbers, wrong types, too deep or too large) before anything is sent to the gateway.
+- GitHub Actions of the project are pinned to verified commits and run with minimal permissions.
+
 ## [1.0.0] - 2026-10-24
 
 **This is a big one.** 1.0 is the largest change since the integration started, and the step from an experimental bridge setup to a stable integration you can rely on every day.
