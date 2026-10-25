@@ -356,6 +356,7 @@ class OpusGatewayClient:
     ) -> None:
         self._session = session
         self._line_framing_rejected = False
+        self._stream_framing: str | None = None
         self.host = host
         self.port = port
         # IPv6 literals need brackets inside a URL.
@@ -419,6 +420,17 @@ class OpusGatewayClient:
         except OpusResponseError as err:
             err.http_status = response.status
             raise
+
+    @property
+    def stream_framing(self) -> str | None:
+        """Return the framing requested by the last accepted stream.
+
+        ``"line"`` or ``"plain"``; ``None`` until a stream was accepted. This is
+        the request, not a proof of the format: firmware that ignores the
+        parameter answers in the plain format to a ``"line"`` request, and the
+        same splitter reads both.
+        """
+        return self._stream_framing
 
     def reset_stream_framing(self) -> None:
         """Offer the line-delimited stream again on the next connection.
@@ -492,6 +504,7 @@ class OpusGatewayClient:
                         response.status,
                         http_status=response.status,
                     )
+                self._stream_framing = "line" if line_framing else "plain"
                 async for chunk in response.content.iter_any():
                     for text in splitter.feed(chunk):
                         document = as_object(parse_json(text))
