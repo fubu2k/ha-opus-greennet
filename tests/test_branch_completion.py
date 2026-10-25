@@ -8,11 +8,14 @@ behaviour.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.components.climate import HVACMode
+from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -41,6 +44,7 @@ from custom_components.opus_greennet.enocean_device import (
 from custom_components.opus_greennet.sensor import (
     OpusGreenNetCoverRunSensor,
     OpusGreenNetHandleSensor,
+    OpusGreenNetLastSeenSensor,
     OpusGreenNetSignalStrengthSensor,
 )
 from tests.fake_gateway import FakeGateway
@@ -158,6 +162,36 @@ def test_signal_strength_is_unknown_until_a_telegram_reports_it(make_device) -> 
     assert sensor.native_value is None
     device.dbm = -70
     assert sensor.native_value == -70
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "2026-10-19T18:17:17.571+0200",
+            datetime(
+                2026, 10, 19, 18, 17, 17, 571000, tzinfo=timezone(timedelta(hours=2))
+            ),
+        ),
+        ("2026-10-19T16:17:17Z", datetime(2026, 10, 19, 16, 17, 17, tzinfo=UTC)),
+        ("", None),
+        ("not a time", None),
+        # No offset: the zone is not guessed, the value stays unknown.
+        ("2026-10-19T18:17:17", None),
+    ],
+)
+def test_last_seen_is_a_timezone_aware_time_or_unknown(
+    make_device, raw: str, expected: datetime | None
+) -> None:
+    device = make_device("D2-01-01")
+    sensor = OpusGreenNetLastSeenSensor(MagicMock(), EAG_ID, "gw", device)
+    device.last_seen = raw
+    assert sensor.native_value == expected
+    assert sensor.unique_id == f"{EAG_ID}_{device.device_id}_last_seen"
+    assert sensor.device_class is SensorDeviceClass.TIMESTAMP
+    assert sensor.entity_category is EntityCategory.DIAGNOSTIC
+    assert sensor.entity_registry_enabled_default is False
+    assert sensor.translation_key == "last_seen"
 
 
 def test_handle_sensors_report_only_what_the_handle_sent(make_device) -> None:

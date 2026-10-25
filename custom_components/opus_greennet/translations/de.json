@@ -151,6 +151,9 @@
       "signal_strength": {
         "name": "Signalstärke"
       },
+      "last_seen": {
+        "name": "Zuletzt gesehen"
+      },
       "illuminance": {
         "name": "Beleuchtungsstärke"
       },
