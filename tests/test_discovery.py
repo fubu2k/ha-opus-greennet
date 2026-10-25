@@ -157,6 +157,20 @@ async def test_locate_accepts_the_gateway_with_the_same_eurid(
         await other.stop()
 
 
+async def test_locate_skips_a_gateway_that_reports_another_eurid(
+    hass: HomeAssistant, gateway: FakeGateway, found_hosts: list[str]
+) -> None:
+    """A candidate that accepts the credentials but is another gateway."""
+    other = FakeGateway(eurid="11223344", password=gateway.eurid)
+    await other.start()
+    try:
+        with patch(f"{DISCOVERY}.DEFAULT_PORT", other.port):
+            found_hosts[:] = [other.host]
+            assert await async_locate_gateway(hass, gateway.eurid) is None
+    finally:
+        await other.stop()
+
+
 async def test_locate_keeps_a_single_gateway_that_rejects_the_default_password(
     hass: HomeAssistant, gateway: FakeGateway, found_hosts: list[str]
 ) -> None:
