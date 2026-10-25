@@ -8,7 +8,7 @@ import pytest
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, InvalidData
 
 from custom_components.opus_greennet.config_flow import _is_host
 from custom_components.opus_greennet.const import DOMAIN
@@ -310,3 +310,26 @@ async def test_reconfigure_rejects_an_invalid_host_and_recovers(
     assert result["reason"] == "reconfigure_successful"
     await hass.async_block_till_done()
     assert entry.data["host"] == "localhost"
+
+
+@pytest.mark.parametrize("port", [0, 65536, -1, True, False, 80.5, "abc", "", None])
+async def test_user_flow_rejects_an_invalid_port_and_recovers(
+    hass: HomeAssistant, gateway: FakeGateway, port: object
+) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    # The form schema rejects the port before the flow step runs.
+    with pytest.raises(InvalidData) as error:
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**gateway.config, "port": port}
+        )
+    assert set(error.value.schema_errors) == {"port"}
+    assert gateway.requests == []
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], gateway.config
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"]["port"] == gateway.port
+    await hass.async_block_till_done()
