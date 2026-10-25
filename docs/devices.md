@@ -238,8 +238,9 @@ battery percentage is invented when the gateway publishes none.
 - Battery level and signal strength come from the device list and are
   refreshed every 30 minutes; the signal strength sensor is disabled by
   default.
-- Every device also has a diagnostic **Last seen** sensor (disabled by
-  default): the time of its newest report, from the telegram timestamp or the
+- Every device also has a diagnostic **Last seen** sensor (enabled by
+  default for new installations; an entity that was disabled before stays
+  disabled until you enable it): the time of its newest report, from the telegram timestamp or the
   gateway's device list. It is a point in time, not a health verdict; a
   value without a UTC offset or in an unknown format stays unknown. Devices
   that only send on a change (for example leak sensors) can legitimately stay

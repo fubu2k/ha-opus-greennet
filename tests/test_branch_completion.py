@@ -190,7 +190,7 @@ def test_last_seen_is_a_timezone_aware_time_or_unknown(
     assert sensor.unique_id == f"{EAG_ID}_{device.device_id}_last_seen"
     assert sensor.device_class is SensorDeviceClass.TIMESTAMP
     assert sensor.entity_category is EntityCategory.DIAGNOSTIC
-    assert sensor.entity_registry_enabled_default is False
+    assert sensor.entity_registry_enabled_default is True
     assert sensor.translation_key == "last_seen"
 
 
