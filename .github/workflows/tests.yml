@@ -206,3 +206,13 @@ jobs:
 
       - name: Validate integration metadata
         uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    # Required for the HACS default store: description, topics, brand icon,
+    # hacs.json and README.
+    runs-on: ubuntu-latest
+    steps:
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
