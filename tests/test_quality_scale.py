@@ -481,6 +481,8 @@ def test_actions_are_set_up_in_async_setup() -> None:
         ("docs-data-update", "docs/how-it-works.md", "## Updates and availability"),
         ("docs-known-limitations", "README.md", "## Known limitations"),
         ("docs-known-limitations", "docs/how-it-works.md", "## Known limitations"),
+        ("docs-examples", "docs/examples.md", "## Examples"),
+        ("docs-use-cases", "docs/examples.md", "## Use cases"),
         ("docs-supported-devices", "README.md", "## Supported devices"),
         ("docs-supported-functions", "README.md", "## Features"),
         ("docs-troubleshooting", "README.md", "## Troubleshooting"),
