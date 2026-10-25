@@ -252,8 +252,10 @@ had registered. **[HW][Test]**
   **[Code][Test]**
 - The gateway has no TLS (plain HTTP, basic authentication), so credentials are
   sent only to the local network. `discovery.LOCAL_NETWORKS` is an allowlist
-  (RFC 1918, link-local, loopback, `100.64.0.0/10`, `fc00::/7`, RFC 5737
-  documentation ranges). The config flow (user, reauth, reconfigure) refuses an
+  (RFC 1918, link-local, loopback, `100.64.0.0/10`, `fc00::/7`), extended by
+  the networks of Home Assistant's enabled adapters (`network` integration),
+  so an on-link global IPv6 address counts as local. Host names are resolved
+  with Home Assistant's shared session, like the connection. The config flow (user, reauth, reconfigure) refuses an
   address outside it (`host_not_local`) and judges a host name by **all** its
   addresses; a name that does not resolve is `cannot_connect`. A zeroconf
   announcement or mDNS search result outside it is ignored

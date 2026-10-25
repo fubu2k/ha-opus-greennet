@@ -27,6 +27,7 @@ from .api import (
 )
 from .const import CONF_EAG_ID, DEFAULT_PORT, DEFAULT_USERNAME, DOMAIN
 from .discovery import (
+    async_local_networks,
     async_read_gateway_id,
     async_resolve_host,
     default_connection,
@@ -105,11 +106,12 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         # The gateway has no TLS: its credentials go only to the local network.
         # Every address of a host name counts, and a name that does not resolve
         # is as unreachable as before (cannot_connect).
-        addresses = await async_resolve_host(host)
+        addresses = await async_resolve_host(self.hass, host)
         if not addresses:
             errors["base"] = "cannot_connect"
             return None
-        if not all(is_local_address(address) for address in addresses):
+        networks = await async_local_networks(self.hass)
+        if not all(is_local_address(address, networks) for address in addresses):
             errors[CONF_HOST] = "host_not_local"
             return None
         try:
@@ -162,7 +164,9 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         """
         if discovery_info.ip_address.version != 4:
             return self.async_abort(reason="not_ipv4_address")
-        if not is_local_address(discovery_info.ip_address):
+        if not is_local_address(
+            discovery_info.ip_address, await async_local_networks(self.hass)
+        ):
             # An announcement cannot make Home Assistant send credentials to
             # an address outside the local network.
             return self.async_abort(reason="not_local_address")

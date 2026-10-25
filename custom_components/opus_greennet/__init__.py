@@ -43,6 +43,7 @@ from .const import (
 )
 from .coordinator import GatewayMismatchError, OpusGreenNetCoordinator
 from .discovery import (
+    async_local_networks,
     async_locate_gateway,
     default_connection,
     is_local_address,
@@ -235,7 +236,9 @@ async def async_setup_entry(
             translation_domain=DOMAIN, translation_key="gateway_address_required"
         )
     configured = parse_host_literal(entry.data[CONF_HOST])
-    non_local = configured is not None and not is_local_address(configured)
+    non_local = configured is not None and not is_local_address(
+        configured, await async_local_networks(hass)
+    )
     async_set_non_local_address_issue(hass, entry.entry_id, non_local=non_local)
     if non_local:
         # Existing entries keep working. The gateway speaks unencrypted HTTP,

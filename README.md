@@ -127,8 +127,9 @@ automatically. To change the credentials, use **Reconfigure** on the entry.
 **Local addresses only:** the gateway speaks unencrypted HTTP, so Home Assistant
 sends its credentials only to private addresses (`10/8`, `172.16/12`,
 `192.168/16`), link-local (`169.254/16`, `fe80::/10`), unique local
-(`fc00::/7`), loopback and carrier-grade NAT (`100.64/10`, used by VPN meshes).
-A host name must resolve only to such addresses. For remote access use a VPN,
+(`fc00::/7`), loopback, carrier-grade NAT (`100.64/10`, used by VPN meshes) and
+the networks Home Assistant itself is attached to (so a global IPv6 address on
+your home network works too). A host name must resolve only to such addresses. For remote access use a VPN,
 not a port forward. Entries that already use a public address keep working and
 log a warning at setup.
 

@@ -24,8 +24,10 @@ from custom_components.opus_greennet import async_setup_entry
 from custom_components.opus_greennet.api import OpusConnectionError
 from custom_components.opus_greennet.const import DOMAIN
 from custom_components.opus_greennet.discovery import (
+    LOCAL_NETWORKS,
     ZEROCONF_TYPE,
     async_browse_gateway_hosts,
+    async_local_networks,
     async_resolve_host,
     is_local_address,
     parse_host_literal,
@@ -48,9 +50,6 @@ LOCAL = [
     "127.0.0.1",
     "100.64.0.1",
     "100.127.255.254",
-    "192.0.2.10",
-    "198.51.100.7",
-    "203.0.113.9",
     "::1",
     "fe80::1",
     "fe80::1%eth0",
@@ -61,6 +60,10 @@ LOCAL = [
 ]
 NOT_LOCAL = [
     "8.8.8.8",
+    # Documentation ranges are no local network.
+    "192.0.2.10",
+    "198.51.100.7",
+    "203.0.113.9",
     "1.1.1.1",
     "172.15.255.255",
     "172.32.0.1",
@@ -116,17 +119,17 @@ def test_host_literals_are_parsed_like_the_config_flow_reads_them() -> None:
 # ── resolving a host name ───────────────────────────────────────────────────
 
 
-async def test_an_ip_address_is_not_looked_up() -> None:
+async def test_an_ip_address_is_not_looked_up(hass: HomeAssistant) -> None:
     loop = asyncio.get_running_loop()
     with patch.object(loop, "getaddrinfo", AsyncMock(side_effect=AssertionError)):
-        assert await async_resolve_host("[::1]") == [ipaddress.ip_address("::1")]
+        assert await async_resolve_host(hass, "[::1]") == [ipaddress.ip_address("::1")]
 
 
-async def test_a_name_resolves_to_all_of_its_addresses() -> None:
+async def test_a_name_resolves_to_all_of_its_addresses(hass: HomeAssistant) -> None:
     loop = asyncio.get_running_loop()
     found = _lookup("10.0.0.5", "2001:4860:4860::8888", "fe80::1%eth0")
     with patch.object(loop, "getaddrinfo", AsyncMock(return_value=found)):
-        assert await async_resolve_host(" gateway.home ") == [
+        assert await async_resolve_host(hass, " gateway.home ") == [
             ipaddress.ip_address("10.0.0.5"),
             ipaddress.ip_address("2001:4860:4860::8888"),
             ipaddress.ip_address("fe80::1%eth0"),
@@ -139,21 +142,23 @@ async def test_a_name_resolves_to_all_of_its_addresses() -> None:
     ids=["unresolvable", "unusable-answer"],
 )
 async def test_a_name_that_does_not_resolve_has_no_addresses(
-    failure: Exception,
+    hass: HomeAssistant, failure: Exception
 ) -> None:
     loop = asyncio.get_running_loop()
     with patch.object(loop, "getaddrinfo", AsyncMock(side_effect=failure)):
-        assert await async_resolve_host("gateway.home") == []
+        assert await async_resolve_host(hass, "gateway.home") == []
 
 
-async def test_an_address_that_is_no_address_counts_as_unresolved() -> None:
+async def test_an_address_that_is_no_address_counts_as_unresolved(
+    hass: HomeAssistant,
+) -> None:
     loop = asyncio.get_running_loop()
     found = _lookup("10.0.0.5", "not-an-address")
     with patch.object(loop, "getaddrinfo", AsyncMock(return_value=found)):
-        assert await async_resolve_host("gateway.home") == []
+        assert await async_resolve_host(hass, "gateway.home") == []
 
 
-async def test_a_slow_lookup_is_given_up() -> None:
+async def test_a_slow_lookup_is_given_up(hass: HomeAssistant) -> None:
     async def never(*args: object, **kwargs: object) -> list[tuple[object, ...]]:
         await asyncio.sleep(60)
         return []
@@ -163,7 +168,7 @@ async def test_a_slow_lookup_is_given_up() -> None:
         patch.object(loop, "getaddrinfo", never),
         patch(f"{DISCOVERY}.RESOLVE_HOST_SECONDS", 0.01),
     ):
-        assert await async_resolve_host("gateway.home") == []
+        assert await async_resolve_host(hass, "gateway.home") == []
 
 
 # ── config flow ─────────────────────────────────────────────────────────────
@@ -353,7 +358,7 @@ async def test_the_search_drops_announced_addresses_outside_the_lan(
         ("8.8.8.8", True),
         ("2001:4860:4860::8888", True),
         ("[2001:4860:4860::8888]", True),
-        ("192.0.2.10", False),
+        ("192.0.2.10", True),
         ("10.0.0.5", False),
         ("fe80::1", False),
         ("opusshgw.local", False),
@@ -382,3 +387,86 @@ async def test_an_existing_entry_with_a_public_address_still_sets_up_but_warns(
     coordinator.async_setup.assert_awaited_once()
     assert ("not in a local network" in caplog.text) is warned
     assert host not in caplog.text
+
+
+# ── networks Home Assistant is attached to ──────────────────────────────────
+
+
+def _adapter(enabled: bool, ipv4: list, ipv6: list) -> dict:
+    return {
+        "name": "eth0",
+        "index": 1,
+        "enabled": enabled,
+        "auto": True,
+        "default": True,
+        "ipv4": ipv4,
+        "ipv6": ipv6,
+    }
+
+
+ADAPTERS = [
+    _adapter(
+        True,
+        [{"address": "192.168.178.20", "network_prefix": 24}],
+        [
+            {
+                "address": "2001:db8:1::20",
+                "flowinfo": 0,
+                "scope_id": 0,
+                "network_prefix": 64,
+            }
+        ],
+    ),
+    _adapter(False, [{"address": "203.0.113.5", "network_prefix": 24}], []),
+]
+
+
+async def test_the_networks_of_enabled_adapters_count_as_local(
+    hass: HomeAssistant,
+) -> None:
+    hass.config.components.add("network")
+    with patch(
+        f"{DISCOVERY}.network.async_get_adapters", AsyncMock(return_value=ADAPTERS)
+    ):
+        networks = await async_local_networks(hass)
+    # A global IPv6 address on the same link, as on dual-stack home networks.
+    assert is_local_address(ipaddress.ip_address("2001:db8:1::77"), networks)
+    assert not is_local_address(ipaddress.ip_address("2001:db8:2::77"), networks)
+    # A disabled adapter adds nothing.
+    assert not is_local_address(ipaddress.ip_address("203.0.113.9"), networks)
+
+
+async def test_without_the_network_integration_only_the_allowlist_counts(
+    hass: HomeAssistant,
+) -> None:
+    assert await async_local_networks(hass) == LOCAL_NETWORKS
+
+
+async def test_user_flow_accepts_a_name_with_an_on_link_global_address(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    hass.config.components.add("network")
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    resolved = [
+        ipaddress.ip_address("192.168.178.30"),
+        ipaddress.ip_address("2001:db8:1::30"),
+    ]
+    with (
+        patch(f"{CONFIG_FLOW}.async_resolve_host", AsyncMock(return_value=resolved)),
+        patch(
+            f"{DISCOVERY}.network.async_get_adapters",
+            AsyncMock(return_value=ADAPTERS),
+        ),
+        patch(
+            f"{CONFIG_FLOW}.async_read_gateway_id",
+            AsyncMock(side_effect=OpusConnectionError("nothing there")),
+        ) as read_gateway_id,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**gateway.config, "host": "opusshgw.fritz.box"}
+        )
+    # The local check passed; the connection itself was attempted.
+    read_gateway_id.assert_awaited_once()
+    assert result["errors"] == {"base": "cannot_connect"}

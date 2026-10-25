@@ -257,7 +257,7 @@ def test_system_info_is_stored_and_identity_checked(coord) -> None:
     assert coord.gateway_info == {}
     coord._apply_system_info({"systemInfo": {"eurid": 7}})
     assert coord.gateway_info == {"eurid": 7}
-    coord.client.host = "192.0.2.1"
+    coord.client.host = "192.168.2.1"
     with pytest.raises(GatewayMismatchError, match="11223344"):
         coord._apply_system_info({"systemInfo": {"eurid": "11223344"}})
     assert coord.gateway_info == {"eurid": 7}

@@ -44,7 +44,7 @@ from tests.ha_helpers import setup_bridge
 EAG_ID = "AABB0011"
 ENTRY_DATA = {
     "eag_id": EAG_ID,
-    "host": "192.0.2.10",
+    "host": "192.168.2.10",
     "port": 8080,
     "username": "admin",
     "password": "secret",

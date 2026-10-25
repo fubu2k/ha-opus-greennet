@@ -19,6 +19,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
+from homeassistant.components import network
 from homeassistant.components import zeroconf as ha_zeroconf
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.core import HomeAssistant
@@ -41,12 +42,13 @@ RESOLVE_TIMEOUT_MS: Final = 3000
 EAG_ID_PATTERN = re.compile(r"[0-9A-Fa-f]{8}")
 
 type IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+type IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 # The gateway speaks plain HTTP with basic authentication (no TLS), so its
 # credentials must never travel beyond the local network. Allowlist, not a
 # "not global" test: Python's private/reserved flags also cover ranges that
 # are no local network (::/8 would reject ::1, 2001::/23 contains Teredo).
-LOCAL_NETWORKS: Final = tuple(
+LOCAL_NETWORKS: Final[tuple[IPNetwork, ...]] = tuple(
     ipaddress.ip_network(network)
     for network in (
         "10.0.0.0/8",  # RFC 1918
@@ -55,11 +57,6 @@ LOCAL_NETWORKS: Final = tuple(
         "169.254.0.0/16",  # link-local
         "127.0.0.0/8",  # loopback (tunnels, tests)
         "100.64.0.0/10",  # carrier-grade NAT, also VPN meshes
-        # Documentation ranges (RFC 5737): unroutable by definition; they
-        # keep the fictional examples of the documentation usable.
-        "192.0.2.0/24",
-        "198.51.100.0/24",
-        "203.0.113.0/24",
         "::1/128",
         "fe80::/10",  # link-local
         "fc00::/7",  # unique local
@@ -80,34 +77,66 @@ def parse_host_literal(host: str) -> IPAddress | None:
         return None
 
 
-def is_local_address(address: IPAddress) -> bool:
-    """Return whether ``address`` lies in one of ``LOCAL_NETWORKS``.
+def is_local_address(
+    address: IPAddress, networks: tuple[IPNetwork, ...] = LOCAL_NETWORKS
+) -> bool:
+    """Return whether ``address`` lies in one of ``networks``.
 
     An IPv4-mapped IPv6 address (``::ffff:192.168.1.5``) is judged by the IPv4
     address it carries.
     """
     if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
         address = address.ipv4_mapped
-    return any(address in network for network in LOCAL_NETWORKS)
+    return any(address in network for network in networks)
 
 
-async def async_resolve_host(host: str) -> list[IPAddress]:
+async def async_local_networks(hass: HomeAssistant) -> tuple[IPNetwork, ...]:
+    """Return ``LOCAL_NETWORKS`` plus the networks Home Assistant is attached to.
+
+    A gateway on the same link is local even with a global IPv6 address, as
+    on dual-stack home networks.
+    """
+    networks = list(LOCAL_NETWORKS)
+    if "network" in hass.config.components:
+        for adapter in await network.async_get_adapters(hass):
+            if not adapter["enabled"]:
+                continue
+            for configured in (*adapter["ipv4"], *adapter["ipv6"]):
+                networks.append(
+                    ipaddress.ip_network(
+                        f"{configured['address']}/{configured['network_prefix']}",
+                        strict=False,
+                    )
+                )
+    return tuple(networks)
+
+
+async def async_resolve_host(hass: HomeAssistant, host: str) -> list[IPAddress]:
     """Return every address ``host`` resolves to.
 
-    A host that is an IP address answers itself. The result is empty when the
-    name does not resolve, the lookup takes longer than ``RESOLVE_HOST_SECONDS``
-    or it returns something that is no address, so the caller treats it as
-    unreachable instead of trusting it.
+    The name is resolved like the connection resolves it (Home Assistant's
+    shared session, including mDNS names), so the check and the connection
+    agree. A host that is an IP address answers itself. The result is empty
+    when the name does not resolve, the lookup takes longer than
+    ``RESOLVE_HOST_SECONDS`` or it returns something that is no address, so the
+    caller treats it as unreachable instead of trusting it.
     """
     literal = parse_host_literal(host)
     if literal is not None:
         return [literal]
+    connector = async_get_clientsession(hass).connector
     try:
         async with asyncio.timeout(RESOLVE_HOST_SECONDS):
-            found = await asyncio.get_running_loop().getaddrinfo(
+            resolve = getattr(connector, "async_resolve_host", None)
+            if resolve is not None:
+                return [
+                    ipaddress.ip_address(str(found["host"]))
+                    for found in await resolve(host.strip())
+                ]
+            entries = await asyncio.get_running_loop().getaddrinfo(
                 host.strip(), None, type=socket.SOCK_STREAM
             )
-        return [ipaddress.ip_address(str(entry[4][0])) for entry in found]
+        return [ipaddress.ip_address(str(entry[4][0])) for entry in entries]
     except OSError, TimeoutError, ValueError:
         return []
 
@@ -170,6 +199,7 @@ async def async_browse_gateway_hosts(hass: HomeAssistant) -> list[str]:
     finally:
         await browser.async_cancel()
 
+    networks = await async_local_networks(hass)
     hosts: list[str] = []
     for name in sorted(names):
         info = AsyncServiceInfo(ZEROCONF_TYPE, name)
@@ -178,7 +208,7 @@ async def async_browse_gateway_hosts(hass: HomeAssistant) -> list[str]:
         for address in info.parsed_addresses(IPVersion.V4Only):
             # Credentials are tried against announced addresses: a forged
             # announcement of a public address must not receive them.
-            if not is_local_address(ipaddress.ip_address(address)):
+            if not is_local_address(ipaddress.ip_address(address), networks):
                 _LOGGER.debug("Ignoring announced gateway address outside the LAN")
                 continue
             if address not in hosts:

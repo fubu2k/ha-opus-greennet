@@ -54,7 +54,7 @@
     "error": {
       "cannot_connect": "Verbindung zum Gateway fehlgeschlagen. Prüfe Host und Port.",
       "invalid_host": "Gib nur die IP-Adresse oder den Hostnamen des Gateways ein, ohne http://, Port oder Pfad.",
-      "host_not_local": "Die Adresse muss im lokalen Netzwerk liegen (privat, Link-Local, Loopback oder Carrier-Grade-NAT). Das Gateway spricht nur unverschlüsseltes HTTP, daher werden öffentliche Adressen nicht unterstützt.",
+      "host_not_local": "Gib eine Adresse in deinem lokalen Netzwerk ein (privat, Link-Local, VPN oder das Netzwerk, in dem Home Assistant ist). Das Gateway spricht nur unverschlüsseltes HTTP, daher werden öffentliche Adressen nicht unterstützt. Wenn ein Hostname nicht klappt, gib die IPv4-Adresse des Gateways ein.",
       "invalid_auth": "Das Gateway hat Benutzername oder Passwort abgelehnt.",
       "unsupported_gateway": "Das Gerät unter dieser Adresse hat nicht wie ein OPUS-Gateway geantwortet.",
       "wrong_gateway": "Diese Adresse gehört zu einem anderen Gateway als {eag_id}.",

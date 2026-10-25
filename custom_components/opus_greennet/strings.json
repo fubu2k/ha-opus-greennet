@@ -54,7 +54,7 @@
     "error": {
       "cannot_connect": "Failed to connect to the gateway. Check the host and port.",
       "invalid_host": "Enter only the gateway's IP address or host name, without http://, port or path.",
-      "host_not_local": "The address must be in the local network (private, link-local, loopback or carrier-grade NAT range). The gateway only speaks unencrypted HTTP, so public addresses are not supported.",
+      "host_not_local": "Enter an address in your local network (private, link-local, VPN or the network Home Assistant is in). The gateway only speaks unencrypted HTTP, so public addresses are not supported. If a host name fails, enter the gateway's IPv4 address.",
       "invalid_auth": "The gateway rejected the username or password.",
       "unsupported_gateway": "The device at this address did not answer like an OPUS gateway.",
       "wrong_gateway": "This address belongs to a different gateway than {eag_id}.",
