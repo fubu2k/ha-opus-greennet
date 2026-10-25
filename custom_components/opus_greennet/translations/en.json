@@ -220,6 +220,15 @@
       },
       "max_holding_time": {
         "name": "Maximum holding time"
+      },
+      "ramping_time": {
+        "name": "Ramping time"
+      },
+      "short_press_time": {
+        "name": "Short-press time"
+      },
+      "long_press_time": {
+        "name": "Long-press time"
       }
     }
   },

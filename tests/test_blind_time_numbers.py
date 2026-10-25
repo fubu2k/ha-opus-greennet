@@ -15,7 +15,7 @@ from custom_components.opus_greennet import protocol
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
 from custom_components.opus_greennet.number import (
     BLIND_TIMES,
-    OpusGreenNetBlindTimeNumber,
+    OpusGreenNetTimeNumber,
     async_setup_entry,
 )
 from tests.test_coordinator_commands import (
@@ -120,7 +120,7 @@ async def test_max_holding_time_only_for_blinds_with_a_catalog(
 
 
 def test_number_metadata_follows_the_gateway_parameter_catalog() -> None:
-    entity = OpusGreenNetBlindTimeNumber(
+    entity = OpusGreenNetTimeNumber(
         MagicMock(), EAG_ID, "gateway", _blind(), BLIND_TIMES[0]
     )
     assert entity.entity_category is EntityCategory.CONFIG
@@ -133,7 +133,7 @@ def test_number_metadata_follows_the_gateway_parameter_catalog() -> None:
 
 
 def test_max_holding_time_metadata_follows_the_gateway_parameter_catalog() -> None:
-    entity = OpusGreenNetBlindTimeNumber(
+    entity = OpusGreenNetTimeNumber(
         MagicMock(), EAG_ID, "gateway", _blind(), BLIND_TIMES[2]
     )
     assert entity.unique_id == f"{EAG_ID}_DEV1_max_holding_time"
@@ -145,7 +145,7 @@ def test_max_holding_time_metadata_follows_the_gateway_parameter_catalog() -> No
     assert entity.native_step == 1
     assert entity.native_unit_of_measurement == "s"
     # The travel times keep their own range.
-    travel = OpusGreenNetBlindTimeNumber(
+    travel = OpusGreenNetTimeNumber(
         MagicMock(), EAG_ID, "gateway", _blind(), BLIND_TIMES[0]
     )
     assert (travel.native_max_value, travel.native_step) == (655.35, 0.01)
@@ -154,7 +154,7 @@ def test_max_holding_time_metadata_follows_the_gateway_parameter_catalog() -> No
 def test_value_follows_the_channel_fields() -> None:
     device = _blind()
     vertical, rotation = (
-        OpusGreenNetBlindTimeNumber(MagicMock(), EAG_ID, "gateway", device, time)
+        OpusGreenNetTimeNumber(MagicMock(), EAG_ID, "gateway", device, time)
         for time in BLIND_TIMES
     )
     assert vertical.native_value is None
@@ -164,7 +164,7 @@ def test_value_follows_the_channel_fields() -> None:
     channel.rotation_time = 0
     assert vertical.native_value == 25.51
     assert rotation.native_value == 0
-    holding = OpusGreenNetBlindTimeNumber(
+    holding = OpusGreenNetTimeNumber(
         MagicMock(), EAG_ID, "gateway", device, BLIND_TIMES[2]
     )
     assert holding.native_value is None
@@ -175,7 +175,7 @@ def test_value_follows_the_channel_fields() -> None:
 async def test_setting_a_value_writes_the_gateway_parameter() -> None:
     coordinator = MagicMock()
     coordinator.async_set_device_parameter = AsyncMock()
-    entity = OpusGreenNetBlindTimeNumber(
+    entity = OpusGreenNetTimeNumber(
         coordinator, EAG_ID, "gateway", _blind(), BLIND_TIMES[1]
     )
     await entity.async_set_native_value(0.4)

@@ -19,9 +19,12 @@ from .const import (
     KEY_DIMMER,
     KEY_HEATER_MODE,
     KEY_LOCKING_MODE,
+    KEY_LONG_PRESS,
     KEY_MAX_HOLDING_TIME,
     KEY_POSITION,
+    KEY_RAMPING_TIME,
     KEY_ROTATION_TIME,
+    KEY_SHORT_PRESS,
     KEY_STOP,
     KEY_SWITCH,
     KEY_TEMPERATURE_SETPOINT,
@@ -45,16 +48,22 @@ FEEDBACK_KEYS = frozenset(
 CONFIGURATION_KEYS = frozenset(
     {
         KEY_CHANNEL,
+        KEY_LONG_PRESS,
         KEY_MAX_HOLDING_TIME,
+        KEY_RAMPING_TIME,
         KEY_ROTATION_TIME,
+        KEY_SHORT_PRESS,
         KEY_VERTICAL_MOVEMENT_TIME,
         "batteryLevel",
     }
 )
-# Configuration parameters of a cover that are read as state.
-COVER_CONFIGURATION_KEYS = (
+# Configuration parameters (cover and dimmer times) that are read as state.
+CONFIGURATION_STATE_KEYS = (
+    KEY_LONG_PRESS,
     KEY_MAX_HOLDING_TIME,
+    KEY_RAMPING_TIME,
     KEY_ROTATION_TIME,
+    KEY_SHORT_PRESS,
     KEY_VERTICAL_MOVEMENT_TIME,
 )
 # The RWM documents value-only slots in transmitModes: index 0 is the smoke
@@ -178,7 +187,7 @@ def rwm_transmit_modes(modes: Sequence[object]) -> list[object]:
 
 
 def configuration_state_functions(data: WireMapping) -> list[WireFunction]:
-    """Read reported cover times, never parameter defaults."""
+    """Read reported cover and dimmer times, never parameter defaults."""
     configuration = data.get("configuration")
     if not isinstance(configuration, dict):
         return []
@@ -192,7 +201,7 @@ def configuration_state_functions(data: WireMapping) -> list[WireFunction]:
             continue
         if parameter.get("key") == KEY_CHANNEL:
             channel = parameter.get("value")
-        elif parameter.get("key") in COVER_CONFIGURATION_KEYS and "value" in parameter:
+        elif parameter.get("key") in CONFIGURATION_STATE_KEYS and "value" in parameter:
             functions.append({"channel": channel, **parameter})
     return functions
 
