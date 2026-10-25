@@ -153,22 +153,24 @@ def test_max_holding_time_metadata_follows_the_gateway_parameter_catalog() -> No
 
 def test_value_follows_the_channel_fields() -> None:
     device = _blind()
-    vertical, rotation = (
+    assert [time.parameter for time in BLIND_TIMES] == [
+        "verticalMovementTime",
+        "rotationTime",
+        "maxHoldingTime",
+    ]
+    vertical, rotation, holding = (
         OpusGreenNetTimeNumber(MagicMock(), EAG_ID, "gateway", device, time)
         for time in BLIND_TIMES
     )
     assert vertical.native_value is None
     channel = device.get_or_create_channel()
     assert vertical.native_value is None
+    assert holding.native_value is None
     channel.vertical_movement_time = 25.51
     channel.rotation_time = 0
+    channel.max_holding_time = 29
     assert vertical.native_value == 25.51
     assert rotation.native_value == 0
-    holding = OpusGreenNetTimeNumber(
-        MagicMock(), EAG_ID, "gateway", device, BLIND_TIMES[2]
-    )
-    assert holding.native_value is None
-    channel.max_holding_time = 29
     assert holding.native_value == 29
 
 
