@@ -119,6 +119,49 @@ def test_raised_exception_keys_are_translated() -> None:
     )
 
 
+def _placeholders(message: str) -> set[str]:
+    return {part.split("}")[0] for part in message.split("{")[1:]}
+
+
+def test_raised_exceptions_supply_every_message_placeholder() -> None:
+    """A raise site must pass each ``{placeholder}`` its translation uses.
+
+    A missing placeholder would not fail in Python; Home Assistant would show
+    the message with the literal braces instead.
+    """
+    messages = {
+        key: _placeholders(text["message"])
+        for key, text in STRINGS["exceptions"].items()
+    }
+    helper_supplies = {"device_id", "reason"}  # coordinator.request_error()
+    checked: set[str] = set()
+    for module in INTEGRATION.glob("*.py"):
+        for node in ast.walk(ast.parse(module.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            keywords = {kw.arg: kw.value for kw in node.keywords}
+            name = getattr(node.func, "id", getattr(node.func, "attr", None))
+            if name == "request_error" and node.args:
+                first = node.args[0]
+                if isinstance(first, ast.Constant) and first.value in messages:
+                    assert messages[first.value] <= helper_supplies, first.value
+                    checked.add(first.value)
+                continue
+            key = keywords.get("translation_key")
+            if not (isinstance(key, ast.Constant) and key.value in messages):
+                continue
+            placeholders = keywords.get("translation_placeholders")
+            supplied = (
+                {k.value for k in placeholders.keys if isinstance(k, ast.Constant)}
+                if isinstance(placeholders, ast.Dict)
+                else set()
+            )
+            assert messages[key.value] <= supplied, (module.name, key.value)
+            checked.add(key.value)
+    # The test must reach the messages that actually use placeholders.
+    assert {"device_not_found", "invalid_configuration"} <= checked
+
+
 def test_config_flow_errors_and_aborts_are_translated() -> None:
     tree = ast.parse((INTEGRATION / "config_flow.py").read_text(encoding="utf-8"))
     errors: set[str] = set()

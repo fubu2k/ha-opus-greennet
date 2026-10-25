@@ -213,6 +213,7 @@ could offer:
 | Page | Contents |
 |------|----------|
 | [Devices](docs/devices.md) | Behaviour per device type, removing devices, actions |
+| [Examples and use cases](docs/examples.md) | Automations, actions and typical uses |
 | [How it works](docs/how-it-works.md) | Updates, availability, commands, all known limitations, REST API |
 | [Troubleshooting](docs/troubleshooting.md) | Diagnosis, diagnostics, debug logging, update lag |
 | [Upgrading](docs/upgrading.md) | From the MQTT versions and the community test versions |

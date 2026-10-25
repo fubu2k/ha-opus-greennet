@@ -19,9 +19,9 @@ Rule -> implementation -> tests -> documentation for every rule in
   official rule keys, the applicable official validators (`config-flow`,
   `runtime-data`, `strict-typing`, `test-before-setup`, `unique-config-entry`,
   `discovery`) and checks that this table matches the YAML.
-- Summary: 47 done, 5 exempt, 2 todo. All open items stay visible as `todo`.
-  Because bronze, silver and gold each contain open or exempt items that an
-  official review would have to accept, no tier is claimed.
+- Summary: 49 done, 5 exempt, 0 todo. Open items stay visible as `todo`.
+  Exempt rules are self-assessed and would need an official review to be
+  accepted, so no tier is claimed.
 
 `QS` = `tests/test_quality_scale.py`, `TR` = `tests/test_translations.py`.
 
@@ -74,12 +74,12 @@ Rule -> implementation -> tests -> documentation for every rule in
 | `discovery` | done | `manifest.json` `zeroconf` (`_enocean._tcp.local.`, `opusshgw*`); `config_flow.py` `async_step_zeroconf`; `discovery.py` search for entries of the former MQTT setup | `test_discovery.py`; QS `test_discovery_status_matches_the_code` | README Configuration, docs/upgrading.md |
 | `discovery-update-info` | done | `config_flow.py` `_async_adopt_address`: a configured gateway announced at another address is updated after its EURID is confirmed | `test_discovery.py::test_discovery_updates_a_changed_address`, `::test_discovery_completes_a_legacy_entry_and_ends_its_reauth` | README Configuration |
 | `docs-data-update` | done | – | QS `test_documentation_rules_point_to_existing_sections` | docs/how-it-works.md Updates and availability |
-| `docs-examples` | todo | – | – | – |
+| `docs-examples` | done | – | QS `test_documentation_rules_point_to_existing_sections` | docs/examples.md Examples |
 | `docs-known-limitations` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Known limitations, docs/how-it-works.md |
 | `docs-supported-devices` | done | `const.py` `EEP_MAPPINGS` | TR `test_every_created_entity_has_a_translated_name` (all EEPs) | README Supported devices |
 | `docs-supported-functions` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Features, Supported devices; docs/devices.md Actions |
 | `docs-troubleshooting` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Troubleshooting, docs/troubleshooting.md |
-| `docs-use-cases` | todo | – | – | – |
+| `docs-use-cases` | done | – | QS `test_documentation_rules_point_to_existing_sections` | docs/examples.md Use cases |
 | `dynamic-devices` | done | `SIGNAL_DEVICE_DISCOVERED` dispatcher listeners in every platform; new devices from stream resyncs, the periodic device list and late lookups | `test_coordinator_devices.py::test_device_list_creates_devices_and_dispatches_discovery`; `test_coordinator_stream.py::test_unknown_device_is_looked_up_once`, `::test_periodic_device_list_refresh_updates_metadata_only`; `test_entities.py::test_sensor_setup_adds_new_types_after_profile_discovery` | docs/devices.md Removing or replacing a device |
 | `entity-category` | done | `EntityCategory.DIAGNOSTIC` for signal strength and actuator status binary sensors | `test_binary_sensor_descriptions.py::test_description_inventory_matches_stable`; `test_entities.py::test_sensor_values_and_metadata` | – |
 | `entity-device-class` | done | Device classes on sensors, binary sensors and covers | `test_entities.py::test_sensor_values_and_metadata`, `::test_moisture_sensor_values_and_metadata`; `test_binary_sensor_descriptions.py` | – |
