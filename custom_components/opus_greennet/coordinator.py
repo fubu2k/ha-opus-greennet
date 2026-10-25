@@ -104,6 +104,7 @@ class CommandDelivery(StrEnum):
 
 SIGNAL_DEVICE_STATE_UPDATE = f"{DOMAIN}_device_state_update"
 SIGNAL_AVAILABILITY_UPDATE = f"{DOMAIN}_availability_update"
+SIGNAL_GATEWAY_UPTIME_UPDATE = f"{DOMAIN}_gateway_uptime_update"
 
 GATEWAY_HEALTH_INTERVAL = timedelta(seconds=60)
 # The stream reports live changes; the periodic device list additionally
@@ -631,6 +632,9 @@ class OpusGreenNetCoordinator:
             return
         previous = self.gateway_uptime
         self.gateway_uptime = uptime
+        async_dispatcher_send(
+            self.hass, f"{SIGNAL_GATEWAY_UPTIME_UPDATE}_{self.eag_id}"
+        )
         if previous is not None and float(uptime) < float(previous):
             _LOGGER.info("OPUS gateway %s restarted; reopening its stream", self.eag_id)
             # A firmware update may have happened: offer line framing again.
