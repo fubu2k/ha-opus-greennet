@@ -207,6 +207,14 @@
       "buttons": {
         "name": "Buttons"
       }
+    },
+    "number": {
+      "vertical_movement_time": {
+        "name": "Vertical movement time"
+      },
+      "rotation_time": {
+        "name": "Rotation time"
+      }
     }
   },
   "exceptions": {
@@ -251,6 +259,9 @@
     },
     "repositioning_not_supported": {
       "message": "Device {device_id} is not a blind with this channel and positioning mode."
+    },
+    "parameter_not_confirmed": {
+      "message": "{device_id} did not confirm the new value of {reason}. Home Assistant kept the previous value; read the device configuration before trying again."
     }
   },
   "services": {

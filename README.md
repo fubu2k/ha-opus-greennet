@@ -170,7 +170,7 @@ All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 | Status | Topic |
 |--------|-------|
 | ✅ Released | 1.0 with the REST API instead of MQTT |
-| 📋 Planned | Device settings as Home Assistant entities |
+| 🚧 In progress | Device settings as Home Assistant entities (blind travel and rotation times released as numbers; more settings planned) |
 | 🔍 Investigating | Adding and removing devices from Home Assistant |
 | 💡 Idea | HTTPS if the gateway offers it |
 
@@ -178,15 +178,16 @@ All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 
 The OPUS app configures every actuator and the gateway. The gateway already
 reports the current values, and the integration can read and write them with
-the ReCom actions. The plan is to offer them as configuration entities
-(select, number, switch) on each device, so they can be changed in the UI and
-in automations:
+the ReCom actions. The travel and rotation times of blinds are already offered
+as number entities (disabled by default). The plan is to offer the other
+settings as configuration entities (select, number, switch) on each device in
+the same way, so they can be changed in the UI and in automations:
 
 | Device | Settings |
 |--------|----------|
 | Switch actuators (D2-01-00/-01, 2-channel D2-01-11) | Operation mode of the wall rocker (e.g. toggle or timer), timer duration for short and long press, switch-off warning and its signal duration, illumination threshold for linked light sensors, function of rocker A and B and of the external input (channel assignment), LED colour and LED channel, ViNET routing time |
 | Dimmers (D2-01-03) | Ramping time on/off, short-press and long-press time |
-| Blinds (D2-05-02) | Maximum holding time, vertical movement and rotation time, function of rocker A and B, ViNET routing time |
+| Blinds (D2-05-02) | Maximum holding time, function of rocker A and B, ViNET routing time (vertical movement and rotation time are available as numbers) |
 | All actuators | Repeater mode; linked wall switches and their role (link tables, e.g. central on/off or up/down) |
 | Gateway | Firmware, app and API version; services such as HomeKit, Alexa, MQTT, InfluxDB, scheduler and heating zones; received telegrams and average signal strength |
 

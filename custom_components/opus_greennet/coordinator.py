@@ -1879,6 +1879,32 @@ class OpusGreenNetCoordinator:
             priority=PRIORITY_QUERY,
         )
 
+    async def async_set_device_parameter(
+        self, device_id: str, key: str, value: float
+    ) -> None:
+        """Write one numeric parameter and show it only once the device confirms.
+
+        The acknowledgement only means that the gateway accepted the request.
+        The stored value is therefore read back, and Home Assistant adopts it
+        only when it matches. Neither the write nor the read-back is repeated
+        automatically; an unclear outcome is reported to the caller.
+        """
+        device = self.get_device(device_id)
+        if device is None:
+            raise request_error("device_not_found", device_id)
+        value = round(value, 2)
+        await self.async_set_device_configuration(
+            device_id,
+            {"configuration": {"parameters": [{"key": key, "value": value}]}},
+        )
+        stored = protocol.configuration_parameter(
+            await self.async_get_device_configuration(device_id), key
+        )
+        if stored is None or abs(stored - value) > 0.005:
+            raise request_error("parameter_not_confirmed", device_id, key)
+        device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
+        self._dispatch_state(device)
+
     async def async_get_device_parameters(self, device_id: str) -> JsonObject:
         """Read the configurable parameters a device supports."""
         path = OpusGatewayClient.device_path(device_id, "parameters")

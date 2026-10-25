@@ -26,6 +26,7 @@ custom_components/opus_greennet/
 ├── sensor.py, binary_sensor.py, binary_sensor_descriptions.py
 ├── event.py              # Rocker switches and actuator buttons
 ├── button.py             # Reference-run buttons for D2-05 blinds
+├── number.py             # Travel and rotation time settings of D2-05 blinds
 ├── services.yaml         # Action definitions
 ├── strings.json          # Translation source
 └── translations/         # en, de

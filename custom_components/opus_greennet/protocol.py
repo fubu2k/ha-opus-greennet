@@ -220,6 +220,24 @@ def last_vertical_movement_times(data: WireMapping) -> dict[int, float]:
     return durations
 
 
+def configuration_parameter(document: WireMapping, key: str) -> float | None:
+    """Return one numeric parameter of a ``configuration`` document.
+
+    ``document`` is the answer to ``GET /devices/{id}/configuration``. A missing,
+    malformed or negative value yields None, so a read-back never confirms
+    something the device did not report.
+    """
+    configuration = as_object(document.get("configuration"))
+    parameters = None if configuration is None else configuration.get("parameters")
+    if not isinstance(parameters, list):
+        return None
+    for parameter in parameters:
+        if isinstance(parameter, dict) and parameter.get("key") == key:
+            value = EnOceanDevice._parse_number(parameter.get("value"), minimum=0)
+            return None if value is None else float(value)
+    return None
+
+
 def device_state_functions(data: WireMapping) -> list[WireFunction]:
     """Read the state functions of one device object.
 
