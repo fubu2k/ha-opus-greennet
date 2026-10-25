@@ -42,8 +42,17 @@ from .const import (
     REPOSITIONING_FIRST_UP,
 )
 from .coordinator import GatewayMismatchError, OpusGreenNetCoordinator
-from .discovery import async_locate_gateway, default_connection
-from .entity import async_delete_config_entry_issues
+from .discovery import (
+    async_locate_gateway,
+    default_connection,
+    is_local_address,
+    parse_host_literal,
+)
+from .entity import (
+    async_delete_config_entry_issues,
+    async_set_non_local_address_issue,
+)
+from .wire import json_body_problem
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,11 +68,14 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.EVENT,
     Platform.LOCK,
+    Platform.NUMBER,
+    Platform.SELECT,
 ]
 
 SERVICE_GET_DEVICE_CONFIG = "get_device_configuration"
 SERVICE_SET_DEVICE_CONFIG = "set_device_configuration"
 SERVICE_GET_DEVICE_PARAMS = "get_device_parameters"
+SERVICE_GET_DEVICE_LINK_TABLES = "get_device_link_tables"
 SERVICE_RELOAD_ENTRY = "reload_entry"
 SERVICE_SET_COVER_POSITION = "set_cover_position"
 ATTR_DEVICE_ID = "device_id"
@@ -222,6 +234,16 @@ async def async_setup_entry(
         raise ConfigEntryAuthFailed(
             translation_domain=DOMAIN, translation_key="gateway_address_required"
         )
+    configured = parse_host_literal(entry.data[CONF_HOST])
+    non_local = configured is not None and not is_local_address(configured)
+    async_set_non_local_address_issue(hass, entry.entry_id, non_local=non_local)
+    if non_local:
+        # Existing entries keep working. The gateway speaks unencrypted HTTP,
+        # so credentials sent to a non-local address can be read on the way.
+        _LOGGER.warning(
+            "The configured OPUS gateway address is not in a local network; "
+            "the gateway has no TLS. Use a VPN or a private address instead"
+        )
     client = OpusGatewayClient(
         async_get_clientsession(hass),
         entry.data[CONF_HOST],
@@ -349,15 +371,28 @@ def _register_services(hass: HomeAssistant) -> None:
         coordinator = _coordinator_for_call(hass, call)
         device_id = call.data[ATTR_DEVICE_ID]
         _validate_service_device(coordinator, device_id)
-        await coordinator.async_set_device_configuration(
-            device_id, call.data[ATTR_CONFIGURATION]
-        )
+        configuration = call.data[ATTR_CONFIGURATION]
+        # Radio write: refuse a body that cannot be encoded as JSON before it
+        # is queued or sent.
+        if (problem := json_body_problem(configuration)) is not None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_configuration",
+                translation_placeholders={"device_id": device_id, "reason": problem},
+            )
+        await coordinator.async_set_device_configuration(device_id, configuration)
 
     async def handle_get_device_parameters(call: ServiceCall) -> ServiceResponse:
         coordinator = _coordinator_for_call(hass, call)
         device_id = call.data[ATTR_DEVICE_ID]
         _validate_service_device(coordinator, device_id)
         return await coordinator.async_get_device_parameters(device_id)
+
+    async def handle_get_device_link_tables(call: ServiceCall) -> ServiceResponse:
+        coordinator = _coordinator_for_call(hass, call)
+        device_id = call.data[ATTR_DEVICE_ID]
+        _validate_service_device(coordinator, device_id)
+        return await coordinator.async_get_device_link_tables(device_id)
 
     async def handle_set_cover_position(call: ServiceCall) -> None:
         coordinator = _coordinator_for_call(hass, call)
@@ -420,6 +455,14 @@ def _register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_GET_DEVICE_PARAMS,
         handle_get_device_parameters,
+        schema=SERVICE_DEVICE_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    async_register_admin_service(
+        hass,
+        DOMAIN,
+        SERVICE_GET_DEVICE_LINK_TABLES,
+        handle_get_device_link_tables,
         schema=SERVICE_DEVICE_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )

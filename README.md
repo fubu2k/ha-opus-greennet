@@ -60,6 +60,12 @@ Works with both OPUS gateways, the black **OPUS greenNet gateway** and the newer
 | Rocker switches | F6-02-01, -02, -03; F6-03-01, -02 | Button events |
 
 Signal strength and battery level are available where the gateway reports them.
+Every device also has a diagnostic **Last seen** time (enabled by default; an entity disabled earlier stays disabled).
+
+The gateway's own device shows its **Uptime** as a diagnostic sensor in days,
+hours, minutes and seconds (for example `1 d 2 h 3 min 4 s`, plus the seconds as
+attribute `uptime_seconds`). It is read by the health probe once a minute and
+updated after each reading; it is not extrapolated in between.
 Details per device type: [docs/devices.md](docs/devices.md).
 
 ## Compatibility
@@ -111,7 +117,7 @@ you only enter the password. To add it by hand, use
 
 | Field | Description |
 |-------|-------------|
-| **Host** | IP address or host name of the gateway |
+| **Host** | IP address or host name of the gateway. It must be in the local network (see below) |
 | **Port** | Port of the REST API, `8080` by default |
 | **Username** | API user, `admin` by default |
 | **Password** | API password, by default the gateway's EURID in capital letters (printed on the gateway; fictional example: `A1B2C3D4`) |
@@ -119,6 +125,14 @@ you only enter the password. To add it by hand, use
 The gateway's EURID becomes the stable identifier of the entry, its devices and
 entities. If the gateway gets a new IP address, discovery updates the entry
 automatically. To change the credentials, use **Reconfigure** on the entry.
+
+**Local addresses only:** the gateway speaks unencrypted HTTP, so Home Assistant
+sends its credentials only to private addresses (`10/8`, `172.16/12`,
+`192.168/16`), link-local (`169.254/16`, `fe80::/10`), unique local
+(`fc00::/7`), loopback and carrier-grade NAT (`100.64/10`, used by VPN meshes).
+A host name must resolve only to such addresses. For remote access use a VPN,
+not a port forward. Entries that already use a public address keep working and
+log a warning at setup.
 
 **Upgrading from an MQTT version (0.x):** nothing to enter in most cases. At the
 first start the integration finds the gateway in the local network and
@@ -145,10 +159,12 @@ diagnostics** on the integration entry). More in
   follows from the device's report or a status check.
 - Cover positions during movement are estimated from the configured travel
   time.
-- The gateway API is plain HTTP with basic authentication. Keep the gateway in
-  a trusted network.
-- Devices cannot be added to or removed from the gateway yet, and device
-  settings are only available as actions (see [Roadmap](#roadmap)).
+- The gateway API is plain HTTP with basic authentication (the gateway has no
+  TLS). Keep the gateway in a trusted network; new or changed addresses must be
+  local.
+- Devices cannot be added to or removed from the gateway yet, and some device
+  settings (the function of rocker A and B, the routing time, the repeater
+  mode) are not offered yet (see [Roadmap](#roadmap)).
 
 All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 
@@ -157,7 +173,7 @@ All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 | Status | Topic |
 |--------|-------|
 | ✅ Released | 1.0 with the REST API instead of MQTT |
-| 📋 Planned | Device settings as Home Assistant entities |
+| 🚧 In progress | Device settings as Home Assistant entities. Available: blind times, dimmer times and switch timers as numbers, switch operation mode, LED and external input as selects, link tables read-only. Still open: function of rocker A and B, routing time, repeater mode and gateway diagnostics (see below) |
 | 🔍 Investigating | Adding and removing devices from Home Assistant |
 | 💡 Idea | HTTPS if the gateway offers it |
 
@@ -165,20 +181,42 @@ All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 
 The OPUS app configures every actuator and the gateway. The gateway already
 reports the current values, and the integration can read and write them with
-the ReCom actions. The plan is to offer them as configuration entities
-(select, number, switch) on each device, so they can be changed in the UI and
-in automations:
+the ReCom actions. The travel and rotation times and the maximum holding time
+of blinds, the ramping, short-press and long-press time of D2-01-03 dimmers and
+the timer durations, switch-off warning, its signal duration and the
+illumination threshold of D2-01-01/-11 switches are already offered as number
+entities, and the operation mode, LED colour, LED channel and external input
+function of these switches as select entities (all disabled by default). What
+is still open is offered the same way once it is safe to write:
 
 | Device | Settings |
 |--------|----------|
-| Switch actuators (D2-01-00/-01, 2-channel D2-01-11) | Operation mode of the wall rocker (e.g. toggle or timer), timer duration for short and long press, switch-off warning and its signal duration, illumination threshold for linked light sensors, function of rocker A and B and of the external input (channel assignment), LED colour and LED channel, ViNET routing time |
-| Dimmers (D2-01-03) | Ramping time on/off, short-press and long-press time |
-| Blinds (D2-05-02) | Maximum holding time, vertical movement and rotation time, function of rocker A and B, ViNET routing time |
-| All actuators | Repeater mode; linked wall switches and their role (link tables, e.g. central on/off or up/down) |
+| Switch actuators (D2-01-00/-01, 2-channel D2-01-11) | Function of rocker A and B (channel assignment), ViNET routing time (timer durations, switch-off warning, its signal duration and illumination threshold are available as numbers; operation mode, LED colour, LED channel and external input function as selects) |
+| Blinds (D2-05-02) | Function of rocker A and B, ViNET routing time (vertical movement time, rotation time and maximum holding time are available as numbers) |
+| All actuators | Repeater mode. Link tables (linked wall switches and their role, e.g. central on/off or up/down) can already be read with the `get_device_link_tables` action, and a diagnostic *Wall switch links* sensor and the diagnostics download show them without a radio request; writing them is not planned |
 | Gateway | Firmware, app and API version; services such as HomeKit, Alexa, MQTT, InfluxDB, scheduler and heating zones; received telegrams and average signal strength |
 
 Settings are written over the radio, so a change can take several seconds and
 needs the actuator to answer.
+
+#### What was verified on hardware
+
+"Written on hardware" means the value was changed on a real device, read back
+from it and restored, with the other parameters unchanged (gateway firmware
+1.21.30, one device each). Everything else is **read from the gateway but never
+written by the integration on hardware so far**: try a single device first.
+
+| Setting | Entity | Written on hardware |
+|---------|--------|---------------------|
+| Blind: vertical movement time | Number | ✅ one blind |
+| Blind: maximum holding time | Number | ✅ one blind |
+| Blind: rotation time | Number | not tested |
+| Dimmer D2-01-03: ramping, short-press and long-press time | Number | not tested |
+| Switch D2-01-01/-11: timers, switch-off warning and signal, illumination threshold | Number | not tested |
+| Switch: LED colour | Select | ✅ one D2-01-01 (text value) |
+| Switch: operation mode, LED channel, external input function | Select | not tested |
+| Link tables (wall switch links) | Action, sensor, diagnostics | read only, read on hardware |
+
 
 ### Adding and removing devices
 
@@ -200,6 +238,7 @@ could offer:
 | Page | Contents |
 |------|----------|
 | [Devices](docs/devices.md) | Behaviour per device type, removing devices, actions |
+| [Examples and use cases](docs/examples.md) | Automations, actions and typical uses |
 | [How it works](docs/how-it-works.md) | Updates, availability, commands, all known limitations, REST API |
 | [Troubleshooting](docs/troubleshooting.md) | Diagnosis, diagnostics, debug logging, update lag |
 | [Upgrading](docs/upgrading.md) | From the MQTT versions and the community test versions |

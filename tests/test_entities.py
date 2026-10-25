@@ -358,7 +358,7 @@ def test_sensor_values_and_metadata() -> None:
     assert power.native_unit_of_measurement is UnitOfPower.KILO_WATT
     assert power.unique_id.endswith("_energy_consumption")
     assert signal.native_value == 0
-    assert signal.entity_registry_enabled_default is False
+    assert signal.entity_registry_enabled_default is True
 
 
 def test_binary_sensor_values() -> None:
@@ -464,7 +464,7 @@ def test_keeps_single_channel_registry_entity() -> None:
         (async_setup_switches, "D2-01-11", 2),
         (async_setup_covers, "D2-05-00", 1),
         (async_setup_climate, "D1-4B-06", 1),
-        (async_setup_sensors, "D1-4B-07", 3),
+        (async_setup_sensors, "D1-4B-07", 4),
         (async_setup_binary_sensors, "D1-4B-05", 5),
         (async_setup_binary_sensors, "F6-05-01", 1),
         (async_setup_events, "F6-02-01", 1),
@@ -507,10 +507,16 @@ async def test_sensor_setup_deduplicates_discovery_entities() -> None:
     discovery_callback = connect.call_args.args[2]
     discovery_callback(device)
 
-    async_add_entities.assert_called_once()
-    initial_entities = async_add_entities.call_args.args[0]
+    # The gateway's own sensor comes first, then the device entities once.
+    assert async_add_entities.call_count == 2
+    gateway_entities = async_add_entities.call_args_list[0].args[0]
+    assert [entity.unique_id for entity in gateway_entities] == [
+        f"{EAG_ID}_gateway_uptime"
+    ]
+    initial_entities = async_add_entities.call_args_list[1].args[0]
     assert [entity.unique_id for entity in initial_entities] == [
-        f"{EAG_ID}_DEV1_signal_strength"
+        f"{EAG_ID}_DEV1_signal_strength",
+        f"{EAG_ID}_DEV1_last_seen",
     ]
 
 
@@ -531,8 +537,9 @@ async def test_sensor_setup_adds_new_types_after_profile_discovery() -> None:
     discovery_callback = connect.call_args.args[2]
     discovery_callback(_device("D1-4B-05"))
 
-    assert async_add_entities.call_count == 2
-    discovered_entities = async_add_entities.call_args_list[1].args[0]
+    # Gateway sensor, the incomplete device (nothing yet), then the discovery.
+    assert async_add_entities.call_count == 3
+    discovered_entities = async_add_entities.call_args_list[2].args[0]
     assert {entity.unique_id for entity in discovered_entities} == {
         f"{EAG_ID}_DEV1_humidity",
         f"{EAG_ID}_DEV1_feed_temperature",

@@ -55,6 +55,7 @@ from .api import (
 from .const import (
     COVER_MOVEMENT_GRACE_SECONDS,
     COVER_RECONCILIATION_DELAYS,
+    DEFAULT_PARAMETER_DECIMALS,
     DOMAIN,
     KEY_ANGLE,
     KEY_CHANNEL,
@@ -68,6 +69,7 @@ from .const import (
     KEY_STOP,
     KEY_UNLOCK,
     KEY_VERTICAL_MOVEMENT_TIME,
+    PARAMETER_DECIMALS,
     RAMPING_MODE_FADE,
     RAMPING_MODE_SWITCH,
     REPOSITIONING_FIRST_DOWN,
@@ -104,6 +106,7 @@ class CommandDelivery(StrEnum):
 
 SIGNAL_DEVICE_STATE_UPDATE = f"{DOMAIN}_device_state_update"
 SIGNAL_AVAILABILITY_UPDATE = f"{DOMAIN}_availability_update"
+SIGNAL_GATEWAY_UPTIME_UPDATE = f"{DOMAIN}_gateway_uptime_update"
 
 GATEWAY_HEALTH_INTERVAL = timedelta(seconds=60)
 # The stream reports live changes; the periodic device list additionally
@@ -278,6 +281,10 @@ class OpusGreenNetCoordinator:
         # hold documents it parsed before its cancellation takes effect; it
         # drops them instead of applying stale state (phase R4).
         self._stream_generation = 0
+        # Opened stream requests and streams that delivered a document since
+        # this coordinator was created (diagnostics only; a reload resets them).
+        self.stream_attempts = 0
+        self.stream_connects = 0
         # Resolved by the stream with its first device list during setup, or
         # failed with the error of the first stream attempt (phase R5).
         self._first_device_list: asyncio.Future[None] | None = None
@@ -493,6 +500,22 @@ class OpusGreenNetCoordinator:
         self._stream_connected = False
         self._start_stream()
 
+    def stream_diagnostics(self) -> dict[str, object]:
+        """Return cached stream facts for diagnostics.
+
+        Reads counters only: no request, no new stream and no radio telegram.
+        ``reconnects`` counts streams after the first one that delivered a
+        document; attempts that failed before any document are in ``attempts``.
+        """
+        return {
+            "connected": self._stream_connected,
+            "framing_requested": self.client.stream_framing,
+            "attempts": self.stream_attempts,
+            "connects": self.stream_connects,
+            "reconnects": max(self.stream_connects - 1, 0),
+            "radio_queue_depth": self._radio_queue.queue_depth,
+        }
+
     def _is_current_stream(self, generation: int) -> bool:
         """Return whether ``generation`` is the reader that may apply state."""
         return not self._unloaded and generation == self._stream_generation
@@ -509,6 +532,7 @@ class OpusGreenNetCoordinator:
         failures = 0
         while self._is_current_stream(generation):
             connected_at: float | None = None
+            self.stream_attempts += 1
             try:
                 # ``aclosing`` releases the HTTP response as soon as a replaced
                 # reader leaves the loop, not only when the generator is
@@ -520,6 +544,7 @@ class OpusGreenNetCoordinator:
                         if connected_at is None:
                             connected_at = monotonic()
                             self._stream_connected = True
+                            self.stream_connects += 1
                             _LOGGER.debug(
                                 "OPUS event stream connected for %s", self.eag_id
                             )
@@ -631,8 +656,13 @@ class OpusGreenNetCoordinator:
             return
         previous = self.gateway_uptime
         self.gateway_uptime = uptime
+        async_dispatcher_send(
+            self.hass, f"{SIGNAL_GATEWAY_UPTIME_UPDATE}_{self.eag_id}"
+        )
         if previous is not None and float(uptime) < float(previous):
             _LOGGER.info("OPUS gateway %s restarted; reopening its stream", self.eag_id)
+            # A firmware update may have happened: offer line framing again.
+            self.client.reset_stream_framing()
             self._restart_stream()
         elif self._stream_connected and not self._gateway_available:
             self._set_gateway_available(True)
@@ -749,6 +779,7 @@ class OpusGreenNetCoordinator:
             first_seen=protocol.metadata_text(data.get("firstSeen")),
             last_seen=protocol.metadata_text(data.get("lastSeen")),
             dbm=EnOceanDevice._parse_integer(data.get("dbm")),
+            link_tables=protocol.link_tables(data),
         )
         was_known = existing is not None and bool(existing.eeps)
         if existing is None:
@@ -1873,6 +1904,59 @@ class OpusGreenNetCoordinator:
             priority=PRIORITY_QUERY,
         )
 
+    async def async_set_device_parameter(
+        self, device_id: str, key: str, value: float
+    ) -> None:
+        """Write one numeric parameter and show it only once the device confirms.
+
+        The acknowledgement only means that the gateway accepted the request.
+        The stored value is therefore read back, and Home Assistant adopts it
+        only when it matches. Neither the write nor the read-back is repeated
+        automatically; an unclear outcome is reported to the caller.
+        """
+        device = self.get_device(device_id)
+        if device is None:
+            raise request_error("device_not_found", device_id)
+        # The step of the parameter decides how many decimals the device keeps.
+        decimals = PARAMETER_DECIMALS.get(key, DEFAULT_PARAMETER_DECIMALS)
+        value = round(value, decimals)
+        await self.async_set_device_configuration(
+            device_id,
+            {"configuration": {"parameters": [{"key": key, "value": value}]}},
+        )
+        stored = protocol.configuration_parameter(
+            await self.async_get_device_configuration(device_id), key
+        )
+        if stored is None or abs(stored - value) > 0.5 * 10**-decimals:
+            raise request_error("parameter_not_confirmed", device_id, key)
+        device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
+        self._dispatch_state(device)
+
+    async def async_set_device_option(
+        self, device_id: str, key: str, option: str
+    ) -> None:
+        """Write one text setting and show it only once the device confirms.
+
+        Same contract as ``async_set_device_parameter``: the acknowledgement
+        only means that the gateway accepted the request, the stored value is
+        read back and adopted only when it equals the written one, and neither
+        request is repeated automatically.
+        """
+        device = self.get_device(device_id)
+        if device is None:
+            raise request_error("device_not_found", device_id)
+        await self.async_set_device_configuration(
+            device_id,
+            {"configuration": {"parameters": [{"key": key, "value": option}]}},
+        )
+        stored = protocol.configuration_option(
+            await self.async_get_device_configuration(device_id), key
+        )
+        if stored != option:
+            raise request_error("parameter_not_confirmed", device_id, key)
+        device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
+        self._dispatch_state(device)
+
     async def async_get_device_parameters(self, device_id: str) -> JsonObject:
         """Read the configurable parameters a device supports."""
         path = OpusGatewayClient.device_path(device_id, "parameters")
@@ -1881,6 +1965,23 @@ class OpusGreenNetCoordinator:
             lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
             priority=PRIORITY_QUERY,
         )
+
+    async def async_get_device_link_tables(self, device_id: str) -> JsonObject:
+        """Read the link tables stored on a device (read only).
+
+        The wall switches a device listens to and the devices it reports to.
+        The gateway's own EURID is masked in the answer. There is deliberately
+        no write counterpart.
+        """
+        path = OpusGatewayClient.device_path(device_id, "linkTables")
+        document = await self._async_radio_request(
+            device_id,
+            lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
+            priority=PRIORITY_QUERY,
+        )
+        masked = protocol.mask_gateway_id(document, self.eag_id)
+        # mask_gateway_id keeps the type of a JSON object.
+        return masked if isinstance(masked, dict) else document
 
 
 def _is_device_list(document: JsonObject) -> bool:

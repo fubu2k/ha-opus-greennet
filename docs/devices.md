@@ -3,6 +3,7 @@
 How each device type appears in Home Assistant. For the list of supported
 profiles see [Supported devices](../README.md#supported-devices).
 
+- [Settings entities by device type](#settings-entities-by-device-type)
 - [Switches and dimmers (D2-01)](#switches-and-dimmers-d2-01)
 - [Buttons and rocker switches](#buttons-and-rocker-switches)
 - [Blinds and shutters (D2-05)](#blinds-and-shutters-d2-05)
@@ -13,6 +14,28 @@ profiles see [Supported devices](../README.md#supported-devices).
 - [Sensor values](#sensor-values)
 - [Removing or replacing a device](#removing-or-replacing-a-device)
 - [Actions](#actions)
+
+## Settings entities by device type
+
+The settings stored on actuators, as far as the gateway's parameter catalog
+(read from one device per type) lists them. All are configuration entities and
+**disabled by default**; the details are in the sections below.
+
+| Device | Number entities | Select entities | Not offered |
+|--------|-----------------|-----------------|-------------|
+| Blinds (D2-05-02) | Vertical movement time, Rotation time, Maximum holding time | – | Function of rocker A and B, routing time |
+| Dimmers (D2-01-03) | Ramping time, Short-press time, Long-press time | – | – |
+| Switches (D2-01-01) | Timer duration, Timer duration (long press), Switch-off warning, Switch-off warning signal, Illumination threshold | Operation mode, LED colour, External input function | Function of rocker A and B, routing time |
+| 2-channel switches (D2-01-11) | as D2-01-01 | as D2-01-01, plus LED channel | as D2-01-01 |
+
+Which of these settings were written on real hardware, and which only read, is
+listed in the [README](../README.md#what-was-verified-on-hardware).
+
+Every actuator whose device list contains a link table also has the diagnostic
+sensor *Wall switch links* (see [Sensor values](#sensor-values)). The
+functions of rocker A and B and the routing time are left out until a text
+write has been tested on hardware; a test in the repository fails when a
+catalog parameter has neither an entity nor an entry in that list of omissions.
 
 ## Switches and dimmers (D2-01)
 
@@ -38,6 +61,58 @@ outputs; update dashboards and automations that used them.
 Apple Home. An action with a `transition` (any duration) uses the dimmer's own
 configured fade instead; the requested duration itself cannot be passed to the
 device.
+
+**Dimmer times.** D2-01-03 dimmers get three number entities for the times
+stored on the dimmer, in seconds: *Ramping time* (the fade of switching on and
+off, 0 to 25.5, step 0.1), *Short-press time* and *Long-press time* (0 to 2.55,
+step 0.01). They are **disabled by default** and are configuration entities.
+The values come from the device configuration that the gateway reads itself
+(setup and every device list refresh, no extra radio telegram), so a change
+made by another controller shows up with the next refresh and a value can be
+up to a day old. A new value is written with the ReCom configuration request
+and adopted only after it was read back from the dimmer; if the dimmer does not
+confirm it, the previous value stays and nothing is repeated automatically.
+Writing these three times was **not tested on hardware** (only the vertical
+movement time and the maximum holding time of blinds were), so try a single
+dimmer first. The ranges are those of the parameter catalog read from one
+D2-01-03; other dimmer types get no such entities.
+
+**Switch settings.** D2-01-01 and D2-01-11 switches get five number entities
+for the settings stored on the switch: *Timer duration* (60 to 7200 s) and
+*Timer duration (long press)* (60 to 18000 s), which only act when the
+operation mode of the switch is *timer* (the second one when it was switched
+on by a long press), *Switch-off warning* (0 to 45 s, how long a warning is
+shown before the switch-off), *Switch-off warning signal* (0.2 to 2 s, step
+0.001, the duration of that warning signal) and *Illumination threshold* (0 to
+1500 lx, for linked light sensors). All steps are 1 except the warning signal.
+The settings belong to the whole device: a 2-channel switch has one set, not
+one per channel. They behave like the dimmer times above (configuration
+entities, **disabled by default**, values from the device configuration, a new
+value is adopted only after it was read back, nothing is repeated
+automatically). The warning signal is rounded to three decimals, all other
+values written by the integration to two. Writing these settings was **not
+tested on hardware**, so try a single switch first. The ranges are those of the
+parameter catalog read from one D2-01-01 and one D2-01-11; other switch types
+get no such entities.
+
+**Switch selects.** D2-01-01 and D2-01-11 switches also get select entities for
+the settings that have a fixed set of values: *Operation mode* (bottom on,
+timer, toggle, top on; the timer durations above only act in *timer*), *LED
+colour* (all, green, off, red), *LED channel* (2-channel switches only: which
+channel the LED shows) and *External input function* (channel 1 and inactive,
+for a 2-channel switch also channel 2 and channels 1 + 2). The same rules apply
+as for the numbers: configuration entities, **disabled by default**, one set
+per device, values from the device configuration, a new value is written with
+the ReCom configuration request (`{"key": ..., "value": "<value>"}`) and
+adopted only after it was read back, nothing is repeated automatically. A value
+the gateway reports that is not in the list shows as *unknown* and is never
+changed by the integration. Writing a text setting is **verified on hardware
+for the LED colour of one D2-01-01 switch** (changed, read back and restored
+with gateway firmware 1.21.30); the other selects
+were **not tested on hardware**, so try a single switch first.
+The function of the rocker buttons A and B is not offered: a switch reports a
+value there that its own catalog does not list, and a wrong choice would change
+which button switches which channel.
 
 **Local control.** D2-01 actuators that report local control get a diagnostic
 *Local control* binary sensor, disabled by default.
@@ -94,6 +169,7 @@ and, where supported, tilt. It does not assume a new position.
 | **Blockage** switch | For automations such as wind protection or an open door. On sends `lockingMode = block`, off sends `unblock`. A D2-05-00 `alarm` counts as blocked; the reported mode is the `locking_mode` attribute. **Disabled by default** because it stops the blind. |
 | **Reference run via top / bottom** buttons | Drive the blind to an end position first (`repositioning = firstUp` / `firstDown`) and then back to its last known position. This recalibrates the blind's position tracking. |
 | **Last run time** sensor (every blind) | Seconds from a position command (from HA, another controller or a reference run) to the blind's report at the target. Attributes: `direction` (`up`, `down`, `reference_up`, `reference_down`), start and end position (100 = open) and `full_travel`, the value to compare with the configured `verticalMovementTime`. Runs ended by Stop, without an end report or only confirmed by a status query record no time. The last value is kept across Home Assistant restarts. |
+| **Vertical movement time**, **Rotation time** and **Maximum holding time** numbers | The travel time and slat rotation time stored on the blind, in seconds (0 to 655.35, step 0.01), and the maximum holding time (D2-05-02 only, 0 to 65535 seconds, step 1; the longest time a run may take). The first two are used for the estimated movement; the maximum holding time is only shown and written, it changes nothing in Home Assistant. A value smaller than the vertical movement time may end a run early; this was not tested. A new value is written to the blind with the ReCom configuration request and adopted only after it was read back from the blind; if the blind does not confirm it, the previous value stays and nothing is repeated automatically. Values changed by other controllers show up with the next device list refresh. **Disabled by default.** The write (`{"configuration": {"parameters": [{"key": ..., "value": ...}]}}`) was verified for the vertical movement time and the maximum holding time on one blind each (firmware 1.21.30): the gateway answered 200, the changed value was read back and the other parameters stayed unchanged. The rotation time was not tested on hardware, so try a single blind first. |
 
 Movement and rotation times always come from the device list (seconds). The
 milliseconds of a D2-05-00 "Set parameters" command sent by another controller
@@ -165,8 +241,27 @@ battery percentage is invented when the gateway publishes none.
 - Battery percentages accept an optional `%` suffix (the gateway reports for
   example `96%`) and must be within 0–100.
 - Battery level and signal strength come from the device list and are
-  refreshed every 30 minutes; the signal strength sensor is disabled by
-  default.
+  refreshed every 30 minutes; the signal strength sensor is enabled by
+  default for new installations (an entity that was disabled before stays
+  disabled until you enable it).
+- Every device also has a diagnostic **Last seen** sensor (enabled by
+  default for new installations; an entity that was disabled before stays
+  disabled until you enable it): the time of its newest report, from the telegram timestamp or the
+  gateway's device list. It is a point in time, not a health verdict; a
+  value without a UTC offset or in an unknown format stays unknown. Devices
+  that only send on a change (for example leak sensors) can legitimately stay
+  unchanged for a long time.
+- Actuators whose device list contains a link table also have a diagnostic
+  **Wall switch links** sensor (disabled by default): the number of wall
+  switches the actuator listens to. The sensor appears as soon as the gateway
+  lists a table for the device, also when that happens after the device was
+  discovered. The table is read from the device list
+  every 30 minutes without a radio request and reflects what the gateway has
+  stored (it reads the tables from the devices itself, typically at night). A
+  table without inbound entries is shown as 0; if the gateway lists no table,
+  the value stays unknown instead of 0. The downloaded diagnostics list the
+  same table per device (device addresses redacted); the integration never
+  writes link tables.
 - Climate activity uses actuator feedback where available; enabling a heating
   zone does not by itself mean it is heating.
 
@@ -195,8 +290,9 @@ device (fictional example: `AABB1122`). Select a gateway with
 |--------|------------|-------------|
 | `opus_greennet.set_cover_position` | `device_id`, `position` (100 = open), optional `repositioning` (`direct`, `first_up`, `first_down`), `channel`, `config_entry_id` | Move a D2-05 blind, optionally after a reference run |
 | `opus_greennet.get_device_configuration` | `device_id` | Admin only. Read the configuration stored on a device (ReCom) |
-| `opus_greennet.set_device_configuration` | `device_id`, `configuration` | Admin only. Write configuration to a device (ReCom) |
+| `opus_greennet.set_device_configuration` | `device_id`, `configuration` | Admin only. Write configuration to a device (ReCom). The integration checks only that the object can be sent as JSON (string keys, finite numbers, at most 16 levels and 64 KiB) and refuses anything else before a request is queued; the content is not interpreted |
 | `opus_greennet.get_device_parameters` | `device_id` | Admin only. Read the parameters a device supports (ReCom) |
+| `opus_greennet.get_device_link_tables` | `device_id` | Admin only. Read the link tables stored on a device (ReCom): `inbound` lists the wall switches it listens to (with rocker and central on/off flags), `outbound` the devices it reports to. The gateway's own address is shown as `gateway`. Read only: there is deliberately no action to write link tables, because a wrong table can cut a device off its wall switches |
 | `opus_greennet.reload_entry` | optional `config_entry_id` | Admin only. Reload the integration without restarting Home Assistant |
 
 The read actions return their data directly as the action response. ReCom

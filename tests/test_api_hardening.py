@@ -303,6 +303,30 @@ def test_client_modules_import_no_home_assistant_or_integration_code(
     assert relative <= allowed_relative
 
 
+@pytest.mark.parametrize(
+    ("name", "allowed_relative"),
+    [
+        ("const.py", set()),
+        ("enocean_device.py", {"const", "wire"}),
+        ("protocol.py", {"const", "enocean_device", "wire"}),
+    ],
+)
+def test_domain_modules_import_no_home_assistant(
+    name: str, allowed_relative: set[str]
+) -> None:
+    """Constants, device model and protocol helpers stay free of Home Assistant.
+
+    They hold the gateway document knowledge (EEP tables, state functions,
+    feedback fields). Keeping them independent of Home Assistant and of the
+    entity platforms is what allows them to be tested, and later moved, without
+    it. Only the modules named here may be imported, and no third-party package.
+    """
+    absolute, relative = _imports(INTEGRATION / name)
+    third_party = absolute - set(sys.stdlib_module_names) - {"__future__"}
+    assert not third_party
+    assert relative <= allowed_relative
+
+
 def test_integration_never_creates_its_own_client_session() -> None:
     """Every HTTP request uses Home Assistant's shared session (inject-websession)."""
     offenders = []

@@ -14,6 +14,9 @@ from .const import (
     D2_01_CHANNEL_COUNTS,
     D2_01_DIMMER_EEPS,
     DEFAULT_CHANNEL,
+    DEVICE_OPTIONS,
+    DEVICE_SETTING_KEYS,
+    DEVICE_SETTINGS,
     EEP_MAPPINGS,
     ERROR_CODE_EEPS,
     ERROR_CODE_NONE,
@@ -40,6 +43,7 @@ from .const import (
     KEY_LIQUID_DETECTED,
     KEY_LOCAL_CONTROL,
     KEY_LOCKING_MODE,
+    KEY_MAX_HOLDING_TIME,
     KEY_MISSING_TEMPERATURE,
     KEY_POSITION,
     KEY_POWER,
@@ -125,6 +129,23 @@ class EnOceanChannel:
     angle: int | None = None  # Tilt angle for blinds
     rotation_time: float | None = None  # Zero means the cover has no slat rotation
     vertical_movement_time: float | None = None
+    max_holding_time: float | None = None  # Seconds, D2-05-02 configuration
+    # D2-01 configuration, filled from DEVICE_SETTINGS: dimmer ramping and
+    # press times (seconds), switch timers and warning (seconds), illumination
+    # threshold (lux). Device-wide, kept on the first channel.
+    ramping_time: float | None = None
+    short_press_time: float | None = None
+    long_press_time: float | None = None
+    timer: float | None = None
+    timer_long: float | None = None
+    switch_off_warning: float | None = None
+    switch_off_warning_signal: float | None = None
+    illumination_threshold: float | None = None
+    # D2-01 switch settings with fixed values, as reported (DEVICE_OPTIONS).
+    operation_mode: str | None = None
+    led_color: str | None = None
+    led_channel: str | None = None
+    function_external_input: str | None = None
     movement: str | None = None  # Estimated opening/closing, never physical feedback
     local_control: bool | None = None
     locking_mode: str | None = None  # block, unblock or alarm (D2-05)
@@ -182,6 +203,30 @@ class ChannelStateSnapshot:
     revision: int
 
 
+@dataclass(frozen=True, slots=True)
+class LinkedDevice:
+    """One entry of a link table: a device and how it is linked.
+
+    ``parameters`` are the entry's settings as the gateway reports them
+    (rocker, central on/off, channel), values as text.
+    """
+
+    device_id: str
+    eep: str
+    parameters: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class LinkTables:
+    """What a device listens to (inbound) and reports to (outbound).
+
+    Read only: the integration never writes link tables.
+    """
+
+    inbound: tuple[LinkedDevice, ...] = ()
+    outbound: tuple[LinkedDevice, ...] = ()
+
+
 @dataclass
 class EnOceanDevice:
     """Represents an EnOcean device from the gateway."""
@@ -206,6 +251,8 @@ class EnOceanDevice:
     channels: dict[int, EnOceanChannel] = field(default_factory=dict)
     # Gateway profile read at setup; None means the EEP tables decide.
     profile: DeviceProfile | None = field(default=None, repr=False, compare=False)
+    # Link tables of the gateway's device list; None until one was read.
+    link_tables: LinkTables | None = None
 
     # Fields a gateway device list owns. ``apply_listed_metadata`` replaces
     # them in place; every other field is runtime state of this integration
@@ -218,6 +265,7 @@ class EnOceanDevice:
         "first_seen",
         "last_seen",
         "dbm",
+        "link_tables",
     )
 
     def apply_listed_metadata(
@@ -243,6 +291,9 @@ class EnOceanDevice:
             self.last_seen = listed.last_seen
         if listed.dbm is not None and not keep_signal:
             self.dbm = listed.dbm
+        # A list without a table says nothing; it never clears a known one.
+        if listed.link_tables is not None:
+            self.link_tables = listed.link_tables
 
     @property
     def primary_eep(self) -> str | None:
@@ -647,6 +698,15 @@ class EnOceanDevice:
         number = cls._parse_float(value, minimum=minimum, maximum=maximum)
         return current if number is None else number
 
+    @staticmethod
+    def _option_reading(value: object) -> str | None:
+        """Return a reported setting value as text, or None if there is none."""
+        if isinstance(value, str):
+            return value or None
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return str(value) if isfinite(value) else None
+        return None
+
     @classmethod
     def _integer_reading(
         cls,
@@ -741,7 +801,10 @@ class EnOceanDevice:
             if channel_id is None:
                 continue
             channel = self.get_or_create_channel(channel_id)
-            channel.state_revision += 1
+            # A stored setting is no feedback: reading it must not cancel the
+            # estimate of a command that awaits its acknowledgement.
+            if key not in DEVICE_SETTING_KEYS:
+                channel.state_revision += 1
 
             if key in BUTTON_KEYS:
                 if value in ("pressed", "released"):
@@ -784,6 +847,30 @@ class EnOceanDevice:
             elif key == KEY_VERTICAL_MOVEMENT_TIME:
                 channel.vertical_movement_time = self._float_reading(
                     channel.vertical_movement_time, value, minimum=0
+                )
+
+            elif key == KEY_MAX_HOLDING_TIME:
+                # Range of the gateway's parameter catalog; anything else keeps
+                # the known value.
+                channel.max_holding_time = self._float_reading(
+                    channel.max_holding_time, value, minimum=0, maximum=65535
+                )
+
+            elif key in DEVICE_OPTIONS:
+                # The reported value is kept as it is, also when the catalog
+                # does not list it; a missing or malformed one keeps the known.
+                option = self._option_reading(value)
+                if option is not None:
+                    setattr(channel, DEVICE_OPTIONS[key], option)
+
+            elif key in DEVICE_SETTINGS:
+                attribute, minimum, maximum = DEVICE_SETTINGS[key]
+                setattr(
+                    channel,
+                    attribute,
+                    self._float_reading(
+                        getattr(channel, attribute), value, minimum, maximum
+                    ),
                 )
 
             elif key == KEY_ROTATION_TIME:

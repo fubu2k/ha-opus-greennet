@@ -26,7 +26,12 @@ from .api import (
     OpusResponseError,
 )
 from .const import CONF_EAG_ID, DEFAULT_PORT, DEFAULT_USERNAME, DOMAIN
-from .discovery import async_read_gateway_id, default_connection
+from .discovery import (
+    async_read_gateway_id,
+    async_resolve_host,
+    default_connection,
+    is_local_address,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -93,8 +98,19 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: Mapping[str, Any], errors: dict[str, str]
     ) -> str | None:
         """Return the gateway's EAG identifier, or None with ``errors`` set."""
-        if not _is_host(user_input[CONF_HOST].strip()):
+        host = user_input[CONF_HOST].strip()
+        if not _is_host(host):
             errors[CONF_HOST] = "invalid_host"
+            return None
+        # The gateway has no TLS: its credentials go only to the local network.
+        # Every address of a host name counts, and a name that does not resolve
+        # is as unreachable as before (cannot_connect).
+        addresses = await async_resolve_host(host)
+        if not addresses:
+            errors["base"] = "cannot_connect"
+            return None
+        if not all(is_local_address(address) for address in addresses):
+            errors[CONF_HOST] = "host_not_local"
             return None
         try:
             return await async_read_gateway_id(self.hass, user_input)
@@ -146,6 +162,10 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         """
         if discovery_info.ip_address.version != 4:
             return self.async_abort(reason="not_ipv4_address")
+        if not is_local_address(discovery_info.ip_address):
+            # An announcement cannot make Home Assistant send credentials to
+            # an address outside the local network.
+            return self.async_abort(reason="not_local_address")
         host = discovery_info.host
         for entry in self._async_current_entries(include_ignore=False):
             if entry.data.get(CONF_HOST) == host:

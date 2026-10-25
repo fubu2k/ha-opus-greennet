@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from typing import Final
 
 from homeassistant.components.sensor import (
@@ -21,20 +22,27 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import OpusGreenNetConfigEntry
-from .const import CONF_EAG_ID, DEFAULT_CHANNEL
+from .const import CONF_EAG_ID, DEFAULT_CHANNEL, DOMAIN
 from .coordinator import (
+    SIGNAL_AVAILABILITY_UPDATE,
     SIGNAL_DEVICE_DISCOVERED,
     SIGNAL_DEVICE_REMOVED,
+    SIGNAL_DEVICE_STATE_UPDATE,
+    SIGNAL_GATEWAY_UPTIME_UPDATE,
     CoverRun,
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanChannel, EnOceanDevice
 from .entity import OpusGreenNetEntity, migrate_legacy_entity_suffix
+
+# Actuators hold link tables; sensors and wall switches never list one.
+LINKABLE_ENTITY_TYPES: Final = frozenset({"switch", "light", "cover"})
 
 # Sensor state is pushed by the coordinator.
 PARALLEL_UPDATES = 0
@@ -77,6 +85,9 @@ async def async_setup_entry(
     gateway_device_id = entry.runtime_data.gateway_device_id
     eag_id = entry.data[CONF_EAG_ID]
     added_unique_ids: set[str] = set()
+    # Devices waiting for their first link table: device id -> unsubscribe.
+    waiting_for_links: dict[str, CALLBACK_TYPE] = {}
+    async_add_entities([OpusGreenNetGatewayUptimeSensor(coordinator, eag_id)])
 
     @callback
     def async_add_sensors(device: EnOceanDevice) -> None:
@@ -243,6 +254,39 @@ async def async_setup_entry(
             )
         )
 
+        # Time of the last telegram or listed update (all devices, diagnostic).
+        entities.append(
+            OpusGreenNetLastSeenSensor(
+                coordinator=coordinator,
+                eag_id=eag_id,
+                gateway_device_id=gateway_device_id,
+                device=device,
+            )
+        )
+
+        # Wall switches linked to an actuator (diagnostic). Only devices whose
+        # gateway listed a link table get one; the others have no such table.
+        # A table that appears later (device list refresh) adds it then.
+        if device.link_tables is not None:
+            waiting_for_links.pop(device.device_id, lambda: None)()
+            entities.append(
+                OpusGreenNetWallSwitchLinksSensor(
+                    coordinator=coordinator,
+                    eag_id=eag_id,
+                    gateway_device_id=gateway_device_id,
+                    device=device,
+                )
+            )
+        elif (
+            device.entity_type in LINKABLE_ENTITY_TYPES
+            and device.device_id not in waiting_for_links
+        ):
+            waiting_for_links[device.device_id] = async_dispatcher_connect(
+                hass,
+                f"{SIGNAL_DEVICE_STATE_UPDATE}_{eag_id}_{device.device_id}",
+                async_link_table_listed,
+            )
+
         new_entities = [
             entity for entity in entities if entity.unique_id not in added_unique_ids
         ]
@@ -254,7 +298,14 @@ async def async_setup_entry(
             async_add_entities(new_entities)
 
     @callback
+    def async_link_table_listed(device: EnOceanDevice) -> None:
+        """Add the link sensor once the gateway lists a table for the device."""
+        if device.link_tables is not None:
+            async_add_sensors(device)
+
+    @callback
     def async_forget_sensors(device_id: str) -> None:
+        waiting_for_links.pop(device_id, lambda: None)()
         prefix = f"{eag_id}_{device_id}_"
         added_unique_ids.difference_update(
             [
@@ -264,11 +315,23 @@ async def async_setup_entry(
             ]
         )
 
-    entry.async_on_unload(
-        async_dispatcher_connect(
-            hass, f"{SIGNAL_DEVICE_REMOVED}_{eag_id}", async_forget_sensors
-        )
+    unsubscribe_removed = async_dispatcher_connect(
+        hass, f"{SIGNAL_DEVICE_REMOVED}_{eag_id}", async_forget_sensors
     )
+
+    @callback
+    def async_unload() -> None:
+        unsubscribe_removed()
+        for unsubscribe in waiting_for_links.values():
+            unsubscribe()
+        waiting_for_links.clear()
+
+    entry.async_on_unload(async_unload)
+
+    # Add entities for already discovered devices. This comes before the
+    # discovery listener below, which stays the last subscription made here.
+    for device in coordinator.devices.values():
+        async_add_sensors(device)
 
     # Listen for new device discoveries
     entry.async_on_unload(
@@ -278,10 +341,6 @@ async def async_setup_entry(
             async_add_sensors,
         )
     )
-
-    # Add entities for already discovered devices
-    for device in coordinator.devices.values():
-        async_add_sensors(device)
 
 
 class OpusGreenNetBaseSensor(OpusGreenNetEntity, SensorEntity):
@@ -416,7 +475,6 @@ class OpusGreenNetSignalStrengthSensor(OpusGreenNetBaseSensor):
             "signal_strength",
             "signal_strength",
         )
-        self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> int | None:
@@ -424,6 +482,81 @@ class OpusGreenNetSignalStrengthSensor(OpusGreenNetBaseSensor):
         if self._device.dbm is not None:
             return self._device.dbm
         return None
+
+
+def parse_last_seen(value: str) -> datetime | None:
+    """Return the gateway's last-seen time, or None when it is not usable.
+
+    The gateway writes an ISO 8601 time with a UTC offset (for example
+    ``2026-10-19T18:17:17.571+0200``). A missing, malformed or offset-less
+    value is unknown: a timestamp sensor must be timezone-aware, and the
+    time zone is never guessed.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+class OpusGreenNetLastSeenSensor(OpusGreenNetBaseSensor):
+    """When the gateway last heard from the device."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+    ) -> None:
+        """Initialize the last-seen sensor."""
+        super().__init__(
+            coordinator, eag_id, gateway_device_id, device, "last_seen", "last_seen"
+        )
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the time of the newest report, unknown when not usable."""
+        return parse_last_seen(self._device.last_seen)
+
+
+class OpusGreenNetWallSwitchLinksSensor(OpusGreenNetBaseSensor):
+    """How many wall switch links an actuator has (read only)."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+    ) -> None:
+        """Initialize the link count sensor."""
+        super().__init__(
+            coordinator,
+            eag_id,
+            gateway_device_id,
+            device,
+            "wall_switch_links",
+            "wall_switch_links",
+        )
+        self._attr_entity_registry_enabled_default = False
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the number of inbound links, unknown until a table was read.
+
+        A wall switch linked to both channels of a two-channel actuator counts
+        once per link. The linked devices themselves are never exposed here.
+        """
+        tables = self._device.link_tables
+        return None if tables is None else len(tables.inbound)
 
 
 class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
@@ -594,3 +727,67 @@ class OpusGreenNetCoverRunSensor(OpusGreenNetEntity, RestoreSensor):
             "full_travel": run.full_travel,
             "finished_at": run.finished_at,
         }
+
+
+def format_uptime(uptime: str | None) -> str | None:
+    """Return the gateway uptime as days, hours, minutes and seconds.
+
+    ``uptime`` is the validated number of seconds from the health probe
+    (finite and not negative). Fractions are dropped.
+    """
+    if uptime is None:
+        return None
+    days, rest = divmod(int(float(uptime)), 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, seconds = divmod(rest, 60)
+    return f"{days} d {hours} h {minutes} min {seconds} s"
+
+
+class OpusGreenNetGatewayUptimeSensor(SensorEntity):
+    """Time since the gateway started, on the gateway's own device.
+
+    The value is read by the health probe (once a minute) and shown after each
+    reading; it is not extrapolated between readings.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "gateway_uptime"
+
+    def __init__(self, coordinator: OpusGreenNetCoordinator, eag_id: str) -> None:
+        """Initialize the sensor for the gateway ``eag_id``."""
+        self._coordinator = coordinator
+        self._eag_id = eag_id
+        self._attr_unique_id = f"{eag_id}_gateway_uptime"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, eag_id)})
+
+    @property
+    def available(self) -> bool:
+        """Return whether the gateway is reachable."""
+        return self._coordinator.available
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the uptime as days, hours, minutes and seconds."""
+        return format_uptime(self._coordinator.gateway_uptime)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, float] | None:
+        """Return the uptime in seconds, as the gateway reported it."""
+        uptime = self._coordinator.gateway_uptime
+        return None if uptime is None else {"uptime_seconds": float(uptime)}
+
+    async def async_added_to_hass(self) -> None:
+        """Show every new reading and every availability change."""
+        await super().async_added_to_hass()
+        for signal in (SIGNAL_GATEWAY_UPTIME_UPDATE, SIGNAL_AVAILABILITY_UPDATE):
+            self.async_on_remove(
+                async_dispatcher_connect(
+                    self.hass, f"{signal}_{self._eag_id}", self._handle_update
+                )
+            )
+
+    @callback
+    def _handle_update(self) -> None:
+        self.async_write_ha_state()

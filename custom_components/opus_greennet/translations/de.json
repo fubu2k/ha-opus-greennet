@@ -54,6 +54,7 @@
     "error": {
       "cannot_connect": "Verbindung zum Gateway fehlgeschlagen. Prüfe Host und Port.",
       "invalid_host": "Gib nur die IP-Adresse oder den Hostnamen des Gateways ein, ohne http://, Port oder Pfad.",
+      "host_not_local": "Die Adresse muss im lokalen Netzwerk liegen (privat, Link-Local, Loopback oder Carrier-Grade-NAT). Das Gateway spricht nur unverschlüsseltes HTTP, daher werden öffentliche Adressen nicht unterstützt.",
       "invalid_auth": "Das Gateway hat Benutzername oder Passwort abgelehnt.",
       "unsupported_gateway": "Das Gerät unter dieser Adresse hat nicht wie ein OPUS-Gateway geantwortet.",
       "wrong_gateway": "Diese Adresse gehört zu einem anderen Gateway als {eag_id}.",
@@ -63,7 +64,8 @@
       "already_configured": "Dieses Gateway ist bereits eingerichtet. Seine Verbindungseinstellungen wurden aktualisiert.",
       "reauth_successful": "Die Verbindung zum Gateway wurde aktualisiert.",
       "reconfigure_successful": "Die Verbindung zum Gateway wurde aktualisiert.",
-      "not_ipv4_address": "Es werden nur Gateways mit einer IPv4-Adresse unterstützt."
+      "not_ipv4_address": "Es werden nur Gateways mit einer IPv4-Adresse unterstützt.",
+      "not_local_address": "Die angekündigte Adresse liegt nicht im lokalen Netzwerk und wird ignoriert."
     }
   },
   "entity": {
@@ -149,6 +151,12 @@
       "signal_strength": {
         "name": "Signalstärke"
       },
+      "last_seen": {
+        "name": "Zuletzt gesehen"
+      },
+      "wall_switch_links": {
+        "name": "Wandtaster-Verknüpfungen"
+      },
       "illuminance": {
         "name": "Beleuchtungsstärke"
       },
@@ -175,6 +183,9 @@
       },
       "last_run_time": {
         "name": "Letzte Fahrzeit"
+      },
+      "gateway_uptime": {
+        "name": "Betriebszeit"
       }
     },
     "switch": {
@@ -202,6 +213,77 @@
       "buttons": {
         "name": "Taster"
       }
+    },
+    "number": {
+      "vertical_movement_time": {
+        "name": "Fahrzeit vertikal"
+      },
+      "rotation_time": {
+        "name": "Rotationszeit"
+      },
+      "max_holding_time": {
+        "name": "Maximale Haltezeit"
+      },
+      "ramping_time": {
+        "name": "Rampenzeit"
+      },
+      "short_press_time": {
+        "name": "Zeit Kurzdruck"
+      },
+      "long_press_time": {
+        "name": "Zeit Langdruck"
+      },
+      "timer": {
+        "name": "Timerdauer"
+      },
+      "timer_long": {
+        "name": "Timerdauer (langer Tastendruck)"
+      },
+      "switch_off_warning": {
+        "name": "Ausschaltwarnung"
+      },
+      "switch_off_warning_signal": {
+        "name": "Dauer des Warnsignals"
+      },
+      "illumination_threshold": {
+        "name": "Helligkeitsschwelle"
+      }
+    },
+    "select": {
+      "operation_mode": {
+        "name": "Betriebsart",
+        "state": {
+          "bottom_on": "Unten EIN",
+          "timer": "Timer",
+          "toggle": "Umschalten",
+          "top_on": "Oben EIN"
+        }
+      },
+      "led_color": {
+        "name": "LED-Farbe",
+        "state": {
+          "all": "Alle LEDs an",
+          "green": "Grüne LED an",
+          "off": "Beide LEDs aus",
+          "red": "Rote LED an"
+        }
+      },
+      "led_channel": {
+        "name": "LED-Kanal",
+        "state": {
+          "channel1": "Kanal 1",
+          "channel2": "Kanal 2"
+        }
+      },
+      "function_external_input": {
+        "name": "Funktion externer Eingang",
+        "state": {
+          "channel1": "Kanal 1",
+          "channel2": "Kanal 2",
+          "channels_all": "Kanal 1 + 2",
+          "inactive": "Inaktiv"
+        }
+      }
     }
   },
   "exceptions": {
@@ -223,6 +305,9 @@
     "gateway_unavailable": {
       "message": "Das OPUS-Gateway ist nicht erreichbar. Prüfe seine Netzwerkverbindung und versuche es erneut."
     },
+    "invalid_configuration": {
+      "message": "Die Konfiguration für {device_id} wurde nicht an das Gateway gesendet: {reason}."
+    },
     "invalid_auth": {
       "message": "Das OPUS-Gateway hat die konfigurierten Zugangsdaten abgelehnt."
     },
@@ -243,6 +328,9 @@
     },
     "repositioning_not_supported": {
       "message": "Gerät {device_id} ist keine Jalousie mit diesem Kanal und dieser Positionierungsart."
+    },
+    "parameter_not_confirmed": {
+      "message": "{device_id} hat den neuen Wert von {reason} nicht bestätigt. Home Assistant behält den bisherigen Wert; lies vor einem neuen Versuch die Gerätekonfiguration aus."
     }
   },
   "services": {
@@ -259,6 +347,20 @@
         }
       },
       "name": "Gerätekonfiguration abrufen"
+    },
+    "get_device_link_tables": {
+      "description": "Liest die auf einem EnOcean-Gerät gespeicherten Linktabellen über die ReCom-API: die Wandtaster, auf die es hört, und die Geräte, an die es meldet. Nur lesend. Die eigene Adresse des Gateways wird als \"gateway\" angezeigt.",
+      "fields": {
+        "config_entry_id": {
+          "description": "Zu verwendendes Gateway. Auswahl erforderlich, wenn mehrere Gateways geladen sind.",
+          "name": "Gateway"
+        },
+        "device_id": {
+          "description": "EURID des EnOcean-Geräts.",
+          "name": "Geräte-ID"
+        }
+      },
+      "name": "Linktabellen eines Geräts abrufen"
     },
     "get_device_parameters": {
       "description": "Ruft DDF-Parameter eines EnOcean-Geräts über die ReCom-API ab.",
@@ -330,6 +432,10 @@
     }
   },
   "issues": {
+    "non_local_gateway_address": {
+      "title": "Die Gateway-Adresse liegt nicht im lokalen Netzwerk",
+      "description": "Die Adresse dieses Gateways liegt außerhalb des lokalen Netzwerks. Das Gateway spricht nur unverschlüsseltes HTTP, deshalb kann seine Anmeldung auf dem Weg mitgelesen werden. Die Integration funktioniert weiter, aber erneute Anmeldung und Neukonfiguration akzeptieren nur noch eine lokale Adresse.\n\nÖffne die Integration Opus GreenNet Bridge, wähle im Menü Neu konfigurieren und trage die Adresse des Gateways in deinem lokalen Netzwerk ein, oder erreiche das Gateway über ein VPN. Der Hinweis verschwindet, wenn die Integration mit einer lokalen Adresse erneut geladen wird."
+    },
     "duplicate_beta_entity": {
       "title": "Doppelte Entität {removed_entity_id} wurde entfernt",
       "fix_flow": {

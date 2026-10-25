@@ -55,6 +55,32 @@ to the gateway open (`GET /devices/stream`):
 - Batteryless EnOcean devices are not marked unavailable just because they are
   quiet.
 
+### Stream format and fallback
+
+The stream is requested with `delimited=newLine` (one JSON document per line).
+This was verified on a gateway with firmware 1.21.30; the other stream
+parameters (`direction`, `output`, `levelOfDetail`) are deliberately not
+requested. Firmware that ignores the parameter answers in the older multi-line
+format, which the same reader handles. Only a gateway that refuses the
+parameter itself (HTTP 400, 405, 422 or 501 before any document) switches the
+integration to the plain stream. The choice is remembered until the gateway
+restarts, when line delimiting is offered again. Rejected credentials, timeouts
+and connection errors never count as missing firmware support. Telegrams in
+the `to` direction have not been observed on the verified gateway.
+
+### Connections and state writes
+
+All requests use Home Assistant's shared HTTP session; the integration neither
+creates nor closes a session of its own. The event stream occupies one
+connection, and requests to the gateway share one radio queue (see
+[Large installations](#large-installations)).
+
+Every telegram is applied to the device state at once. A telegram that changes
+nothing the entity shows does not write the entity state again; rocker events,
+availability changes and command feedback are never delayed or merged. The
+integration does not delay or combine state updates, so Home Assistant sees
+every changed value as the gateway reports it.
+
 ## Commands and acknowledgements
 
 Commands are HTTP requests (`PUT /devices/<id>/state`); the gateway's response
@@ -128,6 +154,7 @@ PUT  /devices/{deviceId}/state         # Commands and status queries
 GET  /devices/{deviceId}/configuration # ReCom: stored configuration
 PUT  /devices/{deviceId}/configuration # ReCom: write configuration
 GET  /devices/{deviceId}/parameters    # ReCom: supported parameters
+GET  /devices/{deviceId}/linkTables    # ReCom: link tables (read only)
 ```
 
 Each telegram on the stream is one JSON document (fictional values):

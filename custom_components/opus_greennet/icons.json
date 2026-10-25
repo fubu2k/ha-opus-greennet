@@ -30,6 +30,12 @@
           "not_requested": "mdi:lock-outline",
           "requested": "mdi:lock-clock"
         }
+      },
+      "gateway_uptime": {
+        "default": "mdi:timer-outline"
+      },
+      "wall_switch_links": {
+        "default": "mdi:link-variant"
       }
     },
     "button": {
@@ -44,6 +50,9 @@
   "services": {
     "get_device_configuration": {
       "service": "mdi:file-download-outline"
+    },
+    "get_device_link_tables": {
+      "service": "mdi:link-variant"
     },
     "get_device_parameters": {
       "service": "mdi:tune-variant"

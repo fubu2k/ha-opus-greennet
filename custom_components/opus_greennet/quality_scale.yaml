@@ -112,8 +112,8 @@ rules:
     status: done
     comment: docs/how-it-works.md section Updates and availability.
   docs-examples:
-    status: todo
-    comment: No automation or dashboard examples are documented yet.
+    status: done
+    comment: docs/examples.md section Examples (rocker automation, blind actions, window handle, leak alert, action response).
   docs-known-limitations:
     status: done
     comment: README and docs/how-it-works.md section Known limitations.
@@ -127,8 +127,8 @@ rules:
     status: done
     comment: README section Troubleshooting; docs/troubleshooting.md.
   docs-use-cases:
-    status: todo
-    comment: No use-case section is documented yet.
+    status: done
+    comment: docs/examples.md section Use cases.
   dynamic-devices:
     status: done
     comment: Devices discovered after setup are added through dispatcher signals.
@@ -157,8 +157,10 @@ rules:
     status: done
     comment: >-
       Persistent, fixable repair after the one-time removal of a duplicate beta
-      entity during unique-ID migration. Transient gateway or radio outages and
-      quiet sensors are intentionally not issues.
+      entity during unique-ID migration, and a non-fixable notice while an
+      entry's gateway address is outside the local network (cleared by the next
+      load with a local address). Transient gateway or radio outages and quiet
+      sensors are intentionally not issues.
   stale-devices:
     status: done
     comment: >-

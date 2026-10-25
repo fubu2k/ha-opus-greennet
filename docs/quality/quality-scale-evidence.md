@@ -19,9 +19,9 @@ Rule -> implementation -> tests -> documentation for every rule in
   official rule keys, the applicable official validators (`config-flow`,
   `runtime-data`, `strict-typing`, `test-before-setup`, `unique-config-entry`,
   `discovery`) and checks that this table matches the YAML.
-- Summary: 47 done, 5 exempt, 2 todo. All open items stay visible as `todo`.
-  Because bronze, silver and gold each contain open or exempt items that an
-  official review would have to accept, no tier is claimed.
+- Summary: 49 done, 5 exempt, 0 todo. Open items stay visible as `todo`.
+  Exempt rules are self-assessed and would need an official review to be
+  accepted, so no tier is claimed.
 
 `QS` = `tests/test_quality_scale.py`, `TR` = `tests/test_translations.py`.
 
@@ -74,12 +74,12 @@ Rule -> implementation -> tests -> documentation for every rule in
 | `discovery` | done | `manifest.json` `zeroconf` (`_enocean._tcp.local.`, `opusshgw*`); `config_flow.py` `async_step_zeroconf`; `discovery.py` search for entries of the former MQTT setup | `test_discovery.py`; QS `test_discovery_status_matches_the_code` | README Configuration, docs/upgrading.md |
 | `discovery-update-info` | done | `config_flow.py` `_async_adopt_address`: a configured gateway announced at another address is updated after its EURID is confirmed | `test_discovery.py::test_discovery_updates_a_changed_address`, `::test_discovery_completes_a_legacy_entry_and_ends_its_reauth` | README Configuration |
 | `docs-data-update` | done | – | QS `test_documentation_rules_point_to_existing_sections` | docs/how-it-works.md Updates and availability |
-| `docs-examples` | todo | – | – | – |
+| `docs-examples` | done | – | QS `test_documentation_rules_point_to_existing_sections` | docs/examples.md Examples |
 | `docs-known-limitations` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Known limitations, docs/how-it-works.md |
 | `docs-supported-devices` | done | `const.py` `EEP_MAPPINGS` | TR `test_every_created_entity_has_a_translated_name` (all EEPs) | README Supported devices |
 | `docs-supported-functions` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Features, Supported devices; docs/devices.md Actions |
 | `docs-troubleshooting` | done | – | QS `test_documentation_rules_point_to_existing_sections` | README Troubleshooting, docs/troubleshooting.md |
-| `docs-use-cases` | todo | – | – | – |
+| `docs-use-cases` | done | – | QS `test_documentation_rules_point_to_existing_sections` | docs/examples.md Use cases |
 | `dynamic-devices` | done | `SIGNAL_DEVICE_DISCOVERED` dispatcher listeners in every platform; new devices from stream resyncs, the periodic device list and late lookups | `test_coordinator_devices.py::test_device_list_creates_devices_and_dispatches_discovery`; `test_coordinator_stream.py::test_unknown_device_is_looked_up_once`, `::test_periodic_device_list_refresh_updates_metadata_only`; `test_entities.py::test_sensor_setup_adds_new_types_after_profile_discovery` | docs/devices.md Removing or replacing a device |
 | `entity-category` | done | `EntityCategory.DIAGNOSTIC` for signal strength and actuator status binary sensors | `test_binary_sensor_descriptions.py::test_description_inventory_matches_stable`; `test_entities.py::test_sensor_values_and_metadata` | – |
 | `entity-device-class` | done | Device classes on sensors, binary sensors and covers | `test_entities.py::test_sensor_values_and_metadata`, `::test_moisture_sensor_values_and_metadata`; `test_binary_sensor_descriptions.py` | – |
@@ -88,7 +88,7 @@ Rule -> implementation -> tests -> documentation for every rule in
 | `exception-translations` | done | `translation_domain`/`translation_key` on raised Home Assistant errors | TR `test_raised_exception_keys_are_translated`; `test_service_actions.py::test_rejected_read_surfaces_translated_error` | – |
 | `icon-translations` | done | `icons.json` (handle position, handle closed, unlock request, mechanics fault, service icons) | `test_icon_translations.py` | – |
 | `reconfiguration-flow` | done | `config_flow.py` `async_step_reconfigure` (address and credentials, identity check) | `test_config_flow.py::test_reconfigure_changes_the_connection`, `::test_reconfigure_rejects_a_different_gateway`; QS `test_reauth_and_reconfigure_flows_verify_the_gateway_identity` | README Configuration |
-| `repair-issues` | done | `entity.py` `async_create_duplicate_beta_entity_issue` (persistent, fixable confirm flow); removed with the entry (`async_remove_entry`) | `test_repair_issues.py` | – |
+| `repair-issues` | done | `entity.py` `async_create_duplicate_beta_entity_issue` (persistent, fixable confirm flow) and `async_set_non_local_address_issue` (notice for a non-local gateway address); both removed with the entry (`async_remove_entry`) | `test_repair_issues.py`, `test_local_gateway_address.py` | – |
 | `stale-devices` | done | `async_remove_config_entry_device`; no automatic removal (gateway cannot confirm a device is gone) | `test_device_removal.py`; QS `test_stale_devices_and_diagnostics_entry_points` | docs/devices.md Removing or replacing a device |
 
 ## Platinum

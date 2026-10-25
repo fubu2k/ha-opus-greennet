@@ -1,0 +1,84 @@
+{
+  "header": {
+    "httpStatus": 200,
+    "content": "configuration"
+  },
+  "configuration": {
+    "deviceId": "DEV1",
+    "friendlyId": "Test",
+    "parameters": [
+      {
+        "key": "operationMode",
+        "description": "Operation mode of rocker switches",
+        "value": "toggle",
+        "meaning": "Toggle"
+      },
+      {
+        "key": "timer",
+        "description": "Period until switch off if operationMode is timer",
+        "value": 300.0,
+        "unit": "s"
+      },
+      {
+        "key": "timerLong",
+        "description": "Period until switch off if operationMode is timer and switched on via long pressed",
+        "value": 3600.0,
+        "unit": "s"
+      },
+      {
+        "key": "switchOffWarning",
+        "description": "Time a warning signal is shown before switch off",
+        "value": 30.0,
+        "unit": "s"
+      },
+      {
+        "key": "switchOffWarningSignal",
+        "description": "Duration of warning signal if switchOffWarning is set",
+        "value": 0.5,
+        "unit": "s"
+      },
+      {
+        "key": "illuminationThreshold",
+        "description": "illumination threshold for inbound light sensors",
+        "value": 80.0,
+        "unit": "lx"
+      },
+      {
+        "key": "functionRockerA",
+        "description": "Function of rocker switch A",
+        "value": "channel1",
+        "meaning": "Channel 1"
+      },
+      {
+        "key": "functionRockerB",
+        "description": "Function of rocker switch B",
+        "value": "channel2",
+        "meaning": "Channel 2"
+      },
+      {
+        "key": "functionExternalInput",
+        "description": "Function of external input",
+        "value": "channel2",
+        "meaning": "Channel 2"
+      },
+      {
+        "key": "routingTime",
+        "description": "ViNET routing time",
+        "value": "off",
+        "meaning": "no routing"
+      },
+      {
+        "key": "ledChannel",
+        "description": "Mapping LED - Channel",
+        "value": "channel1",
+        "meaning": "Channel 1"
+      },
+      {
+        "key": "ledColor",
+        "description": "Color of LED",
+        "value": "green",
+        "meaning": "Green LED on"
+      }
+    ]
+  }
+}
