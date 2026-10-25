@@ -72,7 +72,11 @@ async def test_rwm_discovery_and_live_value_only_updates(
     await wait_until(lambda: hass.states.get(smoke).state == "unknown")
     assert hass.states.get(battery).state == "on"
     await gateway.stop()
-    await wait_until(lambda: hass.states.get(battery).state == "unavailable")
+    # The reader pauses 4 to 5 s after its third stream (backoff step three);
+    # the refused connection that follows can take another second on Windows.
+    await wait_until(
+        lambda: hass.states.get(battery).state == "unavailable", timeout=15
+    )
     registry = er.async_get(hass)
     assert (
         len(
