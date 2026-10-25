@@ -28,6 +28,19 @@ set_device_configuration:
         config_entry:
           integration: opus_greennet
 
+get_device_link_tables:
+  fields:
+    device_id:
+      required: true
+      example: "AABBCCDD"
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: opus_greennet
+
 get_device_parameters:
   fields:
     device_id:

@@ -757,6 +757,7 @@ class OpusGreenNetCoordinator:
             first_seen=protocol.metadata_text(data.get("firstSeen")),
             last_seen=protocol.metadata_text(data.get("lastSeen")),
             dbm=EnOceanDevice._parse_integer(data.get("dbm")),
+            link_tables=protocol.link_tables(data),
         )
         was_known = existing is not None and bool(existing.eeps)
         if existing is None:
@@ -1917,6 +1918,23 @@ class OpusGreenNetCoordinator:
             lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
             priority=PRIORITY_QUERY,
         )
+
+    async def async_get_device_link_tables(self, device_id: str) -> JsonObject:
+        """Read the link tables stored on a device (read only).
+
+        The wall switches a device listens to and the devices it reports to.
+        The gateway's own EURID is masked in the answer. There is deliberately
+        no write counterpart.
+        """
+        path = OpusGatewayClient.device_path(device_id, "linkTables")
+        document = await self._async_radio_request(
+            device_id,
+            lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
+            priority=PRIORITY_QUERY,
+        )
+        masked = protocol.mask_gateway_id(document, self.eag_id)
+        # mask_gateway_id keeps the type of a JSON object.
+        return masked if isinstance(masked, dict) else document
 
 
 def _is_device_list(document: JsonObject) -> bool:

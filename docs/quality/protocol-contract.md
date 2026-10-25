@@ -44,6 +44,19 @@ Verification legend: **[Code]** read from source, **[Test]** covered by tests,
 | `PUT /devices/{id}/state` | Commands, status queries | Body `{"state": {"functions": [...]}}`; answers in ~30 ms **[HW]** |
 | `GET/PUT /devices/{id}/configuration` | Services (ReCom) | Several seconds over the radio (8 s observed) **[HW]** |
 | `GET /devices/{id}/parameters` | Service (ReCom) | **[HW]** |
+| `GET /devices/{id}/linkTables` | Service (ReCom, read only) | Same structure as the `linkTables` block of the device object plus `lastUpdateTime`; `outbound` names the gateway itself **[HW]** |
+
+The device object of `GET /devices` and of the stream snapshot carries the same
+`linkTables` block for actuators (37 of them in the recorded list), without a
+radio request; sensors list an empty object **[HW]**. The integration keeps
+only the wall switch entries and their parameters as text (`LinkTables`
+model, `protocol.link_tables`). An empty object or a missing block means
+"not read" and never replaces a known table (missing fields are no deletion);
+a table with an `outbound` side and no `inbound` list is a read table with no
+wall switch (0 links). That the gateway omits an empty `inbound` list is
+inferred from the recorded list, not from documentation **[HW][Test]**. The
+gateway's own address is masked (`gateway`) in the service response, and the
+diagnostics download redacts all device addresses **[Code][Test]**.
 
 Device identifiers are URL-quoted. **[Code][Test]**
 
@@ -253,7 +266,9 @@ had registered. **[HW][Test]**
 
 `opus_greennet.get_device_configuration` (response only),
 `opus_greennet.set_device_configuration`, `opus_greennet.get_device_parameters`
-(response only), `opus_greennet.reload_entry`. All are admin services with an
+(response only), `opus_greennet.get_device_link_tables` (response only; the
+gateway's own EURID in the answer is replaced by `gateway`, and no write action
+exists **[Code][Test]**), `opus_greennet.reload_entry`. All are admin services with an
 optional `config_entry_id`. `set_device_configuration` refuses a body that is
 not encodable JSON, nested deeper than 16 levels or larger than 64 KiB with the
 translated error `invalid_configuration` before any request is queued

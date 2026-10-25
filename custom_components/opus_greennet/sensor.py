@@ -258,6 +258,18 @@ async def async_setup_entry(
             )
         )
 
+        # Wall switches linked to an actuator (diagnostic). Only devices whose
+        # gateway listed a link table get one; the others have no such table.
+        if device.link_tables is not None:
+            entities.append(
+                OpusGreenNetWallSwitchLinksSensor(
+                    coordinator=coordinator,
+                    eag_id=eag_id,
+                    gateway_device_id=gateway_device_id,
+                    device=device,
+                )
+            )
+
         new_entities = [
             entity for entity in entities if entity.unique_id not in added_unique_ids
         ]
@@ -481,6 +493,40 @@ class OpusGreenNetLastSeenSensor(OpusGreenNetBaseSensor):
     def native_value(self) -> datetime | None:
         """Return the time of the newest report, unknown when not usable."""
         return parse_last_seen(self._device.last_seen)
+
+
+class OpusGreenNetWallSwitchLinksSensor(OpusGreenNetBaseSensor):
+    """How many wall switch links an actuator has (read only)."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+    ) -> None:
+        """Initialize the link count sensor."""
+        super().__init__(
+            coordinator,
+            eag_id,
+            gateway_device_id,
+            device,
+            "wall_switch_links",
+            "wall_switch_links",
+        )
+        self._attr_entity_registry_enabled_default = False
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the number of inbound links, unknown until a table was read.
+
+        A wall switch linked to both channels of a two-channel actuator counts
+        once per link. The linked devices themselves are never exposed here.
+        """
+        tables = self._device.link_tables
+        return None if tables is None else len(tables.inbound)
 
 
 class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):

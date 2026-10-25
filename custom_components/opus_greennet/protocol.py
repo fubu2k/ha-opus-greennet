@@ -33,7 +33,7 @@ from .const import (
     LOCKING_MODES,
     RWM_EEP,
 )
-from .enocean_device import DeviceProfile, EnOceanDevice
+from .enocean_device import DeviceProfile, EnOceanDevice, LinkedDevice, LinkTables
 from .wire import WireFunction, WireMapping, as_object, object_items
 
 if TYPE_CHECKING:
@@ -250,6 +250,86 @@ def configuration_parameter(document: WireMapping, key: str) -> float | None:
             value = EnOceanDevice._parse_number(parameter.get("value"), minimum=0)
             return None if value is None else float(value)
     return None
+
+
+def _text_value(value: object) -> str | None:
+    """Return a scalar parameter value as text, None for anything else."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return str(value)
+    return None
+
+
+def _linked_devices(value: object) -> tuple[LinkedDevice, ...]:
+    """Read the entries of one link table list, skipping unusable ones."""
+    linked: list[LinkedDevice] = []
+    for entry in object_items(value):
+        device_id = entry.get("deviceId")
+        if not isinstance(device_id, str) or not device_id:
+            continue
+        eep = entry.get("eep")
+        parameters: list[tuple[str, str]] = []
+        for parameter in object_items(entry.get("parameters")):
+            key = parameter.get("key")
+            text = _text_value(parameter.get("value"))
+            if isinstance(key, str) and key and text is not None:
+                parameters.append((key, text))
+        linked.append(
+            LinkedDevice(
+                device_id=device_id,
+                eep=eep if isinstance(eep, str) else "",
+                parameters=tuple(parameters),
+            )
+        )
+    return tuple(linked)
+
+
+def link_tables(data: WireMapping) -> LinkTables | None:
+    """Read the ``linkTables`` block of a device object.
+
+    The gateway lists a table for every actuator, always with an ``outbound``
+    side and without an ``inbound`` list when no wall switch is linked. A
+    device without a table (a sensor) lists an empty object. None therefore
+    means that no table was read (unknown), while a table with no inbound
+    entries is a read table with no wall switch. The gateway's names for the
+    entries are not kept.
+    """
+    table = as_object(data.get("linkTables"))
+    if table is None:
+        return None
+    inbound = table.get("inbound")
+    outbound = table.get("outbound")
+    if not isinstance(inbound, list) and not isinstance(outbound, list):
+        return None
+    return LinkTables(
+        inbound=_linked_devices(inbound), outbound=_linked_devices(outbound)
+    )
+
+
+# Stands in for the gateway's own EURID in link tables. The outbound list names
+# the gateway, and its EURID is also the factory password, so it is never passed
+# on.
+MASKED_GATEWAY_ID = "gateway"
+
+
+def mask_gateway_id(value: JsonValue, gateway_id: str) -> JsonValue:
+    """Return a copy of a gateway document without the gateway's own EURID.
+
+    Only a string that equals the identifier (ignoring case) is replaced; keys,
+    other identifiers and every other value are passed on unchanged.
+    """
+    if isinstance(value, dict):
+        return {key: mask_gateway_id(item, gateway_id) for key, item in value.items()}
+    if isinstance(value, list):
+        return [mask_gateway_id(item, gateway_id) for item in value]
+    if (
+        gateway_id
+        and isinstance(value, str)
+        and value.casefold() == gateway_id.casefold()
+    ):
+        return MASKED_GATEWAY_ID
+    return value
 
 
 def device_state_functions(data: WireMapping) -> list[WireFunction]:
