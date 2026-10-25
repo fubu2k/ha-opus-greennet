@@ -333,9 +333,13 @@ async def test_closing_the_stream_releases_the_connection(
     assert (await anext(stream))["header"]["content"] == "devices"
     await gateway.wait_for_stream()
     await stream.aclose()
-    # The server notices the closed connection when it writes next.
-    await gateway.push(telegram("DEV1", []))
-    await wait_until(lambda: gateway.stream_count == 0)
+    # The server notices the closed connection only on a later write: the first
+    # one can still land in the socket buffer.
+    for _ in range(20):
+        if gateway.stream_count == 0:
+            break
+        await gateway.push(telegram("DEV1", []))
+    assert gateway.stream_count == 0
 
 
 # ── coordinator ────────────────────────────────────────────────────────────
