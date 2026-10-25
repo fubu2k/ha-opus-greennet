@@ -216,16 +216,18 @@ def test_parameter_decimals_keep_every_step() -> None:
 def test_settings_are_read_from_a_real_device_configuration(name, eep) -> None:
     data = json.loads((FIXTURES / f"configuration_{name}.json").read_text("utf8"))
     functions = protocol.configuration_state_functions(data)
-    assert [(f["key"], f["value"]) for f in functions] == [
+    # The switch also reports its selectable settings (see test_switch_select).
+    assert [(f["key"], f["value"]) for f in functions if f["key"] in KEYS] == [
         ("timer", 300.0),
         ("timerLong", 3600.0),
         ("switchOffWarning", 30.0),
         ("switchOffWarningSignal", 0.5),
         ("illuminationThreshold", 80.0),
     ]
-    # A refresh that is not authoritative carries the settings, nothing else.
+    # A refresh that is not authoritative carries the same settings.
     keys = {function["key"] for function in protocol.configuration_functions(data)}
-    assert keys == set(KEYS)
+    assert keys >= set(KEYS)
+    assert keys == {function["key"] for function in functions}
     device = _switch(eep)
     device.update_from_telegram({"functions": functions})
     assert list(device.channels) == [0]
