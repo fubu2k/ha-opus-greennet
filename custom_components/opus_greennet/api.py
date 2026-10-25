@@ -6,7 +6,9 @@ with basic authentication. Responses are JSON objects carrying their own
 report success (2xx) and the document status must be 200, 201 or 202 (phase
 R3, finding B-1). ``GET /devices/stream`` keeps the response open and writes one
 JSON document per event: first the complete device list, then every telegram
-and device change as it happens.
+and device change as it happens. The client asks for one document per line
+(``delimited=newLine``) and falls back to the plain stream only when the
+gateway refuses that parameter.
 
 This module only speaks HTTP. It knows nothing about Home Assistant entities
 and never repeats a request; the coordinator maps its exceptions to
@@ -21,6 +23,7 @@ import codecs
 import heapq
 import itertools
 from collections.abc import AsyncGenerator, Mapping
+from contextlib import aclosing
 from math import isfinite
 from typing import Final
 from urllib.parse import quote
@@ -45,6 +48,16 @@ MAX_DOCUMENT_SIZE: Final = 8 * 1024 * 1024
 # Upper bound for the body of one ordinary (non-stream) response.
 MAX_RESPONSE_SIZE: Final = MAX_DOCUMENT_SIZE
 _READ_CHUNK_SIZE: Final = 64 * 1024
+
+_STREAM_PATH: Final = "/devices/stream"
+# Line-delimited stream: one JSON document per line, terminated by CRLF
+# (hardware-verified on OPUS-IQ-DOT 1.21.30). ``direction``, ``output`` and
+# ``levelOfDetail`` are deliberately not requested (docs/quality/phases).
+_LINE_FRAMING_QUERY: Final = "delimited=newLine"
+# HTTP statuses with which a gateway refuses the unknown parameter itself.
+# Everything else (401/403, 5xx, timeouts, connection errors) says nothing
+# about the firmware and must not switch the framing.
+_LINE_FRAMING_REFUSED: Final = frozenset({400, 405, 422, 501})
 
 # Queue priorities: lower values are dispatched first. User-initiated control
 # commands must never wait behind status queries, and delayed (background)
@@ -217,6 +230,18 @@ class JsonDocumentSplitter:
         self._in_string = False
         self._escape = False
 
+    def finish(self) -> None:
+        """Check that the stream ended between two documents.
+
+        A complete last document needs no terminator: it is returned by
+        ``feed`` as soon as its closing bracket arrives. What remains here is
+        an unfinished document or stray bytes, which the stream must not drop
+        silently.
+        """
+        tail = self._decoder.decode(b"", final=True)
+        if self._depth or tail.strip():
+            raise OpusResponseError("The event stream ended inside a document")
+
     def feed(self, chunk: bytes) -> list[str]:
         """Return every document completed by ``chunk``."""
         text = self._decoder.decode(chunk)
@@ -262,6 +287,10 @@ class JsonDocumentSplitter:
             if self._size > self._max_size:
                 raise OpusResponseError("An event stream document is too large")
         return documents
+
+
+class _LineFramingRefused(Exception):
+    """The gateway refused ``delimited=newLine`` before sending a document."""
 
 
 class PriorityLock:
@@ -323,6 +352,7 @@ class OpusGatewayClient:
         password: str,
     ) -> None:
         self._session = session
+        self._line_framing_rejected = False
         self.host = host
         self.port = port
         # IPv6 literals need brackets inside a URL.
@@ -387,15 +417,51 @@ class OpusGatewayClient:
             err.http_status = response.status
             raise
 
+    def reset_stream_framing(self) -> None:
+        """Offer the line-delimited stream again on the next connection.
+
+        Called when the gateway restarted: a firmware update that happened in
+        between may have added what an older firmware rejected.
+        """
+        self._line_framing_rejected = False
+
     async def async_stream(self) -> AsyncGenerator[JsonObject]:
         """Yield every document of ``GET /devices/stream`` until it ends.
 
+        The stream is first requested with ``delimited=newLine`` (one document
+        per line, hardware-verified on 1.21.30). Firmware that ignores the
+        parameter answers in the legacy format, which the same splitter cuts.
+        Only a refusal of the parameter itself (``_LINE_FRAMING_REFUSED``,
+        before any document) switches this client to the plain stream; it is
+        remembered until ``reset_stream_framing``. Authentication errors,
+        timeouts, connection errors and other statuses are never taken for
+        missing firmware support and raise as before.
+
         Closing the generator (``aclose``) releases the HTTP response at once.
         """
+        if not self._line_framing_rejected:
+            try:
+                async with aclosing(self._async_stream_documents(True)) as documents:
+                    async for document in documents:
+                        yield document
+                return
+            except _LineFramingRefused:
+                self._line_framing_rejected = True
+        async with aclosing(self._async_stream_documents(False)) as documents:
+            async for document in documents:
+                yield document
+
+    async def _async_stream_documents(
+        self, line_framing: bool
+    ) -> AsyncGenerator[JsonObject]:
+        """Open one stream request and yield its documents."""
         splitter = JsonDocumentSplitter()
+        url = f"{self._base_url}{_STREAM_PATH}"
+        if line_framing:
+            url = f"{url}?{_LINE_FRAMING_QUERY}"
         try:
             async with self._session.get(
-                f"{self._base_url}/devices/stream",
+                url,
                 headers=self._headers,
                 allow_redirects=False,
                 timeout=aiohttp.ClientTimeout(
@@ -406,6 +472,8 @@ class OpusGatewayClient:
                 ),
             ) as response:
                 _raise_for_auth(response)
+                if line_framing and response.status in _LINE_FRAMING_REFUSED:
+                    raise _LineFramingRefused
                 if response.status != 200:
                     raise OpusResponseError(
                         f"status {response.status}",
@@ -417,6 +485,7 @@ class OpusGatewayClient:
                         document = as_object(parse_json(text))
                         if document is not None:
                             yield document
+                splitter.finish()
         except TimeoutError as err:
             raise OpusTimeoutError("The event stream went silent") from err
         except aiohttp.ClientError as err:

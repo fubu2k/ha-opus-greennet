@@ -633,6 +633,8 @@ class OpusGreenNetCoordinator:
         self.gateway_uptime = uptime
         if previous is not None and float(uptime) < float(previous):
             _LOGGER.info("OPUS gateway %s restarted; reopening its stream", self.eag_id)
+            # A firmware update may have happened: offer line framing again.
+            self.client.reset_stream_framing()
             self._restart_stream()
         elif self._stream_connected and not self._gateway_available:
             self._set_gateway_available(True)
