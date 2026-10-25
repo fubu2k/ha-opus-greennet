@@ -210,7 +210,20 @@ DEVICE_SETTINGS: Final = {
     KEY_SWITCH_OFF_WARNING_SIGNAL: ("switch_off_warning_signal", 0.2, 2),
     KEY_ILLUMINATION_THRESHOLD: ("illumination_threshold", 0, 1500),
 }
-DEVICE_SETTING_KEYS: Final = frozenset(DEVICE_SETTINGS)
+# Device settings with a fixed set of values (select entities): key -> channel
+# field. The field holds the value the gateway reported, listed or not; the
+# select shows an unlisted value as unknown and never writes it back.
+KEY_OPERATION_MODE: Final = "operationMode"
+KEY_LED_COLOR: Final = "ledColor"
+KEY_LED_CHANNEL: Final = "ledChannel"
+KEY_FUNCTION_EXTERNAL_INPUT: Final = "functionExternalInput"
+DEVICE_OPTIONS: Final = {
+    KEY_OPERATION_MODE: "operation_mode",
+    KEY_LED_COLOR: "led_color",
+    KEY_LED_CHANNEL: "led_channel",
+    KEY_FUNCTION_EXTERNAL_INPUT: "function_external_input",
+}
+DEVICE_SETTING_KEYS: Final = frozenset(DEVICE_SETTINGS) | frozenset(DEVICE_OPTIONS)
 # Decimals a written parameter is rounded to; the default fits every step of
 # 0.01 or more.
 DEFAULT_PARAMETER_DECIMALS: Final = 2

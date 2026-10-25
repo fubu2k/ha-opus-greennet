@@ -66,6 +66,7 @@ PLATFORMS: list[Platform] = [
     Platform.EVENT,
     Platform.LOCK,
     Platform.NUMBER,
+    Platform.SELECT,
 ]
 
 SERVICE_GET_DEVICE_CONFIG = "get_device_configuration"

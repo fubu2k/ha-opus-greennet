@@ -1910,6 +1910,31 @@ class OpusGreenNetCoordinator:
         device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
         self._dispatch_state(device)
 
+    async def async_set_device_option(
+        self, device_id: str, key: str, option: str
+    ) -> None:
+        """Write one text setting and show it only once the device confirms.
+
+        Same contract as ``async_set_device_parameter``: the acknowledgement
+        only means that the gateway accepted the request, the stored value is
+        read back and adopted only when it equals the written one, and neither
+        request is repeated automatically.
+        """
+        device = self.get_device(device_id)
+        if device is None:
+            raise request_error("device_not_found", device_id)
+        await self.async_set_device_configuration(
+            device_id,
+            {"configuration": {"parameters": [{"key": key, "value": option}]}},
+        )
+        stored = protocol.configuration_option(
+            await self.async_get_device_configuration(device_id), key
+        )
+        if stored != option:
+            raise request_error("parameter_not_confirmed", device_id, key)
+        device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
+        self._dispatch_state(device)
+
     async def async_get_device_parameters(self, device_id: str) -> JsonObject:
         """Read the configurable parameters a device supports."""
         path = OpusGatewayClient.device_path(device_id, "parameters")
