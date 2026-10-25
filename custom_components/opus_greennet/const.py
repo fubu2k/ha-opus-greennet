@@ -184,6 +184,9 @@ VALUE_UNKNOWN: Final = "unknown"
 KEY_ANGLE: Final = "angle"
 KEY_ROTATION_TIME: Final = "rotationTime"
 KEY_VERTICAL_MOVEMENT_TIME: Final = "verticalMovementTime"
+# Longest run of a D2-05-02 blind in seconds, a configuration parameter. Not a
+# state key: a command of another controller carrying it is not applied.
+KEY_MAX_HOLDING_TIME: Final = "maxHoldingTime"
 COVER_MOVEMENT_GRACE_SECONDS: Final = 5.0
 COVER_RECONCILIATION_DELAYS: Final = (10.0, 20.0)
 KEY_CHANNEL: Final = "channel"

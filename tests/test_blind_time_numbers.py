@@ -84,7 +84,7 @@ def test_configuration_parameter_reads_a_zero_value() -> None:
 # ── entities ───────────────────────────────────────────────────────────────
 
 
-async def test_setup_creates_both_times_for_blinds_only(
+async def test_setup_creates_the_times_for_blinds_only(
     hass: HomeAssistant,
 ) -> None:
     coordinator = MagicMock()
@@ -92,6 +92,23 @@ async def test_setup_creates_both_times_for_blinds_only(
         "DEV1": _blind(),
         "SW": EnOceanDevice("SW", "Switch", [{"eep": "D2-01-01"}]),
     }
+    added: list = []
+    await async_setup_entry(
+        hass, _entry(coordinator), lambda entities, *_a, **_k: added.extend(entities)
+    )
+    assert [entity.unique_id for entity in added] == [
+        f"{EAG_ID}_DEV1_vertical_movement_time",
+        f"{EAG_ID}_DEV1_rotation_time",
+        f"{EAG_ID}_DEV1_max_holding_time",
+    ]
+
+
+async def test_max_holding_time_only_for_blinds_with_a_catalog(
+    hass: HomeAssistant,
+) -> None:
+    """The parameter catalog was read from a D2-05-02 only."""
+    coordinator = MagicMock()
+    coordinator.devices = {"DEV1": _blind("D2-05-00")}
     added: list = []
     await async_setup_entry(
         hass, _entry(coordinator), lambda entities, *_a, **_k: added.extend(entities)
@@ -115,6 +132,25 @@ def test_number_metadata_follows_the_gateway_parameter_catalog() -> None:
     assert entity.native_unit_of_measurement == "s"
 
 
+def test_max_holding_time_metadata_follows_the_gateway_parameter_catalog() -> None:
+    entity = OpusGreenNetBlindTimeNumber(
+        MagicMock(), EAG_ID, "gateway", _blind(), BLIND_TIMES[2]
+    )
+    assert entity.unique_id == f"{EAG_ID}_DEV1_max_holding_time"
+    assert entity.translation_key == "max_holding_time"
+    assert entity.entity_category is EntityCategory.CONFIG
+    assert entity.entity_registry_enabled_default is False
+    assert entity.device_class is NumberDeviceClass.DURATION
+    assert (entity.native_min_value, entity.native_max_value) == (0, 65535)
+    assert entity.native_step == 1
+    assert entity.native_unit_of_measurement == "s"
+    # The travel times keep their own range.
+    travel = OpusGreenNetBlindTimeNumber(
+        MagicMock(), EAG_ID, "gateway", _blind(), BLIND_TIMES[0]
+    )
+    assert (travel.native_max_value, travel.native_step) == (655.35, 0.01)
+
+
 def test_value_follows_the_channel_fields() -> None:
     device = _blind()
     vertical, rotation = (
@@ -128,6 +164,12 @@ def test_value_follows_the_channel_fields() -> None:
     channel.rotation_time = 0
     assert vertical.native_value == 25.51
     assert rotation.native_value == 0
+    holding = OpusGreenNetBlindTimeNumber(
+        MagicMock(), EAG_ID, "gateway", device, BLIND_TIMES[2]
+    )
+    assert holding.native_value is None
+    channel.max_holding_time = 29
+    assert holding.native_value == 29
 
 
 async def test_setting_a_value_writes_the_gateway_parameter() -> None:
@@ -142,7 +184,106 @@ async def test_setting_a_value_writes_the_gateway_parameter() -> None:
     )
 
 
+# ── max holding time in the data model ─────────────────────────────────────
+
+
+def test_max_holding_time_is_read_from_the_device_configuration() -> None:
+    data = {
+        "configuration": {
+            "parameters": [
+                {"key": "maxHoldingTime", "value": 29.0, "unit": "s"},
+                {"key": "verticalMovementTime", "value": 25.42, "unit": "s"},
+            ]
+        }
+    }
+    functions = protocol.configuration_state_functions(data)
+    assert {"channel": 0, "key": "maxHoldingTime", "value": 29.0, "unit": "s"} in (
+        functions
+    )
+    # A refresh that is not authoritative still carries the setting.
+    keys = {function["key"] for function in protocol.configuration_functions(data)}
+    assert keys == {"maxHoldingTime", "verticalMovementTime"}
+    device = _blind()
+    device.update_from_telegram({"functions": functions})
+    assert device.channels[0].max_holding_time == 29.0
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(0, 0.0), ("29.00", 29.0), (29, 29.0), (65535, 65535.0), ("12", 12.0)],
+)
+def test_max_holding_time_accepts_values_in_the_catalog_range(value, expected) -> None:
+    device = _blind()
+    device.update_from_telegram(
+        {"functions": [{"key": "maxHoldingTime", "value": value}]}
+    )
+    assert device.channels[0].max_holding_time == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, True, "", "off", "noChange", -1, "-0.5", 65536, float("nan"), float("inf")],
+)
+def test_invalid_max_holding_time_keeps_the_known_value(value) -> None:
+    device = _blind()
+    device.get_or_create_channel().max_holding_time = 29.0
+    device.update_from_telegram(
+        {"functions": [{"key": "maxHoldingTime", "value": value}]}
+    )
+    assert device.channels[0].max_holding_time == 29.0
+
+
+def test_a_foreign_command_never_sets_the_max_holding_time() -> None:
+    """Units of a command of another controller are not known; only reports count."""
+    command = [{"key": "maxHoldingTime", "value": 30}]
+    assert protocol.outbound_state_functions(command) == []
+    assert not protocol.has_target_state(protocol.outbound_state_functions(command))
+
+
 # ── coordinator ────────────────────────────────────────────────────────────
+
+
+async def test_max_holding_time_write_is_adopted_after_the_read_back(
+    radio, connected_coordinator
+) -> None:
+    coord = connected_coordinator
+    device = coord.devices["DEV1"] = _blind()
+    channel = device.get_or_create_channel()
+    channel.max_holding_time = 12.0
+    radio.response = _document(maxHoldingTime=29.0)
+
+    await coord.async_set_device_parameter("DEV1", "maxHoldingTime", 29)
+
+    assert radio.sent == [
+        (
+            "PUT",
+            CONFIG_PATH,
+            {
+                "configuration": {
+                    "parameters": [{"key": "maxHoldingTime", "value": 29}]
+                }
+            },
+        ),
+        ("GET", CONFIG_PATH, None),
+    ]
+    assert channel.max_holding_time == 29.0
+
+
+async def test_unconfirmed_max_holding_time_keeps_the_previous_one(
+    radio, connected_coordinator
+) -> None:
+    coord = connected_coordinator
+    device = coord.devices["DEV1"] = _blind()
+    channel = device.get_or_create_channel()
+    channel.max_holding_time = 12.0
+    radio.response = _document(maxHoldingTime=12.0)
+
+    with pytest.raises(HomeAssistantError) as error:
+        await coord.async_set_device_parameter("DEV1", "maxHoldingTime", 29)
+
+    assert error.value.translation_key == "parameter_not_confirmed"
+    assert channel.max_holding_time == 12.0
+    assert [method for method, _, _ in radio.sent] == ["PUT", "GET"]
 
 
 async def test_write_is_adopted_only_after_the_read_back(

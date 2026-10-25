@@ -140,6 +140,7 @@ def test_configuration_functions_tolerate_malformed_parameters(
     [
         [{"key": "rotationTime", "defaultValue": 0.0}],
         [{"key": "verticalMovementTime", "defaultValue": 30.0}],
+        [{"key": "maxHoldingTime", "defaultValue": 12.0}],
         [{"key": "timer", "value": 300.0}],
     ],
 )
