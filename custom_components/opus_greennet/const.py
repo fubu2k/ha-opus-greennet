@@ -187,15 +187,34 @@ KEY_VERTICAL_MOVEMENT_TIME: Final = "verticalMovementTime"
 # Longest run of a D2-05-02 blind in seconds, a configuration parameter. Not a
 # state key: a command of another controller carrying it is not applied.
 KEY_MAX_HOLDING_TIME: Final = "maxHoldingTime"
-# Configuration parameters of a D2-01-03 dimmer in seconds. Like the holding
-# time they are no state keys: a command of another controller carrying them is
-# not applied, and reading them is no state update (see DIMMER_SETTING_KEYS).
+# Configuration parameters of D2-01 dimmers (seconds) and switches (seconds, lux).
 KEY_RAMPING_TIME: Final = "rampingTime"
 KEY_SHORT_PRESS: Final = "shortPress"
 KEY_LONG_PRESS: Final = "longPress"
-DIMMER_SETTING_KEYS: Final = frozenset(
-    {KEY_RAMPING_TIME, KEY_SHORT_PRESS, KEY_LONG_PRESS}
-)
+KEY_TIMER: Final = "timer"
+KEY_TIMER_LONG: Final = "timerLong"
+KEY_SWITCH_OFF_WARNING: Final = "switchOffWarning"
+KEY_SWITCH_OFF_WARNING_SIGNAL: Final = "switchOffWarningSignal"
+KEY_ILLUMINATION_THRESHOLD: Final = "illuminationThreshold"
+# Device settings and the channel field they fill, with the range of the
+# gateway's parameter catalog (a reported value outside it keeps the known one).
+# Like the holding time they are no state keys: a command of another controller
+# carrying them is not applied, and reading them is no state update.
+DEVICE_SETTINGS: Final = {
+    KEY_RAMPING_TIME: ("ramping_time", 0, 25.5),
+    KEY_SHORT_PRESS: ("short_press_time", 0, 2.55),
+    KEY_LONG_PRESS: ("long_press_time", 0, 2.55),
+    KEY_TIMER: ("timer", 60, 7200),
+    KEY_TIMER_LONG: ("timer_long", 60, 18000),
+    KEY_SWITCH_OFF_WARNING: ("switch_off_warning", 0, 45),
+    KEY_SWITCH_OFF_WARNING_SIGNAL: ("switch_off_warning_signal", 0.2, 2),
+    KEY_ILLUMINATION_THRESHOLD: ("illumination_threshold", 0, 1500),
+}
+DEVICE_SETTING_KEYS: Final = frozenset(DEVICE_SETTINGS)
+# Decimals a written parameter is rounded to; the default fits every step of
+# 0.01 or more.
+DEFAULT_PARAMETER_DECIMALS: Final = 2
+PARAMETER_DECIMALS: Final = {KEY_SWITCH_OFF_WARNING_SIGNAL: 3}
 COVER_MOVEMENT_GRACE_SECONDS: Final = 5.0
 COVER_RECONCILIATION_DELAYS: Final = (10.0, 20.0)
 KEY_CHANNEL: Final = "channel"

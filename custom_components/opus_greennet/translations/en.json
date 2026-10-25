@@ -229,6 +229,21 @@
       },
       "long_press_time": {
         "name": "Long-press time"
+      },
+      "timer": {
+        "name": "Timer duration"
+      },
+      "timer_long": {
+        "name": "Timer duration (long press)"
+      },
+      "switch_off_warning": {
+        "name": "Switch-off warning"
+      },
+      "switch_off_warning_signal": {
+        "name": "Switch-off warning signal"
+      },
+      "illumination_threshold": {
+        "name": "Illumination threshold"
       }
     }
   },

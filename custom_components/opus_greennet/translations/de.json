@@ -229,6 +229,21 @@
       },
       "long_press_time": {
         "name": "Zeit Langdruck"
+      },
+      "timer": {
+        "name": "Timerdauer"
+      },
+      "timer_long": {
+        "name": "Timerdauer (langer Tastendruck)"
+      },
+      "switch_off_warning": {
+        "name": "Ausschaltwarnung"
+      },
+      "switch_off_warning_signal": {
+        "name": "Dauer des Warnsignals"
+      },
+      "illumination_threshold": {
+        "name": "Helligkeitsschwelle"
       }
     }
   },

@@ -55,6 +55,7 @@ from .api import (
 from .const import (
     COVER_MOVEMENT_GRACE_SECONDS,
     COVER_RECONCILIATION_DELAYS,
+    DEFAULT_PARAMETER_DECIMALS,
     DOMAIN,
     KEY_ANGLE,
     KEY_CHANNEL,
@@ -68,6 +69,7 @@ from .const import (
     KEY_STOP,
     KEY_UNLOCK,
     KEY_VERTICAL_MOVEMENT_TIME,
+    PARAMETER_DECIMALS,
     RAMPING_MODE_FADE,
     RAMPING_MODE_SWITCH,
     REPOSITIONING_FIRST_DOWN,
@@ -1892,7 +1894,9 @@ class OpusGreenNetCoordinator:
         device = self.get_device(device_id)
         if device is None:
             raise request_error("device_not_found", device_id)
-        value = round(value, 2)
+        # The step of the parameter decides how many decimals the device keeps.
+        decimals = PARAMETER_DECIMALS.get(key, DEFAULT_PARAMETER_DECIMALS)
+        value = round(value, decimals)
         await self.async_set_device_configuration(
             device_id,
             {"configuration": {"parameters": [{"key": key, "value": value}]}},
@@ -1900,7 +1904,7 @@ class OpusGreenNetCoordinator:
         stored = protocol.configuration_parameter(
             await self.async_get_device_configuration(device_id), key
         )
-        if stored is None or abs(stored - value) > 0.005:
+        if stored is None or abs(stored - value) > 0.5 * 10**-decimals:
             raise request_error("parameter_not_confirmed", device_id, key)
         device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
         self._dispatch_state(device)
