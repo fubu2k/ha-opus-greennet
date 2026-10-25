@@ -72,6 +72,23 @@ tested on hardware**, so try a single switch first. The ranges are those of the
 parameter catalog read from one D2-01-01 and one D2-01-11; other switch types
 get no such entities.
 
+**Switch selects.** D2-01-01 and D2-01-11 switches also get select entities for
+the settings that have a fixed set of values: *Operation mode* (bottom on,
+timer, toggle, top on; the timer durations above only act in *timer*), *LED
+colour* (all, green, off, red), *LED channel* (2-channel switches only: which
+channel the LED shows) and *External input function* (channel 1 and inactive,
+for a 2-channel switch also channel 2 and channels 1 + 2). The same rules apply
+as for the numbers: configuration entities, **disabled by default**, one set
+per device, values from the device configuration, a new value is written with
+the ReCom configuration request (`{"key": ..., "value": "<value>"}`) and
+adopted only after it was read back, nothing is repeated automatically. A value
+the gateway reports that is not in the list shows as *unknown* and is never
+changed by the integration. Writing these settings was **not tested on
+hardware** (not even a numeric one on a switch), so try a single switch first.
+The function of the rocker buttons A and B is not offered: a switch reports a
+value there that its own catalog does not list, and a wrong choice would change
+which button switches which channel.
+
 **Local control.** D2-01 actuators that report local control get a diagnostic
 *Local control* binary sensor, disabled by default.
 

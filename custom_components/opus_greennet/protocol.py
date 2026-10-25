@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from .const import (
     BUTTON_KEYS,
+    DEVICE_OPTIONS,
     DEVICE_SETTING_KEYS,
     DEVICE_SETTINGS,
     KEY_ANGLE,
@@ -54,12 +55,14 @@ CONFIGURATION_KEYS = frozenset(
         *DEVICE_SETTING_KEYS,
     }
 )
-# Configuration parameters (cover times, D2-01 settings) that are read as state.
+# Configuration parameters (cover times, D2-01 settings and options) that are
+# read as state.
 CONFIGURATION_STATE_KEYS = (
     KEY_MAX_HOLDING_TIME,
     KEY_ROTATION_TIME,
     KEY_VERTICAL_MOVEMENT_TIME,
     *DEVICE_SETTINGS,
+    *DEVICE_OPTIONS,
 )
 # The RWM documents value-only slots in transmitModes: index 0 is the smoke
 # alarm, index 1 the battery state.
@@ -182,7 +185,7 @@ def rwm_transmit_modes(modes: Sequence[object]) -> list[object]:
 
 
 def configuration_state_functions(data: WireMapping) -> list[WireFunction]:
-    """Read reported cover and dimmer times, never parameter defaults."""
+    """Read reported cover times and D2-01 settings, never parameter defaults."""
     configuration = data.get("configuration")
     if not isinstance(configuration, dict):
         return []
@@ -249,6 +252,24 @@ def configuration_parameter(document: WireMapping, key: str) -> float | None:
         if isinstance(parameter, dict) and parameter.get("key") == key:
             value = EnOceanDevice._parse_number(parameter.get("value"), minimum=0)
             return None if value is None else float(value)
+    return None
+
+
+def configuration_option(document: WireMapping, key: str) -> str | None:
+    """Return one text parameter of a ``configuration`` document.
+
+    ``document`` is the answer to ``GET /devices/{id}/configuration``. A
+    missing or malformed value yields None, so a read-back never confirms
+    something the device did not report.
+    """
+    configuration = as_object(document.get("configuration"))
+    parameters = None if configuration is None else configuration.get("parameters")
+    if not isinstance(parameters, list):
+        return None
+    for parameter in parameters:
+        if isinstance(parameter, dict) and parameter.get("key") == key:
+            value = parameter.get("value")
+            return value if isinstance(value, str) and value else None
     return None
 
 

@@ -14,6 +14,7 @@ from .const import (
     D2_01_CHANNEL_COUNTS,
     D2_01_DIMMER_EEPS,
     DEFAULT_CHANNEL,
+    DEVICE_OPTIONS,
     DEVICE_SETTING_KEYS,
     DEVICE_SETTINGS,
     EEP_MAPPINGS,
@@ -140,6 +141,11 @@ class EnOceanChannel:
     switch_off_warning: float | None = None
     switch_off_warning_signal: float | None = None
     illumination_threshold: float | None = None
+    # D2-01 switch settings with fixed values, as reported (DEVICE_OPTIONS).
+    operation_mode: str | None = None
+    led_color: str | None = None
+    led_channel: str | None = None
+    function_external_input: str | None = None
     movement: str | None = None  # Estimated opening/closing, never physical feedback
     local_control: bool | None = None
     locking_mode: str | None = None  # block, unblock or alarm (D2-05)
@@ -662,6 +668,15 @@ class EnOceanDevice:
         number = cls._parse_float(value, minimum=minimum, maximum=maximum)
         return current if number is None else number
 
+    @staticmethod
+    def _option_reading(value: object) -> str | None:
+        """Return a reported setting value as text, or None if there is none."""
+        if isinstance(value, str):
+            return value or None
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return str(value) if isfinite(value) else None
+        return None
+
     @classmethod
     def _integer_reading(
         cls,
@@ -810,6 +825,13 @@ class EnOceanDevice:
                 channel.max_holding_time = self._float_reading(
                     channel.max_holding_time, value, minimum=0, maximum=65535
                 )
+
+            elif key in DEVICE_OPTIONS:
+                # The reported value is kept as it is, also when the catalog
+                # does not list it; a missing or malformed one keeps the known.
+                option = self._option_reading(value)
+                if option is not None:
+                    setattr(channel, DEVICE_OPTIONS[key], option)
 
             elif key in DEVICE_SETTINGS:
                 attribute, minimum, maximum = DEVICE_SETTINGS[key]
