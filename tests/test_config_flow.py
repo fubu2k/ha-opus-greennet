@@ -212,6 +212,8 @@ async def test_reconfigure_rejects_a_different_gateway(
         "-gateway.local",
         "a" * 64 + ".local",
         "[not-an-ip]",
+        "",
+        "   ",
     ],
 )
 async def test_user_flow_rejects_a_url_instead_of_a_host(
@@ -246,3 +248,65 @@ async def test_user_flow_accepts_host_names_and_ipv6(
 )
 def test_host_names_are_accepted(host: str) -> None:
     assert _is_host(host)
+
+
+INVALID_HOSTS = ["http://192.168.1.10", "", "   "]
+
+
+@pytest.mark.parametrize("host", INVALID_HOSTS)
+async def test_reauth_rejects_an_invalid_host_and_recovers(
+    hass: HomeAssistant, gateway: FakeGateway, host: str
+) -> None:
+    entry = await _entry_with_legacy_mqtt_data(hass, gateway.eurid)
+    flow_id = hass.config_entries.flow.async_progress_by_handler(DOMAIN)[0]["flow_id"]
+    with patch(
+        "custom_components.opus_greennet.config_flow.async_read_gateway_id"
+    ) as read_gateway_id:
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, {**gateway.config, "host": host}
+        )
+    # The host is rejected before any connection attempt.
+    read_gateway_id.assert_not_called()
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"host": "invalid_host"}
+    assert "host" not in entry.data
+
+    result = await hass.config_entries.flow.async_configure(flow_id, gateway.config)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    await hass.async_block_till_done()
+    assert entry.data["host"] == gateway.config["host"]
+
+
+@pytest.mark.parametrize("host", INVALID_HOSTS)
+async def test_reconfigure_rejects_an_invalid_host_and_recovers(
+    hass: HomeAssistant, gateway: FakeGateway, host: str
+) -> None:
+    entry = await setup_bridge(hass, gateway)
+    original_host = entry.data["host"]
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+    with patch(
+        "custom_components.opus_greennet.config_flow.async_read_gateway_id"
+    ) as read_gateway_id:
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**gateway.config, "host": host}
+        )
+    # The host is rejected before any connection attempt.
+    read_gateway_id.assert_not_called()
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"host": "invalid_host"}
+    assert entry.data["host"] == original_host
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**gateway.config, "host": "localhost"}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    await hass.async_block_till_done()
+    assert entry.data["host"] == "localhost"
