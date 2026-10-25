@@ -17,6 +17,8 @@ import pytest
 
 from custom_components.opus_greennet import protocol
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
+from custom_components.opus_greennet.number import DEVICE_TIMES
+from custom_components.opus_greennet.select import DEVICE_SELECTS
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TYPES = ("d2_05_02", "d2_01_01", "d2_01_11", "d2_01_03")
@@ -172,3 +174,93 @@ def test_blind_configuration_feeds_the_cover_model() -> None:
     assert (channel.vertical_movement_time, channel.rotation_time) == (25.51, 0.0)
     # A rotation time of zero means a roller shutter without tilt.
     assert device.supports_tilt is False
+
+
+# ── Entity coverage of the catalogs ──────────────────────────────────────────
+
+EEPS = {
+    "d2_05_02": "D2-05-02",
+    "d2_01_01": "D2-01-01",
+    "d2_01_11": "D2-01-11",
+    "d2_01_03": "D2-01-03",
+}
+# Catalog parameters without an entity, each with the reason. A new parameter
+# in a catalog fails the coverage test until it gets an entity or is listed here.
+_SWITCH_DEFERRED = {
+    "functionRockerA": "raw value 0 is outside the options; needs a text write test",
+    "functionRockerB": "raw value 0 is outside the options; needs a text write test",
+    "routingTime": "a number or the word off; no entity yet",
+}
+DEFERRED = {
+    "d2_05_02": {
+        "functionRockerA": "same options as the switches; needs a text write test",
+        "functionRockerB": "same options as the switches; needs a text write test",
+        "routingTime": "a number or the word off; no entity yet",
+        "lastVerticalMovementTime": "read only; shown in the diagnostics",
+    },
+    "d2_01_01": _SWITCH_DEFERRED,
+    "d2_01_11": _SWITCH_DEFERRED,
+    "d2_01_03": {},
+}
+
+
+def _device(name: str) -> EnOceanDevice:
+    return EnOceanDevice("DEV1", "Test", [{"eep": EEPS[name]}])
+
+
+def _entity_parameters(name: str) -> set[str]:
+    device = _device(name)
+    numbers = {time.parameter for time in DEVICE_TIMES if time.applies_to(device)}
+    selects = {
+        select.parameter
+        for select in DEVICE_SELECTS
+        if select.values_for(device) is not None
+    }
+    return numbers | selects
+
+
+@pytest.mark.parametrize("name", TYPES)
+def test_every_catalog_parameter_has_an_entity_or_a_reason(name: str) -> None:
+    catalog = set(_catalog(name))
+    covered = _entity_parameters(name)
+    deferred = set(DEFERRED[name])
+    assert not covered - catalog, "an entity for a parameter the catalog lacks"
+    assert not covered & deferred, "listed as deferred, but it has an entity"
+    assert not deferred - catalog, "deferred entry for a parameter the catalog lacks"
+    assert catalog == covered | deferred
+    assert all(DEFERRED[name].values())
+
+
+@pytest.mark.parametrize("name", TYPES)
+def test_number_entities_follow_the_catalog_ranges(name: str) -> None:
+    device = _device(name)
+    catalog = _catalog(name)
+    for time in DEVICE_TIMES:
+        if not time.applies_to(device):
+            continue
+        (rng,) = (
+            item["range"]
+            for item in catalog[time.parameter]["values"]
+            if "range" in item
+        )
+        assert (time.minimum, time.maximum, time.step) == (
+            rng["min"],
+            rng["max"],
+            rng["step"],
+        ), time.parameter
+
+
+@pytest.mark.parametrize("name", TYPES)
+def test_select_entities_offer_the_catalog_values(name: str) -> None:
+    device = _device(name)
+    catalog = _catalog(name)
+    for select in DEVICE_SELECTS:
+        values = select.values_for(device)
+        if values is None:
+            continue
+        listed = {
+            item["value"]
+            for item in catalog[select.parameter]["values"]
+            if "value" in item
+        }
+        assert set(values) == listed, select.parameter

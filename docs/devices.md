@@ -3,6 +3,7 @@
 How each device type appears in Home Assistant. For the list of supported
 profiles see [Supported devices](../README.md#supported-devices).
 
+- [Settings entities by device type](#settings-entities-by-device-type)
 - [Switches and dimmers (D2-01)](#switches-and-dimmers-d2-01)
 - [Buttons and rocker switches](#buttons-and-rocker-switches)
 - [Blinds and shutters (D2-05)](#blinds-and-shutters-d2-05)
@@ -13,6 +14,25 @@ profiles see [Supported devices](../README.md#supported-devices).
 - [Sensor values](#sensor-values)
 - [Removing or replacing a device](#removing-or-replacing-a-device)
 - [Actions](#actions)
+
+## Settings entities by device type
+
+The settings stored on actuators, as far as the gateway's parameter catalog
+(read from one device per type) lists them. All are configuration entities and
+**disabled by default**; the details are in the sections below.
+
+| Device | Number entities | Select entities | Not offered |
+|--------|-----------------|-----------------|-------------|
+| Blinds (D2-05-02) | Vertical movement time, Rotation time, Maximum holding time | – | Function of rocker A and B, routing time |
+| Dimmers (D2-01-03) | Ramping time, Short-press time, Long-press time | – | – |
+| Switches (D2-01-01) | Timer duration, Timer duration (long press), Switch-off warning, Switch-off warning signal, Illumination threshold | Operation mode, LED colour, External input function | Function of rocker A and B, routing time |
+| 2-channel switches (D2-01-11) | as D2-01-01 | as D2-01-01, plus LED channel | as D2-01-01 |
+
+Every actuator whose device list contains a link table also has the diagnostic
+sensor *Wall switch links* (see [Sensor values](#sensor-values)). The
+functions of rocker A and B and the routing time are left out until a text
+write has been tested on hardware; a test in the repository fails when a
+catalog parameter has neither an entity nor an entry in that list of omissions.
 
 ## Switches and dimmers (D2-01)
 
@@ -226,7 +246,9 @@ battery percentage is invented when the gateway publishes none.
   unchanged for a long time.
 - Actuators whose device list contains a link table also have a diagnostic
   **Wall switch links** sensor (disabled by default): the number of wall
-  switches the actuator listens to. The table is read from the device list
+  switches the actuator listens to. The sensor appears as soon as the gateway
+  lists a table for the device, also when that happens after the device was
+  discovered. The table is read from the device list
   every 30 minutes without a radio request and reflects what the gateway has
   stored (it reads the tables from the devices itself, typically at night). A
   table without inbound entries is shown as 0; if the gateway lists no table,

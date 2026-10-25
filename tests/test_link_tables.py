@@ -433,6 +433,53 @@ async def test_sensor_exists_only_for_devices_with_a_table(make_device) -> None:
     assert f"{GATEWAY_ID}_PLAIN_wall_switch_links" not in unique_ids
 
 
+async def test_sensor_follows_a_table_that_is_listed_after_discovery(
+    make_device,
+) -> None:
+    device = make_device("D2-01-01", device_id="LATE")
+    coordinator = MagicMock()
+    coordinator.devices = {device.device_id: device}
+    entry = SimpleNamespace(
+        data={"eag_id": GATEWAY_ID},
+        runtime_data=SimpleNamespace(coordinator=coordinator, gateway_device_id="gw"),
+        async_on_unload=MagicMock(),
+    )
+    added = MagicMock()
+    unsubscribe = MagicMock()
+    with patch(
+        "custom_components.opus_greennet.sensor.async_dispatcher_connect",
+        return_value=unsubscribe,
+    ) as connect:
+        await async_setup_sensors(MagicMock(), entry, added)
+
+    def link_ids() -> list[str | None]:
+        return [
+            entity.unique_id
+            for call in added.call_args_list
+            for entity in call.args[0]
+            if isinstance(entity, OpusGreenNetWallSwitchLinksSensor)
+        ]
+
+    # No table yet: no sensor, and one listener for this device's updates.
+    assert link_ids() == []
+    signals = [call.args[1] for call in connect.call_args_list]
+    assert signals.count(f"{SIGNAL_DEVICE_STATE_UPDATE}_{GATEWAY_ID}_LATE") == 1
+    state_update = next(
+        call.args[2]
+        for call in connect.call_args_list
+        if call.args[1].startswith(SIGNAL_DEVICE_STATE_UPDATE)
+    )
+
+    state_update(device)  # an update that brings no table changes nothing
+    assert link_ids() == []
+    unsubscribe.assert_not_called()
+
+    device.link_tables = RECORDED  # the next device list brings the table
+    state_update(device)
+    state_update(device)  # a second update adds nothing twice
+    assert link_ids() == [f"{GATEWAY_ID}_LATE_wall_switch_links"]
+
+
 # ── Diagnostics ──────────────────────────────────────────────────────────────
 
 
