@@ -59,7 +59,7 @@ connected directly to the OPUS gateway's EnOcean over IP REST API.
 | Rocker switches | F6-02-01, -02, -03; F6-03-01, -02 | Button events |
 
 Signal strength and battery level are available where the gateway reports them.
-Every device also has a diagnostic **Last seen** time (disabled by default).
+Every device also has a diagnostic **Last seen** time (enabled by default; an entity disabled earlier stays disabled).
 
 The gateway's own device shows its **Uptime** as a diagnostic sensor in days,
 hours, minutes and seconds (for example `1 d 2 h 3 min 4 s`, plus the seconds as

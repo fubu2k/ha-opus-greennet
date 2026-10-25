@@ -358,7 +358,7 @@ def test_sensor_values_and_metadata() -> None:
     assert power.native_unit_of_measurement is UnitOfPower.KILO_WATT
     assert power.unique_id.endswith("_energy_consumption")
     assert signal.native_value == 0
-    assert signal.entity_registry_enabled_default is False
+    assert signal.entity_registry_enabled_default is True
 
 
 def test_binary_sensor_values() -> None:

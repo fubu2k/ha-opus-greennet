@@ -475,7 +475,6 @@ class OpusGreenNetSignalStrengthSensor(OpusGreenNetBaseSensor):
             "signal_strength",
             "signal_strength",
         )
-        self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> int | None:
@@ -519,7 +518,6 @@ class OpusGreenNetLastSeenSensor(OpusGreenNetBaseSensor):
         super().__init__(
             coordinator, eag_id, gateway_device_id, device, "last_seen", "last_seen"
         )
-        self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> datetime | None:
