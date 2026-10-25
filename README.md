@@ -4,8 +4,9 @@
 
 # Opus GreenNet Bridge
 
-Local Home Assistant integration for **OPUS greenNet** EnOcean smart homes,
-connected directly to the OPUS gateway's EnOcean over IP REST API.
+Local Home Assistant integration for **OPUS greenNet** EnOcean smart homes.
+Works with both OPUS gateways, the black **OPUS greenNet gateway** and the newer
+**OPUS IQ-DOT**, connected directly to their EnOcean over IP REST API.
 
 [![HACS Custom][hacs-shield]][hacs]
 [![GitHub Release][release-shield]][releases]
@@ -66,7 +67,7 @@ Details per device type: [docs/devices.md](docs/devices.md).
 | | Requirement |
 |---|---|
 | Home Assistant | 2026.10.1 or newer |
-| Gateway | OPUS greenNet gateway with the REST API on port 8080 (tested with firmware OPUS-GW v1.21.31) |
+| Gateway | Both OPUS gateways: the black OPUS greenNet gateway (reports itself as `OPUS-GW`) and the OPUS IQ-DOT (`OPUS-IQ-DOT`), with the REST API on port 8080. Tested with firmware 1.21.30 to 1.21.34 |
 | Network | Home Assistant and the gateway in the same local network. Discovery uses mDNS; without it (for example Docker without host networking) enter the address once |
 | Devices | Paired with the gateway in the OPUS app |
 
