@@ -38,7 +38,7 @@ script/
 ├── check_coverage.py     # Per-module coverage gate used by CI
 └── check_icons.py        # Checks icons.json against the frontend's icon catalogue
 docs/
-└── quality/              # Quality scale evidence and gateway protocol contract
+└── quality/              # Quality scale evidence, gateway protocol contract, state semantics
 ```
 
 ## Running the checks
