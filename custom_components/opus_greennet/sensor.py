@@ -22,7 +22,7 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -33,12 +33,16 @@ from .coordinator import (
     SIGNAL_AVAILABILITY_UPDATE,
     SIGNAL_DEVICE_DISCOVERED,
     SIGNAL_DEVICE_REMOVED,
+    SIGNAL_DEVICE_STATE_UPDATE,
     SIGNAL_GATEWAY_UPTIME_UPDATE,
     CoverRun,
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanChannel, EnOceanDevice
 from .entity import OpusGreenNetEntity, migrate_legacy_entity_suffix
+
+# Actuators hold link tables; sensors and wall switches never list one.
+LINKABLE_ENTITY_TYPES: Final = frozenset({"switch", "light", "cover"})
 
 # Sensor state is pushed by the coordinator.
 PARALLEL_UPDATES = 0
@@ -81,6 +85,8 @@ async def async_setup_entry(
     gateway_device_id = entry.runtime_data.gateway_device_id
     eag_id = entry.data[CONF_EAG_ID]
     added_unique_ids: set[str] = set()
+    # Devices waiting for their first link table: device id -> unsubscribe.
+    waiting_for_links: dict[str, CALLBACK_TYPE] = {}
     async_add_entities([OpusGreenNetGatewayUptimeSensor(coordinator, eag_id)])
 
     @callback
@@ -260,7 +266,9 @@ async def async_setup_entry(
 
         # Wall switches linked to an actuator (diagnostic). Only devices whose
         # gateway listed a link table get one; the others have no such table.
+        # A table that appears later (device list refresh) adds it then.
         if device.link_tables is not None:
+            waiting_for_links.pop(device.device_id, lambda: None)()
             entities.append(
                 OpusGreenNetWallSwitchLinksSensor(
                     coordinator=coordinator,
@@ -268,6 +276,15 @@ async def async_setup_entry(
                     gateway_device_id=gateway_device_id,
                     device=device,
                 )
+            )
+        elif (
+            device.entity_type in LINKABLE_ENTITY_TYPES
+            and device.device_id not in waiting_for_links
+        ):
+            waiting_for_links[device.device_id] = async_dispatcher_connect(
+                hass,
+                f"{SIGNAL_DEVICE_STATE_UPDATE}_{eag_id}_{device.device_id}",
+                async_link_table_listed,
             )
 
         new_entities = [
@@ -281,7 +298,14 @@ async def async_setup_entry(
             async_add_entities(new_entities)
 
     @callback
+    def async_link_table_listed(device: EnOceanDevice) -> None:
+        """Add the link sensor once the gateway lists a table for the device."""
+        if device.link_tables is not None:
+            async_add_sensors(device)
+
+    @callback
     def async_forget_sensors(device_id: str) -> None:
+        waiting_for_links.pop(device_id, lambda: None)()
         prefix = f"{eag_id}_{device_id}_"
         added_unique_ids.difference_update(
             [
@@ -291,11 +315,23 @@ async def async_setup_entry(
             ]
         )
 
-    entry.async_on_unload(
-        async_dispatcher_connect(
-            hass, f"{SIGNAL_DEVICE_REMOVED}_{eag_id}", async_forget_sensors
-        )
+    unsubscribe_removed = async_dispatcher_connect(
+        hass, f"{SIGNAL_DEVICE_REMOVED}_{eag_id}", async_forget_sensors
     )
+
+    @callback
+    def async_unload() -> None:
+        unsubscribe_removed()
+        for unsubscribe in waiting_for_links.values():
+            unsubscribe()
+        waiting_for_links.clear()
+
+    entry.async_on_unload(async_unload)
+
+    # Add entities for already discovered devices. This comes before the
+    # discovery listener below, which stays the last subscription made here.
+    for device in coordinator.devices.values():
+        async_add_sensors(device)
 
     # Listen for new device discoveries
     entry.async_on_unload(
@@ -305,10 +341,6 @@ async def async_setup_entry(
             async_add_sensors,
         )
     )
-
-    # Add entities for already discovered devices
-    for device in coordinator.devices.values():
-        async_add_sensors(device)
 
 
 class OpusGreenNetBaseSensor(OpusGreenNetEntity, SensorEntity):
