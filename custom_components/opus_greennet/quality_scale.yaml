@@ -157,8 +157,10 @@ rules:
     status: done
     comment: >-
       Persistent, fixable repair after the one-time removal of a duplicate beta
-      entity during unique-ID migration. Transient gateway or radio outages and
-      quiet sensors are intentionally not issues.
+      entity during unique-ID migration, and a non-fixable notice while an
+      entry's gateway address is outside the local network (cleared by the next
+      load with a local address). Transient gateway or radio outages and quiet
+      sensors are intentionally not issues.
   stale-devices:
     status: done
     comment: >-

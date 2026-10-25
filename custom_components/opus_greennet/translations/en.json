@@ -432,6 +432,10 @@
     }
   },
   "issues": {
+    "non_local_gateway_address": {
+      "title": "The gateway address is not in the local network",
+      "description": "The address of this gateway is outside the local network. The gateway only speaks unencrypted HTTP, so its login can be read on the way. The integration keeps working, but re-authentication and reconfiguration only accept a local address.\n\nOpen the Opus GreenNet Bridge integration, choose Reconfigure from its menu and enter the gateway's address in your local network, or reach the gateway through a VPN. The notice disappears when the integration is loaded again with a local address."
+    },
     "duplicate_beta_entity": {
       "title": "Duplicate entity {removed_entity_id} was removed",
       "fix_flow": {

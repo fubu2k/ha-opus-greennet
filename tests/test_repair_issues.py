@@ -22,7 +22,9 @@ from homeassistant.helpers import issue_registry as ir
 from custom_components.opus_greennet.const import DOMAIN
 from custom_components.opus_greennet.entity import (
     ISSUE_DUPLICATE_BETA_ENTITY,
+    ISSUE_NON_LOCAL_ADDRESS,
     async_create_duplicate_beta_entity_issue,
+    async_set_non_local_address_issue,
     migrate_legacy_entity_suffix,
 )
 from tests.ha_helpers import setup_bridge
@@ -225,3 +227,60 @@ def test_issue_strings_use_exactly_the_raised_placeholders() -> None:
     assert set(PLACEHOLDERS) <= {
         part.split("}")[0] for part in confirm["description"].split("{")[1:]
     }
+
+
+# ── Gateway address outside the local network ──────────────────────────────
+
+
+async def test_non_local_address_notice_is_shown_cleared_and_not_fixable(
+    hass: HomeAssistant, gateway
+) -> None:
+    entry = await _entry(hass, gateway)
+    issue_id = f"{ISSUE_NON_LOCAL_ADDRESS}_{entry.entry_id}"
+    registry = ir.async_get(hass)
+    assert registry.async_get_issue(DOMAIN, issue_id) is None
+
+    async_set_non_local_address_issue(hass, entry.entry_id, non_local=True)
+    issue = registry.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.is_fixable is False
+    assert issue.is_persistent is False
+    assert issue.severity is ir.IssueSeverity.WARNING
+    assert issue.translation_key == ISSUE_NON_LOCAL_ADDRESS
+    # The gateway address is not part of the notice.
+    assert issue.translation_placeholders is None
+
+    # Raising it again does not duplicate it; a local address clears it.
+    async_set_non_local_address_issue(hass, entry.entry_id, non_local=True)
+    assert len([i for (d, _), i in registry.issues.items() if d == DOMAIN]) == 1
+    async_set_non_local_address_issue(hass, entry.entry_id, non_local=False)
+    assert registry.async_get_issue(DOMAIN, issue_id) is None
+    # Clearing something that is not there is harmless.
+    async_set_non_local_address_issue(hass, entry.entry_id, non_local=False)
+
+
+async def test_non_local_address_notice_goes_away_with_the_entry(
+    hass: HomeAssistant, gateway
+) -> None:
+    entry = await _entry(hass, gateway)
+    async_set_non_local_address_issue(hass, entry.entry_id, non_local=True)
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert not [
+        issue
+        for (domain, _), issue in ir.async_get(hass).issues.items()
+        if domain == DOMAIN
+    ]
+
+
+async def test_loading_an_entry_with_a_local_address_leaves_no_notice(
+    hass: HomeAssistant, gateway
+) -> None:
+    """The fake gateway listens on a loopback address."""
+    entry = await _entry(hass, gateway)
+    assert (
+        ir.async_get(hass).async_get_issue(
+            DOMAIN, f"{ISSUE_NON_LOCAL_ADDRESS}_{entry.entry_id}"
+        )
+        is None
+    )

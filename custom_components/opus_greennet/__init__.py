@@ -48,7 +48,10 @@ from .discovery import (
     is_local_address,
     parse_host_literal,
 )
-from .entity import async_delete_config_entry_issues
+from .entity import (
+    async_delete_config_entry_issues,
+    async_set_non_local_address_issue,
+)
 from .wire import json_body_problem
 
 _LOGGER = logging.getLogger(__name__)
@@ -232,7 +235,9 @@ async def async_setup_entry(
             translation_domain=DOMAIN, translation_key="gateway_address_required"
         )
     configured = parse_host_literal(entry.data[CONF_HOST])
-    if configured is not None and not is_local_address(configured):
+    non_local = configured is not None and not is_local_address(configured)
+    async_set_non_local_address_issue(hass, entry.entry_id, non_local=non_local)
+    if non_local:
         # Existing entries keep working. The gateway speaks unencrypted HTTP,
         # so credentials sent to a non-local address can be read on the way.
         _LOGGER.warning(
