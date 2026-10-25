@@ -365,15 +365,19 @@ async def test_an_existing_entry_with_a_public_address_still_sets_up_but_warns(
     coordinator = MagicMock()
     coordinator.async_setup = AsyncMock(side_effect=OpusConnectionError("Offline"))
     coordinator.async_unload = AsyncMock()
-    entry = SimpleNamespace(data={**ENTRY_DATA, "host": host})
+    entry = SimpleNamespace(entry_id="entry-id", data={**ENTRY_DATA, "host": host})
     coordinator_patch, session_patch = _mock_setup(coordinator)
+    hass = MagicMock()
     with (
         caplog.at_level(logging.WARNING, logger="custom_components.opus_greennet"),
         coordinator_patch,
-        session_patch,
+        session_patch as issue,
         pytest.raises(ConfigEntryNotReady),
     ):
-        await async_setup_entry(MagicMock(), entry)
+        await async_setup_entry(hass, entry)
+    # Every setup decides the repair notice again: shown for a public address,
+    # cleared otherwise (a host name is not judged at setup).
+    issue.assert_called_once_with(hass, "entry-id", non_local=warned)
     # The entry was not blocked: setup went on to the coordinator.
     coordinator.async_setup.assert_awaited_once()
     assert ("not in a local network" in caplog.text) is warned

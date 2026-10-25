@@ -88,7 +88,7 @@ Rule -> implementation -> tests -> documentation for every rule in
 | `exception-translations` | done | `translation_domain`/`translation_key` on raised Home Assistant errors | TR `test_raised_exception_keys_are_translated`; `test_service_actions.py::test_rejected_read_surfaces_translated_error` | – |
 | `icon-translations` | done | `icons.json` (handle position, handle closed, unlock request, mechanics fault, service icons) | `test_icon_translations.py` | – |
 | `reconfiguration-flow` | done | `config_flow.py` `async_step_reconfigure` (address and credentials, identity check) | `test_config_flow.py::test_reconfigure_changes_the_connection`, `::test_reconfigure_rejects_a_different_gateway`; QS `test_reauth_and_reconfigure_flows_verify_the_gateway_identity` | README Configuration |
-| `repair-issues` | done | `entity.py` `async_create_duplicate_beta_entity_issue` (persistent, fixable confirm flow); removed with the entry (`async_remove_entry`) | `test_repair_issues.py` | – |
+| `repair-issues` | done | `entity.py` `async_create_duplicate_beta_entity_issue` (persistent, fixable confirm flow) and `async_set_non_local_address_issue` (notice for a non-local gateway address); both removed with the entry (`async_remove_entry`) | `test_repair_issues.py`, `test_local_gateway_address.py` | – |
 | `stale-devices` | done | `async_remove_config_entry_device`; no automatic removal (gateway cannot confirm a device is gone) | `test_device_removal.py`; QS `test_stale_devices_and_diagnostics_entry_points` | docs/devices.md Removing or replacing a device |
 
 ## Platinum

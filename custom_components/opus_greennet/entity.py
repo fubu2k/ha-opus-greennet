@@ -28,6 +28,9 @@ _LOGGER = logging.getLogger(__name__)
 
 # Repair issue raised once when the migration removes a duplicate beta entity.
 ISSUE_DUPLICATE_BETA_ENTITY: Final = "duplicate_beta_entity"
+# Repair issue shown while an entry's gateway address is outside the local
+# network (the entry keeps working; the gateway has no TLS).
+ISSUE_NON_LOCAL_ADDRESS: Final = "non_local_gateway_address"
 # Issue data key linking an issue to the config entry that raised it.
 ISSUE_DATA_CONFIG_ENTRY_ID: Final = "config_entry_id"
 
@@ -128,6 +131,32 @@ def async_create_duplicate_beta_entity_issue(
             "preserved_entity_id": preserved_entity_id,
         },
     )
+
+
+@callback
+def async_set_non_local_address_issue(
+    hass: HomeAssistant, config_entry_id: str, *, non_local: bool
+) -> None:
+    """Show or clear the notice for a gateway address outside the local network.
+
+    The issue is not persistent: every setup of the entry decides again, so a
+    corrected address clears it with the next load. It is not fixable because
+    only the user can choose the new address (Reconfigure). Nothing is sent to
+    the gateway.
+    """
+    issue_id = f"{ISSUE_NON_LOCAL_ADDRESS}_{config_entry_id}"
+    if non_local:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            data={ISSUE_DATA_CONFIG_ENTRY_ID: config_entry_id},
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_NON_LOCAL_ADDRESS,
+        )
+    else:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
 @callback

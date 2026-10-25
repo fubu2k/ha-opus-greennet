@@ -432,6 +432,10 @@
     }
   },
   "issues": {
+    "non_local_gateway_address": {
+      "title": "Die Gateway-Adresse liegt nicht im lokalen Netzwerk",
+      "description": "Die Adresse dieses Gateways liegt außerhalb des lokalen Netzwerks. Das Gateway spricht nur unverschlüsseltes HTTP, deshalb kann seine Anmeldung auf dem Weg mitgelesen werden. Die Integration funktioniert weiter, aber erneute Anmeldung und Neukonfiguration akzeptieren nur noch eine lokale Adresse.\n\nÖffne die Integration Opus GreenNet Bridge, wähle im Menü Neu konfigurieren und trage die Adresse des Gateways in deinem lokalen Netzwerk ein, oder erreiche das Gateway über ein VPN. Der Hinweis verschwindet, wenn die Integration mit einer lokalen Adresse erneut geladen wird."
+    },
     "duplicate_beta_entity": {
       "title": "Doppelte Entität {removed_entity_id} wurde entfernt",
       "fix_flow": {

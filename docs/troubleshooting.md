@@ -34,6 +34,18 @@ integration works the same.
 A gateway that was ignored under **Discovered** stays ignored; remove the
 ignored entry to see it again.
 
+### "The gateway address is not in the local network"
+
+Entries that were set up with a public IP address before the gateway address
+had to be local keep working, but **Settings → System → Repairs** shows this
+notice for them, because the gateway speaks unencrypted HTTP and its login can
+be read on the way. Re-authentication and reconfiguration only accept a local
+address (error `host_not_local`). Choose **Reconfigure** in the integration's
+menu and enter the gateway's address in your local network, or reach the
+gateway through a VPN. The notice disappears when the integration is loaded
+again with a local address. Only IP addresses are checked when the integration
+loads; a host name is checked when you enter it.
+
 ## Devices not appearing
 
 1. Check that the integration entry is loaded and the gateway is available.
