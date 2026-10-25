@@ -19,15 +19,15 @@ concurrency:
 env:
   # Fixed reference: change only in a reviewed phase, together with
   # requirements_test_reference.txt.
-  REFERENCE_HA_VERSION: "2026.10.2"
-  # home-assistant/core tag 2026.10.2; hassfest rules and validators are built
+  REFERENCE_HA_VERSION: "2026.10.3"
+  # home-assistant/core tag 2026.10.3; hassfest rules and validators are built
   # from this immutable commit instead of the moving hassfest image.
-  REFERENCE_HA_CORE_SHA: "8d7fd8b68677c2585be36ec86043308f403875b8"
+  REFERENCE_HA_CORE_SHA: "1f214b8461dd1fbbd66e10765c6905f49d3c1d86"
 
 jobs:
   reference:
     runs-on: ubuntu-24.04
-    name: Home Assistant 2026.10.2 (fixed reference)
+    name: Home Assistant 2026.10.3 (fixed reference)
     steps:
       - uses: actions/checkout@v7
 
@@ -149,7 +149,7 @@ jobs:
 
   validate-reference:
     runs-on: ubuntu-24.04
-    name: Hassfest at Home Assistant 2026.10.2 (fixed reference)
+    name: Hassfest at Home Assistant 2026.10.3 (fixed reference)
     steps:
       - uses: actions/checkout@v7
         with:
