@@ -1,4 +1,4 @@
-"""Number platform: configured times of D2-05 blinds."""
+"""Number platform: configured times of D2-05 blinds and D2-01-03 dimmers."""
 
 from __future__ import annotations
 
@@ -18,8 +18,11 @@ from . import OpusGreenNetConfigEntry
 from .const import (
     CONF_EAG_ID,
     DEFAULT_CHANNEL,
+    KEY_LONG_PRESS,
     KEY_MAX_HOLDING_TIME,
+    KEY_RAMPING_TIME,
     KEY_ROTATION_TIME,
+    KEY_SHORT_PRESS,
     KEY_VERTICAL_MOVEMENT_TIME,
 )
 from .coordinator import SIGNAL_DEVICE_DISCOVERED, OpusGreenNetCoordinator
@@ -34,34 +37,43 @@ MAX_TRAVEL_SECONDS = 655.35
 TRAVEL_STEP_SECONDS = 0.01
 MAX_HOLDING_SECONDS = 65535
 HOLDING_STEP_SECONDS = 1
+MAX_RAMPING_SECONDS = 25.5
+RAMPING_STEP_SECONDS = 0.1
+MAX_PRESS_SECONDS = 2.55
+PRESS_STEP_SECONDS = 0.01
 
-# The parameter catalog was read from a D2-05-02 blind only.
+# The parameter catalogs were read from a D2-05-02 blind and a D2-01-03 dimmer.
 MAX_HOLDING_TIME_EEPS = frozenset({"D2-05-02"})
+DIMMER_TIME_EEPS = frozenset({"D2-01-03"})
 
 
 @dataclass(frozen=True, slots=True)
-class BlindTime:
-    """One time parameter of a blind with the range the gateway reports."""
+class DeviceTime:
+    """One time parameter of a device with the range the gateway reports."""
 
     translation_key: str
     parameter: str
     attribute: str
     maximum: float = MAX_TRAVEL_SECONDS
     step: float = TRAVEL_STEP_SECONDS
-    # EEPs whose catalog lists the parameter; None means every cover.
+    # Platform type of the devices that have the parameter.
+    entity_type: str = "cover"
+    # EEPs whose catalog lists the parameter; None means every such device.
     eeps: frozenset[str] | None = None
 
     def applies_to(self, device: EnOceanDevice) -> bool:
-        """Return whether the blind is known to have this parameter."""
-        return self.eeps is None or not self.eeps.isdisjoint(device.eep_names)
+        """Return whether the device is known to have this parameter."""
+        return device.entity_type == self.entity_type and (
+            self.eeps is None or not self.eeps.isdisjoint(device.eep_names)
+        )
 
 
-BLIND_TIMES: tuple[BlindTime, ...] = (
-    BlindTime(
+BLIND_TIMES: tuple[DeviceTime, ...] = (
+    DeviceTime(
         "vertical_movement_time", KEY_VERTICAL_MOVEMENT_TIME, "vertical_movement_time"
     ),
-    BlindTime("rotation_time", KEY_ROTATION_TIME, "rotation_time"),
-    BlindTime(
+    DeviceTime("rotation_time", KEY_ROTATION_TIME, "rotation_time"),
+    DeviceTime(
         "max_holding_time",
         KEY_MAX_HOLDING_TIME,
         "max_holding_time",
@@ -71,28 +83,58 @@ BLIND_TIMES: tuple[BlindTime, ...] = (
     ),
 )
 
+DIMMER_TIMES: tuple[DeviceTime, ...] = (
+    DeviceTime(
+        "ramping_time",
+        KEY_RAMPING_TIME,
+        "ramping_time",
+        maximum=MAX_RAMPING_SECONDS,
+        step=RAMPING_STEP_SECONDS,
+        entity_type="light",
+        eeps=DIMMER_TIME_EEPS,
+    ),
+    DeviceTime(
+        "short_press_time",
+        KEY_SHORT_PRESS,
+        "short_press_time",
+        maximum=MAX_PRESS_SECONDS,
+        step=PRESS_STEP_SECONDS,
+        entity_type="light",
+        eeps=DIMMER_TIME_EEPS,
+    ),
+    DeviceTime(
+        "long_press_time",
+        KEY_LONG_PRESS,
+        "long_press_time",
+        maximum=MAX_PRESS_SECONDS,
+        step=PRESS_STEP_SECONDS,
+        entity_type="light",
+        eeps=DIMMER_TIME_EEPS,
+    ),
+)
+
+DEVICE_TIMES = BLIND_TIMES + DIMMER_TIMES
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: OpusGreenNetConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the time settings of blinds."""
+    """Set up the time settings of blinds and dimmers."""
     coordinator = entry.runtime_data.coordinator
     gateway_device_id = entry.runtime_data.gateway_device_id
     eag_id = entry.data[CONF_EAG_ID]
 
     @callback
     def async_add_numbers(device: EnOceanDevice) -> None:
-        if device.entity_type != "cover":
-            return
         async_add_entities(
             [
-                OpusGreenNetBlindTimeNumber(
-                    coordinator, eag_id, gateway_device_id, device, blind_time
+                OpusGreenNetTimeNumber(
+                    coordinator, eag_id, gateway_device_id, device, device_time
                 )
-                for blind_time in BLIND_TIMES
-                if blind_time.applies_to(device)
+                for device_time in DEVICE_TIMES
+                if device_time.applies_to(device)
             ]
         )
 
@@ -105,13 +147,13 @@ async def async_setup_entry(
         async_add_numbers(device)
 
 
-class OpusGreenNetBlindTimeNumber(OpusGreenNetEntity, NumberEntity):
-    """A time stored on the blind (seconds).
+class OpusGreenNetTimeNumber(OpusGreenNetEntity, NumberEntity):
+    """A time stored on the blind or dimmer (seconds).
 
     The value comes from the device configuration, which the integration reads
     at setup and with every device list refresh; a change made by another
     controller shows up with the next refresh. A new value is adopted only
-    after the blind confirmed it when it was read back.
+    after the device confirmed it when it was read back.
     """
 
     _attr_has_entity_name = True
@@ -129,18 +171,18 @@ class OpusGreenNetBlindTimeNumber(OpusGreenNetEntity, NumberEntity):
         eag_id: str,
         gateway_device_id: str,
         device: EnOceanDevice,
-        blind_time: BlindTime,
+        device_time: DeviceTime,
     ) -> None:
         """Initialize the number."""
         super().__init__(
             coordinator, eag_id, gateway_device_id, device, DEFAULT_CHANNEL
         )
-        self._blind_time = blind_time
-        self._attr_translation_key = blind_time.translation_key
-        self._attr_native_max_value = blind_time.maximum
-        self._attr_native_step = blind_time.step
+        self._device_time = device_time
+        self._attr_translation_key = device_time.translation_key
+        self._attr_native_max_value = device_time.maximum
+        self._attr_native_step = device_time.step
         self._attr_unique_id = (
-            f"{eag_id}_{device.device_id}_{blind_time.translation_key}"
+            f"{eag_id}_{device.device_id}_{device_time.translation_key}"
         )
 
     @property
@@ -149,11 +191,11 @@ class OpusGreenNetBlindTimeNumber(OpusGreenNetEntity, NumberEntity):
         channel = self._device.channels.get(self._channel_id)
         if channel is None:
             return None
-        value: float | None = getattr(channel, self._blind_time.attribute)
+        value: float | None = getattr(channel, self._device_time.attribute)
         return value
 
     async def async_set_native_value(self, value: float) -> None:
-        """Write the time to the blind and read it back."""
+        """Write the time to the device and read it back."""
         await self._coordinator.async_set_device_parameter(
-            self._device.device_id, self._blind_time.parameter, value
+            self._device.device_id, self._device_time.parameter, value
         )

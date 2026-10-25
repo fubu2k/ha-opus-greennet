@@ -187,6 +187,15 @@ KEY_VERTICAL_MOVEMENT_TIME: Final = "verticalMovementTime"
 # Longest run of a D2-05-02 blind in seconds, a configuration parameter. Not a
 # state key: a command of another controller carrying it is not applied.
 KEY_MAX_HOLDING_TIME: Final = "maxHoldingTime"
+# Configuration parameters of a D2-01-03 dimmer in seconds. Like the holding
+# time they are no state keys: a command of another controller carrying them is
+# not applied, and reading them is no state update (see DIMMER_SETTING_KEYS).
+KEY_RAMPING_TIME: Final = "rampingTime"
+KEY_SHORT_PRESS: Final = "shortPress"
+KEY_LONG_PRESS: Final = "longPress"
+DIMMER_SETTING_KEYS: Final = frozenset(
+    {KEY_RAMPING_TIME, KEY_SHORT_PRESS, KEY_LONG_PRESS}
+)
 COVER_MOVEMENT_GRACE_SECONDS: Final = 5.0
 COVER_RECONCILIATION_DELAYS: Final = (10.0, 20.0)
 KEY_CHANNEL: Final = "channel"

@@ -39,6 +39,21 @@ Apple Home. An action with a `transition` (any duration) uses the dimmer's own
 configured fade instead; the requested duration itself cannot be passed to the
 device.
 
+**Dimmer times.** D2-01-03 dimmers get three number entities for the times
+stored on the dimmer, in seconds: *Ramping time* (the fade of switching on and
+off, 0 to 25.5, step 0.1), *Short-press time* and *Long-press time* (0 to 2.55,
+step 0.01). They are **disabled by default** and are configuration entities.
+The values come from the device configuration that the gateway reads itself
+(setup and every device list refresh, no extra radio telegram), so a change
+made by another controller shows up with the next refresh and a value can be
+up to a day old. A new value is written with the ReCom configuration request
+and adopted only after it was read back from the dimmer; if the dimmer does not
+confirm it, the previous value stays and nothing is repeated automatically.
+Writing these three times was **not tested on hardware** (only the vertical
+movement time and the maximum holding time of blinds were), so try a single
+dimmer first. The ranges are those of the parameter catalog read from one
+D2-01-03; other dimmer types get no such entities.
+
 **Local control.** D2-01 actuators that report local control get a diagnostic
 *Local control* binary sensor, disabled by default.
 
