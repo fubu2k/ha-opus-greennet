@@ -226,9 +226,10 @@ async def test_failed_setup_raises_translated_errors(
     assert raised.value.translation_key == translation_key
     unload.assert_awaited_once()
     # Nothing was left running: at most the one failed stream attempt of the
-    # stream-first setup, and no further attempt afterwards.
+    # stream-first setup (the line-framed request and its plain retry), and no
+    # further attempt afterwards.
     attempts = len(gateway.requests_to("GET", "/devices/stream"))
-    assert attempts <= 1
+    assert attempts <= 2
     await asyncio.sleep(1.4)
     assert len(gateway.requests_to("GET", "/devices/stream")) == attempts
 

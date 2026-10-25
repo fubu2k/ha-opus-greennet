@@ -148,9 +148,10 @@ async def test_setup_retries_for_an_unusable_gateway(
     assert not await hass.config_entries.async_setup(entry.entry_id)
     assert entry.state is config_entries.ConfigEntryState.SETUP_RETRY
     # The failed attempt left no stream or timers behind: the stream-first
-    # setup made at most its one attempt and no further one afterwards.
+    # setup made at most its one attempt (the line-framed request and its
+    # plain retry) and no further one afterwards.
     attempts = len(gateway.requests_to("GET", "/devices/stream")) - streams
-    assert attempts == (0 if failure == "unreachable" else 1)
+    assert attempts == (0 if failure == "unreachable" else 2)
     await asyncio.sleep(1.4)
     assert len(gateway.requests_to("GET", "/devices/stream")) == streams + attempts
 

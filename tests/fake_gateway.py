@@ -73,7 +73,8 @@ class FakeGateway:
     ``delimited=newLine`` parameter: ``"legacy"`` ignores it like older
     firmware and writes pretty-printed documents without delimiter, ``"ndjson"``
     writes one document per line ending in CRLF, ``"reject"`` answers
-    ``reject_status``, by default HTTP 400) and ``stream_queries`` (the query string of every stream request).
+    ``reject_status``, by default HTTP 400) and ``stream_queries`` (the query
+    string of every stream request).
     """
 
     def __init__(self, eurid: str = EURID, password: str = PASSWORD) -> None:

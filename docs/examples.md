@@ -103,9 +103,10 @@ automation:
 
 ### Show the last run time of a blind
 
-*Last run time* is a sensor with the attributes `direction`, `full_travel` and
-the start and end position. Compare `full_travel` with the configured
-`verticalMovementTime` to see whether the estimated travel matches the blind:
+*Last run time* is a sensor in seconds with the attributes `direction`,
+`full_travel` (true when the run covered the full height) and the start and end
+position. For a full run, compare the sensor value with the configured
+*Vertical movement time* to see whether the estimated travel matches the blind:
 
 ```yaml
 type: entities
@@ -163,8 +164,8 @@ This action only reads. Link tables are changed with the OPUS app.
 - **Physical buttons as automation triggers.** Wall rockers and the rocker
   buttons of actuators trigger scenes and other automations in Home Assistant.
 - **Safety and presence.** Water leak sensors, smoke alarms and presence
-  detectors become binary sensors for notifications, with unknown values never
-  taken for "no alarm".
+  detectors become binary sensors for notifications. During a gateway outage
+  they show *unavailable*, so a lost gateway does not look like "no alarm".
 - **Diagnosing a radio installation.** Signal strength (disabled by default),
   battery level and the redacted diagnostics download show devices with weak signal
   or low battery. See

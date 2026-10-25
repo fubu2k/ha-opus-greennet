@@ -144,10 +144,11 @@ async def test_setup_retries_when_the_stream_fails(
     await hass.async_block_till_done()
     entry = result["result"]
     assert entry.state is ConfigEntryState.SETUP_RETRY
-    # The first failure ends setup at once; no background retry is left.
-    assert len(gateway.requests_to("GET", "/devices/stream")) == 1
+    # The first failure ends setup at once; no background retry is left. One
+    # attempt is the line-framed request and its plain retry.
+    assert len(gateway.requests_to("GET", "/devices/stream")) == 2
     await asyncio.sleep(1.2)
-    assert len(gateway.requests_to("GET", "/devices/stream")) == 1
+    assert len(gateway.requests_to("GET", "/devices/stream")) == 2
 
 
 async def test_rejected_stream_at_setup_starts_one_reauth(

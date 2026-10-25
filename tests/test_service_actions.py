@@ -313,3 +313,21 @@ def test_services_are_registered_only_once() -> None:
     ) as register:
         _register_services(hass)
     register.assert_not_called()
+
+
+def test_device_configuration_actions_are_for_administrators_only() -> None:
+    hass = MagicMock()
+    hass.services.has_service.return_value = False
+    with patch(
+        "custom_components.opus_greennet.async_register_admin_service"
+    ) as register:
+        _register_services(hass)
+    admin_only = {call.args[2] for call in register.call_args_list}
+    assert {
+        "get_device_configuration",
+        "set_device_configuration",
+        "get_device_parameters",
+        "get_device_link_tables",
+    } <= admin_only
+    # Moving a blind is an everyday action, not an administrator one.
+    assert "set_cover_position" not in admin_only
