@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from math import isfinite
+from typing import Final
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
@@ -36,6 +38,68 @@ def parse_json(text: str | bytes | bytearray) -> JsonValue:
     except RecursionError as err:
         raise ValueError("The JSON document is nested too deeply") from err
     return value
+
+
+# Bounds for a request body that a caller (not the integration) composes. The
+# gateway documents no limit; these are generous for any configuration document
+# and exist so a malformed or runaway value fails before it reaches the radio.
+MAX_BODY_DEPTH: Final = 16
+MAX_BODY_SIZE: Final = 64 * 1024
+
+
+def json_body_problem(value: object) -> str | None:
+    """Return why ``value`` cannot be sent as a JSON body, or None if it can.
+
+    Only the encoding is checked, never the meaning: keys must be strings,
+    values must be JSON types with finite numbers, and nesting depth and
+    encoded size are bounded. ``json.dumps`` would otherwise write ``NaN`` as
+    if it were JSON or raise ``TypeError`` for other types. The returned text
+    never contains the value, so it is safe to show and to log.
+    """
+    if not _json_encodable(value, 0):
+        return "the value contains data that is not valid JSON"
+    if _nesting_depth(value) > MAX_BODY_DEPTH:
+        return "the value is nested too deeply"
+    try:
+        size = len(json.dumps(value, allow_nan=False))
+    except ValueError:
+        return "the value contains data that is not valid JSON"
+    if size > MAX_BODY_SIZE:
+        return "the value is too large"
+    return None
+
+
+def _json_encodable(value: object, depth: int) -> bool:
+    """Check types, keys and numbers, giving up beyond the depth bound."""
+    if depth > MAX_BODY_DEPTH:
+        # Too deep is reported by the caller; stop before recursing further.
+        return True
+    if value is None or isinstance(value, str | int):
+        return True
+    if isinstance(value, float):
+        return isfinite(value)
+    if isinstance(value, list):
+        return all(_json_encodable(item, depth + 1) for item in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(key, str) and _json_encodable(item, depth + 1)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _nesting_depth(value: object, depth: int = 1) -> int:
+    """Return the nesting depth, stopping once it exceeds the bound."""
+    if depth > MAX_BODY_DEPTH:
+        return depth
+    children: list[object]
+    if isinstance(value, list):
+        children = list(value)
+    elif isinstance(value, dict):
+        children = list(value.values())
+    else:
+        return depth - 1
+    return max((_nesting_depth(child, depth + 1) for child in children), default=depth)
 
 
 def as_object(value: object) -> JsonObject | None:

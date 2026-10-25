@@ -44,6 +44,7 @@ from .const import (
 from .coordinator import GatewayMismatchError, OpusGreenNetCoordinator
 from .discovery import async_locate_gateway, default_connection
 from .entity import async_delete_config_entry_issues
+from .wire import json_body_problem
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -349,9 +350,16 @@ def _register_services(hass: HomeAssistant) -> None:
         coordinator = _coordinator_for_call(hass, call)
         device_id = call.data[ATTR_DEVICE_ID]
         _validate_service_device(coordinator, device_id)
-        await coordinator.async_set_device_configuration(
-            device_id, call.data[ATTR_CONFIGURATION]
-        )
+        configuration = call.data[ATTR_CONFIGURATION]
+        # Radio write: refuse a body that cannot be encoded as JSON before it
+        # is queued or sent.
+        if (problem := json_body_problem(configuration)) is not None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_configuration",
+                translation_placeholders={"device_id": device_id, "reason": problem},
+            )
+        await coordinator.async_set_device_configuration(device_id, configuration)
 
     async def handle_get_device_parameters(call: ServiceCall) -> ServiceResponse:
         coordinator = _coordinator_for_call(hass, call)

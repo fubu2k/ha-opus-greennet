@@ -223,6 +223,9 @@
     "gateway_unavailable": {
       "message": "Das OPUS-Gateway ist nicht erreichbar. Prüfe seine Netzwerkverbindung und versuche es erneut."
     },
+    "invalid_configuration": {
+      "message": "Die Konfiguration für {device_id} wurde nicht an das Gateway gesendet: {reason}."
+    },
     "invalid_auth": {
       "message": "Das OPUS-Gateway hat die konfigurierten Zugangsdaten abgelehnt."
     },

@@ -240,7 +240,11 @@ had registered. **[HW][Test]**
 `opus_greennet.get_device_configuration` (response only),
 `opus_greennet.set_device_configuration`, `opus_greennet.get_device_parameters`
 (response only), `opus_greennet.reload_entry`. All are admin services with an
-optional `config_entry_id`.
+optional `config_entry_id`. `set_device_configuration` refuses a body that is
+not encodable JSON, nested deeper than 16 levels or larger than 64 KiB with the
+translated error `invalid_configuration` before any request is queued
+(`wire.json_body_problem`); the schema of the document is not known and not
+checked **[Code][Test]**.
 
 ## 11. Dispatcher signals (internal, unchanged)
 
