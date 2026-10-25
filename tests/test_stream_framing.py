@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import aiohttp
 import pytest
@@ -237,6 +238,26 @@ async def test_refused_parameter_falls_back_and_is_remembered(
     client.reset_stream_framing()
     await _drain(client)
     assert gateway.stream_queries == [QUERY, "", "", QUERY, ""]
+
+
+async def test_framing_choice_is_logged_without_host_or_credentials(
+    session: aiohttp.ClientSession,
+    gateway: FakeGateway,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    gateway.stream_framing = "reject"
+    gateway.close_after_snapshot = True
+    with caplog.at_level(logging.DEBUG, logger="custom_components.opus_greennet.api"):
+        await _drain(_client(session, gateway))
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages == [
+        "OPUS event stream requested with line framing",
+        "OPUS gateway refused line framing (HTTP 400); using the plain event stream",
+        "OPUS event stream requested with plain framing",
+    ]
+    text = "\n".join(messages)
+    assert gateway.host not in text
+    assert gateway.password not in text
 
 
 async def test_ignored_parameter_needs_no_fallback(

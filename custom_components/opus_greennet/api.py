@@ -22,6 +22,7 @@ import base64
 import codecs
 import heapq
 import itertools
+import logging
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import aclosing
 from math import isfinite
@@ -31,6 +32,8 @@ from urllib.parse import quote
 import aiohttp
 
 from .wire import JsonObject, as_object, parse_json
+
+_LOGGER = logging.getLogger(__name__)
 
 # Bounds for one request/response exchange (seconds).
 REQUEST_TIMEOUT: Final = 10.0
@@ -459,6 +462,10 @@ class OpusGatewayClient:
         url = f"{self._base_url}{_STREAM_PATH}"
         if line_framing:
             url = f"{url}?{_LINE_FRAMING_QUERY}"
+        _LOGGER.debug(
+            "OPUS event stream requested with %s framing",
+            "line" if line_framing else "plain",
+        )
         try:
             async with self._session.get(
                 url,
@@ -473,6 +480,11 @@ class OpusGatewayClient:
             ) as response:
                 _raise_for_auth(response)
                 if line_framing and response.status in _LINE_FRAMING_REFUSED:
+                    _LOGGER.debug(
+                        "OPUS gateway refused line framing (HTTP %s); "
+                        "using the plain event stream",
+                        response.status,
+                    )
                     raise _LineFramingRefused
                 if response.status != 200:
                     raise OpusResponseError(
