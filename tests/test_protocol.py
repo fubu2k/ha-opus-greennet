@@ -316,13 +316,17 @@ def test_real_device_object_state_functions() -> None:
             {"key": "switch", "channel": 0, "value": "on", "age": 26576},
         ],
     }
+    # The reported timer of the D2-01-11 is a device setting and read as state.
+    timer = {"channel": 0, "key": "timer", "value": 300.0, "unit": "s"}
     assert protocol.device_state_functions(data) == [
         data["states"][0],
         data["states"][1],
         {"key": "batteryLevel", "value": "96%"},
+        timer,
     ]
     assert protocol.configuration_functions(data) == [
-        {"key": "batteryLevel", "value": "96%"}
+        {"key": "batteryLevel", "value": "96%"},
+        timer,
     ]
 
 
