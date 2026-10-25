@@ -208,7 +208,10 @@ send it. **[Code][Test]**
   last vertical run, seconds) is kept per device and channel and shown in
   diagnostics as `last_vertical_movement_time`. It is never used for
   estimates, timers or queries and causes no request. Present only in
-  `GET /devices`, not in the streamed list. **[Upstream note][Code][Test]**
+  `GET /devices`, not in the streamed list. The key exists in the parameter
+  catalog (`GET /devices/{id}/parameters`, 0 to 655.35 s, step 0.01) and in the
+  configuration of a D2-05-02 on the maintainer's gateway (firmware 1.21.30).
+  **[HW][Upstream note][Code][Test]**
 - Diagnostics show per cover channel `position_origin`: `device list`,
   `reported` (device report or `device` document), `estimated` (foreign
   command or entity estimate after an acknowledgement) or `assumed` (travel
@@ -270,4 +273,3 @@ checked **[Code][Test]**.
   sensors and stand-alone rocker switches: not present on the test
   installation; covered by tests with the documented payloads.
 - Whether the gateway ever sends `content = "device"` documents on the stream.
-- The key `lastVerticalMovementTime` on the maintainer's gateway.

@@ -1,0 +1,193 @@
+{
+  "header": {
+    "httpStatus": 200,
+    "content": "parameters"
+  },
+  "parameters": [
+    {
+      "key": "functionExternalInput",
+      "description": "Function of external input",
+      "values": [
+        {
+          "value": "channel1",
+          "meaning": "Channel 1"
+        },
+        {
+          "value": "inactive",
+          "meaning": "Inactive"
+        }
+      ],
+      "defaultValue": "channel1"
+    },
+    {
+      "key": "functionRockerA",
+      "description": "Function of rocker switch A",
+      "values": [
+        {
+          "value": "channel1",
+          "meaning": "Channel 1"
+        },
+        {
+          "value": "inactive",
+          "meaning": "Inactive"
+        }
+      ],
+      "defaultValue": 3
+    },
+    {
+      "key": "functionRockerB",
+      "description": "Function of rocker switch B",
+      "values": [
+        {
+          "value": "channel1",
+          "meaning": "Channel 1"
+        },
+        {
+          "value": "inactive",
+          "meaning": "Inactive"
+        }
+      ],
+      "defaultValue": "channel1"
+    },
+    {
+      "key": "illuminationThreshold",
+      "description": "illumination threshold for inbound light sensors",
+      "values": [
+        {
+          "range": {
+            "min": 0,
+            "max": 1500,
+            "step": 1,
+            "unit": "lx"
+          }
+        }
+      ],
+      "defaultValue": 80
+    },
+    {
+      "key": "ledColor",
+      "description": "Color of LED",
+      "values": [
+        {
+          "value": "all",
+          "meaning": "All LEDs on"
+        },
+        {
+          "value": "green",
+          "meaning": "Green LED on"
+        },
+        {
+          "value": "off",
+          "meaning": "both LEDs off"
+        },
+        {
+          "value": "red",
+          "meaning": "Red LED on"
+        }
+      ],
+      "defaultValue": "off"
+    },
+    {
+      "key": "operationMode",
+      "description": "Operation mode of rocker switches",
+      "values": [
+        {
+          "value": "bottomOn",
+          "meaning": "Unten EIN"
+        },
+        {
+          "value": "timer",
+          "meaning": "Timer"
+        },
+        {
+          "value": "toggle",
+          "meaning": "Toggle"
+        },
+        {
+          "value": "topOn",
+          "meaning": "Oben EIN"
+        }
+      ],
+      "defaultValue": "toggle"
+    },
+    {
+      "key": "routingTime",
+      "description": "ViNET routing time",
+      "values": [
+        {
+          "range": {
+            "min": 0.3,
+            "max": 2.55,
+            "step": 0.01,
+            "unit": "s"
+          }
+        },
+        {
+          "value": "off",
+          "meaning": "no routing"
+        }
+      ],
+      "defaultValue": "off"
+    },
+    {
+      "key": "switchOffWarning",
+      "description": "Time a warning signal is shown before switch off",
+      "values": [
+        {
+          "range": {
+            "min": 0,
+            "max": 45,
+            "step": 1,
+            "unit": "s"
+          }
+        }
+      ],
+      "defaultValue": 30
+    },
+    {
+      "key": "switchOffWarningSignal",
+      "description": "Duration of warning signal if switchOffWarning is set",
+      "values": [
+        {
+          "range": {
+            "min": 0.2,
+            "max": 2,
+            "step": 0.001,
+            "unit": "s"
+          }
+        }
+      ],
+      "defaultValue": 0.5
+    },
+    {
+      "key": "timer",
+      "description": "Period until switch off if operationMode is timer",
+      "values": [
+        {
+          "range": {
+            "min": 60,
+            "max": 7200,
+            "step": 1,
+            "unit": "s"
+          }
+        }
+      ],
+      "defaultValue": 60
+    },
+    {
+      "key": "timerLong",
+      "description": "Period until switch off if operationMode is timer and switched on via long pressed",
+      "values": [
+        {
+          "range": {
+            "min": 60,
+            "max": 18000,
+            "step": 1,
+            "unit": "s"
+          }
+        }
+      ],
+      "defaultValue": 60
+    }
+  ]
+}

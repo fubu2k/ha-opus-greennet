@@ -1,0 +1,30 @@
+{
+  "header": {
+    "httpStatus": 200,
+    "content": "configuration"
+  },
+  "configuration": {
+    "deviceId": "DEV1",
+    "friendlyId": "Test",
+    "parameters": [
+      {
+        "key": "rampingTime",
+        "description": "Rampenzeit Ein/Aus",
+        "value": 0.0,
+        "unit": "s"
+      },
+      {
+        "key": "shortPress",
+        "description": "Zeit ShortPress",
+        "value": 0.03,
+        "unit": "s"
+      },
+      {
+        "key": "longPress",
+        "description": "Zeit LongPress",
+        "value": 0.0,
+        "unit": "s"
+      }
+    ]
+  }
+}
