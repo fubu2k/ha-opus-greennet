@@ -149,7 +149,12 @@ def test_configuration_functions_tolerate_malformed_parameters(
         [{"key": "switchOffWarning", "defaultValue": 30}],
         [{"key": "switchOffWarningSignal", "defaultValue": 0.5}],
         [{"key": "illuminationThreshold", "defaultValue": 80}],
-        [{"key": "operationMode", "value": "timer"}],
+        [{"key": "operationMode", "defaultValue": "toggle"}],
+        [{"key": "ledColor", "defaultValue": "off"}],
+        [{"key": "ledChannel", "defaultValue": "channel1"}],
+        [{"key": "functionExternalInput", "defaultValue": "channel1"}],
+        [{"key": "routingTime", "value": "off"}],
+        [{"key": "functionRockerA", "value": 0}],
     ],
 )
 def test_configuration_defaults_and_unrelated_parameters_are_not_state(

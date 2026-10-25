@@ -245,6 +245,42 @@
       "illumination_threshold": {
         "name": "Illumination threshold"
       }
+    },
+    "select": {
+      "operation_mode": {
+        "name": "Operation mode",
+        "state": {
+          "bottom_on": "Bottom on",
+          "timer": "Timer",
+          "toggle": "Toggle",
+          "top_on": "Top on"
+        }
+      },
+      "led_color": {
+        "name": "LED colour",
+        "state": {
+          "all": "All LEDs on",
+          "green": "Green LED on",
+          "off": "Both LEDs off",
+          "red": "Red LED on"
+        }
+      },
+      "led_channel": {
+        "name": "LED channel",
+        "state": {
+          "channel1": "Channel 1",
+          "channel2": "Channel 2"
+        }
+      },
+      "function_external_input": {
+        "name": "External input function",
+        "state": {
+          "channel1": "Channel 1",
+          "channel2": "Channel 2",
+          "channels_all": "Channel 1 + 2",
+          "inactive": "Inactive"
+        }
+      }
     }
   },
   "exceptions": {

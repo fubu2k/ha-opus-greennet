@@ -245,6 +245,42 @@
       "illumination_threshold": {
         "name": "Helligkeitsschwelle"
       }
+    },
+    "select": {
+      "operation_mode": {
+        "name": "Betriebsart",
+        "state": {
+          "bottom_on": "Unten EIN",
+          "timer": "Timer",
+          "toggle": "Umschalten",
+          "top_on": "Oben EIN"
+        }
+      },
+      "led_color": {
+        "name": "LED-Farbe",
+        "state": {
+          "all": "Alle LEDs an",
+          "green": "Grüne LED an",
+          "off": "Beide LEDs aus",
+          "red": "Rote LED an"
+        }
+      },
+      "led_channel": {
+        "name": "LED-Kanal",
+        "state": {
+          "channel1": "Kanal 1",
+          "channel2": "Kanal 2"
+        }
+      },
+      "function_external_input": {
+        "name": "Funktion externer Eingang",
+        "state": {
+          "channel1": "Kanal 1",
+          "channel2": "Kanal 2",
+          "channels_all": "Kanal 1 + 2",
+          "inactive": "Inaktiv"
+        }
+      }
     }
   },
   "exceptions": {
