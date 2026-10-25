@@ -54,6 +54,7 @@
     "error": {
       "cannot_connect": "Failed to connect to the gateway. Check the host and port.",
       "invalid_host": "Enter only the gateway's IP address or host name, without http://, port or path.",
+      "host_not_local": "Enter an address in your local network (private, link-local, VPN or the network Home Assistant is in). The gateway only speaks unencrypted HTTP, so public addresses are not supported. If a host name fails, enter the gateway's IPv4 address.",
       "invalid_auth": "The gateway rejected the username or password.",
       "unsupported_gateway": "The device at this address did not answer like an OPUS gateway.",
       "wrong_gateway": "This address belongs to a different gateway than {eag_id}.",
@@ -63,7 +64,8 @@
       "already_configured": "This gateway is already configured. Its connection settings were updated.",
       "reauth_successful": "The gateway connection was updated.",
       "reconfigure_successful": "The gateway connection was updated.",
-      "not_ipv4_address": "Only gateways with an IPv4 address are supported."
+      "not_ipv4_address": "Only gateways with an IPv4 address are supported.",
+      "not_local_address": "The announced address is not in the local network and is ignored."
     }
   },
   "entity": {
@@ -149,6 +151,12 @@
       "signal_strength": {
         "name": "Signal strength"
       },
+      "last_seen": {
+        "name": "Last seen"
+      },
+      "wall_switch_links": {
+        "name": "Wall switch links"
+      },
       "illuminance": {
         "name": "Illuminance"
       },
@@ -175,6 +183,9 @@
       },
       "last_run_time": {
         "name": "Last run time"
+      },
+      "gateway_uptime": {
+        "name": "Uptime"
       }
     },
     "switch": {
@@ -202,6 +213,77 @@
       "buttons": {
         "name": "Buttons"
       }
+    },
+    "number": {
+      "vertical_movement_time": {
+        "name": "Vertical movement time"
+      },
+      "rotation_time": {
+        "name": "Rotation time"
+      },
+      "max_holding_time": {
+        "name": "Maximum holding time"
+      },
+      "ramping_time": {
+        "name": "Ramping time"
+      },
+      "short_press_time": {
+        "name": "Short-press time"
+      },
+      "long_press_time": {
+        "name": "Long-press time"
+      },
+      "timer": {
+        "name": "Timer duration"
+      },
+      "timer_long": {
+        "name": "Timer duration (long press)"
+      },
+      "switch_off_warning": {
+        "name": "Switch-off warning"
+      },
+      "switch_off_warning_signal": {
+        "name": "Switch-off warning signal"
+      },
+      "illumination_threshold": {
+        "name": "Illumination threshold"
+      }
+    },
+    "select": {
+      "operation_mode": {
+        "name": "Operation mode",
+        "state": {
+          "bottom_on": "Bottom on",
+          "timer": "Timer",
+          "toggle": "Toggle",
+          "top_on": "Top on"
+        }
+      },
+      "led_color": {
+        "name": "LED colour",
+        "state": {
+          "all": "All LEDs on",
+          "green": "Green LED on",
+          "off": "Both LEDs off",
+          "red": "Red LED on"
+        }
+      },
+      "led_channel": {
+        "name": "LED channel",
+        "state": {
+          "channel1": "Channel 1",
+          "channel2": "Channel 2"
+        }
+      },
+      "function_external_input": {
+        "name": "External input function",
+        "state": {
+          "channel1": "Channel 1",
+          "channel2": "Channel 2",
+          "channels_all": "Channel 1 + 2",
+          "inactive": "Inactive"
+        }
+      }
     }
   },
   "exceptions": {
@@ -223,6 +305,9 @@
     "gateway_unavailable": {
       "message": "The OPUS gateway is unavailable. Check its network connection and try again."
     },
+    "invalid_configuration": {
+      "message": "The configuration for {device_id} was not sent to the gateway: {reason}."
+    },
     "invalid_auth": {
       "message": "The OPUS gateway rejected the configured credentials."
     },
@@ -243,6 +328,15 @@
     },
     "repositioning_not_supported": {
       "message": "Device {device_id} is not a blind with this channel and positioning mode."
+    },
+    "parameter_not_confirmed": {
+      "message": "{device_id} did not confirm the new value of {reason}. Home Assistant kept the previous value; read the device configuration before trying again."
+    },
+    "parameter_differs": {
+      "message": "{device_id} stored a different value for {reason} than requested. Home Assistant now shows the value stored on the device."
+    },
+    "invalid_parameter_value": {
+      "message": "The value is not a valid number."
     }
   },
   "services": {
@@ -259,6 +353,20 @@
         }
       },
       "name": "Get device configuration"
+    },
+    "get_device_link_tables": {
+      "description": "Reads the link tables stored on an EnOcean device through the ReCom API: the wall switches it listens to and the devices it reports to. Read only. The gateway's own address is shown as \"gateway\".",
+      "fields": {
+        "config_entry_id": {
+          "description": "Gateway to use. Select one when more than one gateway is loaded.",
+          "name": "Gateway"
+        },
+        "device_id": {
+          "description": "EURID of the EnOcean device.",
+          "name": "Device ID"
+        }
+      },
+      "name": "Get device link tables"
     },
     "get_device_parameters": {
       "description": "Retrieves DDF parameters for an EnOcean device through the ReCom API.",
@@ -330,6 +438,10 @@
     }
   },
   "issues": {
+    "non_local_gateway_address": {
+      "title": "The gateway address is not in the local network",
+      "description": "The address of this gateway is outside the local network. The gateway only speaks unencrypted HTTP, so its login can be read on the way. The integration keeps working, but re-authentication and reconfiguration only accept a local address.\n\nOpen the Opus GreenNet Bridge integration, choose Reconfigure from its menu and enter the gateway's address in your local network, or reach the gateway through a VPN. The notice disappears when the integration is loaded again with a local address."
+    },
     "duplicate_beta_entity": {
       "title": "Duplicate entity {removed_entity_id} was removed",
       "fix_flow": {

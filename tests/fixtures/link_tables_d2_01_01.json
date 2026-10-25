@@ -1,0 +1,70 @@
+{
+  "header": {
+    "httpStatus": 200,
+    "content": "linkTables"
+  },
+  "linkTables": {
+    "inbound": [
+      {
+        "deviceId": "WALL1",
+        "eep": "F6-02-01",
+        "parameters": [
+          {
+            "key": "rocker",
+            "description": "Which rocker is used",
+            "value": "B0BI",
+            "meaning": "Rocker B0/BI"
+          },
+          {
+            "key": "illuminationThreshold",
+            "description": "Device used for illuminationThreshold",
+            "value": "false"
+          },
+          {
+            "key": "centralOn",
+            "description": "Device used for central on",
+            "value": "false"
+          },
+          {
+            "key": "centralOff",
+            "description": "Device used for central off",
+            "value": "false"
+          },
+          {
+            "key": "smartMotionSensor",
+            "description": "Enables SMS specific behavior",
+            "value": "false"
+          }
+        ]
+      },
+      {
+        "deviceId": "WALL2",
+        "eep": "F6-02-01",
+        "parameters": [
+          {
+            "key": "rocker",
+            "description": "Which rocker is used",
+            "value": "A0AI",
+            "meaning": "Rocker A0/AI"
+          },
+          {
+            "key": "centralOn",
+            "description": "Device used for central on",
+            "value": "true"
+          }
+        ]
+      }
+    ],
+    "outbound": [
+      {
+        "deviceId": "GATEWAY",
+        "eep": "D2-01-01"
+      },
+      {
+        "deviceId": "OTHER",
+        "eep": "D2-01-01"
+      }
+    ],
+    "lastUpdateTime": "LAST_UPDATE"
+  }
+}

@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Keeps the commit-pinned workflow actions current. Python dependencies are
+  # not listed: the Home Assistant reference is fixed on purpose
+  # (requirements_test_reference.txt) and changes only in a reviewed phase.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      github-actions:
+        patterns: ["*"]

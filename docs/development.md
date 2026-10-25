@@ -26,6 +26,8 @@ custom_components/opus_greennet/
 ├── sensor.py, binary_sensor.py, binary_sensor_descriptions.py
 ├── event.py              # Rocker switches and actuator buttons
 ├── button.py             # Reference-run buttons for D2-05 blinds
+├── number.py             # Time and threshold settings (blinds, dimmers, switches)
+├── select.py             # Selectable settings of D2-01 switches
 ├── services.yaml         # Action definitions
 ├── strings.json          # Translation source
 └── translations/         # en, de
@@ -33,6 +35,7 @@ tests/
 ├── conftest.py           # Shared fixtures (real HA core, fake gateway)
 ├── fake_gateway.py       # In-process OPUS gateway serving the REST API over HTTP
 ├── ha_helpers.py         # Config flow and waiting helpers
+├── fixtures/             # Anonymized parameter catalogs and configurations read from a gateway (one device per actuator type)
 └── test_*.py             # One module per area (api, coordinator, platforms, flows, …)
 script/
 ├── check_coverage.py     # Per-module coverage gate used by CI
@@ -54,7 +57,7 @@ pytest -v --cov --cov-report=json:coverage.json
 python script/check_coverage.py coverage.json
 ```
 
-The suite has 1,813 tests. They run against real Home Assistant core and an
+The suite has 2,331 tests. They run against real Home Assistant core and an
 in-process gateway that serves the REST API and its event stream over real HTTP
 (`tests/fake_gateway.py`).
 
@@ -62,7 +65,7 @@ in-process gateway that serves the REST API and its event stream over real HTTP
 
 - CI tests the latest stable Home Assistant release from PyPI (recorded in the
   workflow summary) and a pinned reference version
-  (`requirements_test_reference.txt`, currently 2026.10.2) with hassfest built
+  (`requirements_test_reference.txt`, currently 2026.10.3) with hassfest built
   from that release; the latest hassfest image runs as an extra signal. If a new release needs a newer Python, CI fails explicitly instead
   of silently testing an older release.
 - It runs on pull requests, pushes to main, every Monday at 06:17 UTC and on

@@ -1,0 +1,133 @@
+{
+  "header": {
+    "httpStatus": 200,
+    "content": "parameters"
+  },
+  "parameters": [
+    {
+      "key": "functionRockerA",
+      "description": "Function of rocker switch A",
+      "values": [
+        {
+          "value": "channel1",
+          "meaning": "Channel 1"
+        },
+        {
+          "value": "inactive",
+          "meaning": "Inactive"
+        },
+        {
+          "value": "inactive",
+          "meaning": "Inactive"
+        },
+        {
+          "value": "inactive",
+          "meaning": "Inactive"
+        }
+      ],
+      "defaultValue": "inactive"
+    },
+    {
+      "key": "functionRockerB",
+      "description": "Function of rocker switch B",
+      "values": [
+        {
+          "value": "channel1",
+          "meaning": "Channel 1"
+        },
+        {
+          "value": "inactive",
+          "meaning": "Inactive"
+        },
+        {
+          "value": "inactive",
+          "meaning": "Inactive"
+        },
+        {
+          "value": "inactive",
+          "meaning": "Inactive"
+        }
+      ],
+      "defaultValue": "channel1"
+    },
+    {
+      "key": "lastVerticalMovementTime",
+      "description": "Letzte Fahrzeit [10ms] ... 0-65535 ... 10 - 655350 ms",
+      "values": [
+        {
+          "range": {
+            "min": 0,
+            "max": 655.35,
+            "step": 0.01,
+            "unit": "s"
+          }
+        }
+      ],
+      "defaultValue": 0
+    },
+    {
+      "key": "maxHoldingTime",
+      "description": "Max holding time for up / or down",
+      "values": [
+        {
+          "range": {
+            "min": 0,
+            "max": 65535,
+            "step": 1,
+            "unit": "s"
+          }
+        }
+      ],
+      "defaultValue": 12
+    },
+    {
+      "key": "rotationTime",
+      "description": "Measured duration of rotation",
+      "values": [
+        {
+          "range": {
+            "min": 0,
+            "max": 655.35,
+            "step": 0.01,
+            "unit": "s"
+          }
+        }
+      ],
+      "defaultValue": 0.2
+    },
+    {
+      "key": "routingTime",
+      "description": "ViNET routing time",
+      "values": [
+        {
+          "range": {
+            "min": 0.3,
+            "max": 2.55,
+            "step": 0.01,
+            "unit": "s"
+          }
+        },
+        {
+          "value": "off",
+          "meaning": "no routing"
+        }
+      ],
+      "defaultValue": "off"
+    },
+    {
+      "key": "verticalMovementTime",
+      "description": "Measured duration of a vertical run",
+      "values": [
+        {
+          "range": {
+            "min": 0,
+            "max": 655.35,
+            "step": 0.01,
+            "unit": "s"
+          }
+        }
+      ],
+      "defaultValue": 12
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "header": {
+    "httpStatus": 200,
+    "content": "configuration"
+  },
+  "configuration": {
+    "deviceId": "DEV1",
+    "friendlyId": "Test",
+    "parameters": [
+      {
+        "key": "maxHoldingTime",
+        "description": "Max holding time for up / or down",
+        "value": 29.0,
+        "unit": "s"
+      },
+      {
+        "key": "verticalMovementTime",
+        "description": "Measured duration of a vertical run",
+        "value": 25.51,
+        "unit": "s"
+      },
+      {
+        "key": "rotationTime",
+        "description": "Measured duration of rotation",
+        "value": 0.0,
+        "unit": "s"
+      },
+      {
+        "key": "routingTime",
+        "description": "ViNET routing time",
+        "value": "off",
+        "meaning": "no routing"
+      },
+      {
+        "key": "functionRockerA",
+        "description": "Function of rocker switch A",
+        "value": "inactive",
+        "meaning": "Inactive"
+      },
+      {
+        "key": "functionRockerB",
+        "description": "Function of rocker switch B",
+        "value": "channel1",
+        "meaning": "Channel 1"
+      },
+      {
+        "key": "lastVerticalMovementTime",
+        "description": "Letzte Fahrzeit [10ms] ... 0-65535 ... 10 - 655350 ms",
+        "value": 19.14,
+        "unit": "s"
+      }
+    ]
+  }
+}

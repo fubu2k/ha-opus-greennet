@@ -35,6 +35,8 @@ from custom_components.opus_greennet import (
     event,
     light,
     lock,
+    number,
+    select,
     sensor,
     switch,
 )
@@ -54,6 +56,8 @@ PLATFORM_MODULES = [
     event,
     light,
     lock,
+    number,
+    select,
     sensor,
     switch,
 ]
@@ -402,6 +406,10 @@ def test_parallel_updates_in_every_platform() -> None:
         assert module.PARALLEL_UPDATES == 0, module.__name__
 
 
+# Entities of the gateway device itself (no EnOcean device behind them).
+GATEWAY_LEVEL_ENTITY_CLASSES = frozenset({"OpusGreenNetGatewayUptimeSensor"})
+
+
 def test_every_entity_class_has_entity_name_and_no_polling() -> None:
     classes = [
         value
@@ -413,7 +421,11 @@ def test_every_entity_class_has_entity_name_and_no_polling() -> None:
     ]
     assert len(classes) >= 15
     for cls in classes:
-        assert issubclass(cls, OpusGreenNetEntity), cls
+        # Gateway-level entities have no EnOcean device behind them and cannot
+        # use the device base class. The source check below still applies to
+        # every class, so they keep entity names and never poll.
+        if cls.__name__ not in GATEWAY_LEVEL_ENTITY_CLASSES:
+            assert issubclass(cls, OpusGreenNetEntity), cls
     # HA turns _attr_* class values into properties, so check the source.
     assignments: dict[str, list[object]] = {}
     for path in INTEGRATION.glob("*.py"):
@@ -428,7 +440,7 @@ def test_every_entity_class_has_entity_name_and_no_polling() -> None:
                 if name in ("_attr_has_entity_name", "_attr_should_poll"):
                     assignments.setdefault(name, []).append(node.value.value)
     assert set(assignments["_attr_has_entity_name"]) == {True}
-    assert assignments["_attr_should_poll"] == [False]
+    assert set(assignments["_attr_should_poll"]) == {False}
 
 
 def test_stale_devices_and_diagnostics_entry_points() -> None:
@@ -473,6 +485,8 @@ def test_actions_are_set_up_in_async_setup() -> None:
         ("docs-data-update", "docs/how-it-works.md", "## Updates and availability"),
         ("docs-known-limitations", "README.md", "## Known limitations"),
         ("docs-known-limitations", "docs/how-it-works.md", "## Known limitations"),
+        ("docs-examples", "docs/examples.md", "## Examples"),
+        ("docs-use-cases", "docs/examples.md", "## Use cases"),
         ("docs-supported-devices", "README.md", "## Supported devices"),
         ("docs-supported-functions", "README.md", "## Features"),
         ("docs-troubleshooting", "README.md", "## Troubleshooting"),

@@ -69,7 +69,12 @@ class FakeGateway:
     (seconds between opening a stream and writing its device list),
     ``redirects`` (per path, the target of a 302 answer), ``chunked`` (paths
     answered without a Content-Length) and ``accept_auth`` (reject every
-    request with 401 when False).
+    request with 401 when False), ``stream_framing`` (how a stream answers the
+    ``delimited=newLine`` parameter: ``"legacy"`` ignores it like older
+    firmware and writes pretty-printed documents without delimiter, ``"ndjson"``
+    writes one document per line ending in CRLF, ``"reject"`` answers
+    ``reject_status``, by default HTTP 400) and ``stream_queries`` (the query
+    string of every stream request).
     """
 
     def __init__(self, eurid: str = EURID, password: str = PASSWORD) -> None:
@@ -93,6 +98,9 @@ class FakeGateway:
         self.on_request: Callable[[str, str, Any], Awaitable[None]] | None = None
         self.stream_preamble: list[str] = []
         self.close_after_snapshot = False
+        self.stream_framing = "legacy"
+        self.reject_status = 400
+        self.stream_queries: list[str] = []
         self.snapshot_delay = 0.0
         # Real gateways stream the device list without ``configuration``
         # (phase 21 hardware diagnostics); GET /devices carries it.
@@ -220,6 +228,17 @@ class FakeGateway:
         if path == "/devices/stream":
             if self._stopping:
                 return web.Response(status=503)
+            self.stream_queries.append(request.query_string)
+            if self.stream_framing == "reject" and "delimited" in request.query:
+                return web.json_response(
+                    {
+                        "header": {
+                            "httpStatus": self.reject_status,
+                            "message": "bad parameter",
+                        }
+                    },
+                    status=self.reject_status,
+                )
             return await self._stream(request)
         if path in self.responses:
             response = self.responses[path]
@@ -230,9 +249,9 @@ class FakeGateway:
             if path in self.chunked:
                 answer.enable_chunked_encoding()
             return answer
-        return web.json_response(self._answer(request.method, path))
+        return web.json_response(self._answer(request.method, path, body))
 
-    def _answer(self, method: str, path: str) -> dict[str, Any]:
+    def _answer(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
         ok = {"httpStatus": 200, "gateway": "OPUS-GW test"}
         if path == "/system/info":
             return {
@@ -259,13 +278,31 @@ class FakeGateway:
                 return {"header": {"httpStatus": 404, "message": "unknown device"}}
             if len(parts) == 2:
                 return {"header": {**ok, "content": "device"}, "device": device}
-            if method == "PUT":
-                return {"header": ok}
             if parts[2] == "configuration":
+                # The device's configuration: a PUT stores its parameters (like
+                # a device that accepts every value), a GET reads them back.
+                stored = device.setdefault("configuration", {}).setdefault(
+                    "parameters", []
+                )
+                if method == "PUT":
+                    written = (
+                        (body or {}).get("configuration", {}).get("parameters", [])
+                    )
+                    for parameter in written:
+                        known = next(
+                            (p for p in stored if p["key"] == parameter["key"]), None
+                        )
+                        if known is None:
+                            stored.append(dict(parameter))
+                        else:
+                            known["value"] = parameter["value"]
+                    return {"header": ok}
                 return {
                     "header": {**ok, "content": "configuration"},
-                    "configuration": {"deviceId": parts[1], "parameters": []},
+                    "configuration": {"deviceId": parts[1], "parameters": stored},
                 }
+            if method == "PUT":
+                return {"header": ok}
             if parts[2] == "profile" and parts[1] in self.profiles:
                 return {
                     "header": {**ok, "content": "profile"},
@@ -274,6 +311,11 @@ class FakeGateway:
             if parts[2] == "parameters":
                 return {"header": {**ok, "content": "parameters"}, "parameters": []}
         return {"header": {"httpStatus": 404, "message": "not found"}}
+
+    def _line_framed(self, request: web.Request) -> bool:
+        return self.stream_framing == "ndjson" and (
+            request.query.get("delimited") == "newLine"
+        )
 
     async def _stream(self, request: web.Request) -> web.StreamResponse:
         response = web.StreamResponse(
@@ -293,7 +335,10 @@ class FakeGateway:
                 {key: value for key, value in device.items() if key != "configuration"}
                 for device in snapshot["devices"]
             ]
-        await response.write(json.dumps(snapshot, indent=2).encode())
+        if self._line_framed(request):
+            await response.write(json.dumps(snapshot).encode() + b"\r\n")
+        else:
+            await response.write(json.dumps(snapshot, indent=2).encode())
         if self.close_after_snapshot:
             # A gateway that ends every stream right after the device list.
             await response.write_eof()
@@ -301,7 +346,10 @@ class FakeGateway:
         self._streams.append(queue)
         self._stream_connected.set()
         try:
+            line_framed = self._line_framed(request)
             while (text := await queue.get()) is not None:
+                if line_framed and not text.endswith("\n"):
+                    text += "\r\n"
                 await response.write(text.encode())
         except ConnectionResetError, asyncio.CancelledError:
             pass

@@ -184,6 +184,46 @@ VALUE_UNKNOWN: Final = "unknown"
 KEY_ANGLE: Final = "angle"
 KEY_ROTATION_TIME: Final = "rotationTime"
 KEY_VERTICAL_MOVEMENT_TIME: Final = "verticalMovementTime"
+# Longest run of a D2-05-02 blind in seconds, a configuration parameter. Not a
+# state key: a command of another controller carrying it is not applied.
+KEY_MAX_HOLDING_TIME: Final = "maxHoldingTime"
+# Configuration parameters of D2-01 dimmers (seconds) and switches (seconds, lux).
+KEY_RAMPING_TIME: Final = "rampingTime"
+KEY_SHORT_PRESS: Final = "shortPress"
+KEY_LONG_PRESS: Final = "longPress"
+KEY_TIMER: Final = "timer"
+KEY_TIMER_LONG: Final = "timerLong"
+KEY_SWITCH_OFF_WARNING: Final = "switchOffWarning"
+KEY_SWITCH_OFF_WARNING_SIGNAL: Final = "switchOffWarningSignal"
+KEY_ILLUMINATION_THRESHOLD: Final = "illuminationThreshold"
+# Device settings and the channel field they fill, with the range of the
+# gateway's parameter catalog (a reported value outside it keeps the known one).
+# Like the holding time they are no state keys: a command of another controller
+# carrying them is not applied, and reading them is no state update.
+DEVICE_SETTINGS: Final = {
+    KEY_RAMPING_TIME: ("ramping_time", 0, 25.5),
+    KEY_SHORT_PRESS: ("short_press_time", 0, 2.55),
+    KEY_LONG_PRESS: ("long_press_time", 0, 2.55),
+    KEY_TIMER: ("timer", 60, 7200),
+    KEY_TIMER_LONG: ("timer_long", 60, 18000),
+    KEY_SWITCH_OFF_WARNING: ("switch_off_warning", 0, 45),
+    KEY_SWITCH_OFF_WARNING_SIGNAL: ("switch_off_warning_signal", 0.2, 2),
+    KEY_ILLUMINATION_THRESHOLD: ("illumination_threshold", 0, 1500),
+}
+# Device settings with a fixed set of values (select entities): key -> channel
+# field. The field holds the value the gateway reported, listed or not; the
+# select shows an unlisted value as unknown and never writes it back.
+KEY_OPERATION_MODE: Final = "operationMode"
+KEY_LED_COLOR: Final = "ledColor"
+KEY_LED_CHANNEL: Final = "ledChannel"
+KEY_FUNCTION_EXTERNAL_INPUT: Final = "functionExternalInput"
+DEVICE_OPTIONS: Final = {
+    KEY_OPERATION_MODE: "operation_mode",
+    KEY_LED_COLOR: "led_color",
+    KEY_LED_CHANNEL: "led_channel",
+    KEY_FUNCTION_EXTERNAL_INPUT: "function_external_input",
+}
+DEVICE_SETTING_KEYS: Final = frozenset(DEVICE_SETTINGS) | frozenset(DEVICE_OPTIONS)
 COVER_MOVEMENT_GRACE_SECONDS: Final = 5.0
 COVER_RECONCILIATION_DELAYS: Final = (10.0, 20.0)
 KEY_CHANNEL: Final = "channel"

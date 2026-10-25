@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
@@ -190,3 +191,21 @@ async def test_removal_cancels_active_and_queued_requests_only_for_child(
     assert gateway.requests_to("PUT", "/devices/NEW/state") == [
         {"state": {"functions": [{"key": "switch", "value": "on"}]}}
     ]
+
+
+async def test_unloaded_entry_removes_a_stale_child_without_the_coordinator(
+    hass: HomeAssistant,
+) -> None:
+    """A registry-only device can go while the entry is not loaded."""
+    coordinator = MagicMock()
+    entry = SimpleNamespace(
+        entry_id="entry-id",
+        data={"eag_id": "AABB0011"},
+        state=ConfigEntryState.NOT_LOADED,
+        runtime_data=SimpleNamespace(coordinator=coordinator),
+    )
+    device = SimpleNamespace(
+        identifiers={(DOMAIN, "AABB0011_CHILD")}, config_entry_id="entry-id"
+    )
+    assert await async_remove_config_entry_device(hass, entry, device)
+    coordinator.async_forget_device.assert_not_called()

@@ -140,7 +140,21 @@ def test_configuration_functions_tolerate_malformed_parameters(
     [
         [{"key": "rotationTime", "defaultValue": 0.0}],
         [{"key": "verticalMovementTime", "defaultValue": 30.0}],
-        [{"key": "timer", "value": 300.0}],
+        [{"key": "maxHoldingTime", "defaultValue": 12.0}],
+        [{"key": "rampingTime", "defaultValue": 5}],
+        [{"key": "shortPress", "defaultValue": 0.1}],
+        [{"key": "longPress", "defaultValue": 0.1}],
+        [{"key": "timer", "defaultValue": 60}],
+        [{"key": "timerLong", "defaultValue": 60}],
+        [{"key": "switchOffWarning", "defaultValue": 30}],
+        [{"key": "switchOffWarningSignal", "defaultValue": 0.5}],
+        [{"key": "illuminationThreshold", "defaultValue": 80}],
+        [{"key": "operationMode", "defaultValue": "toggle"}],
+        [{"key": "ledColor", "defaultValue": "off"}],
+        [{"key": "ledChannel", "defaultValue": "channel1"}],
+        [{"key": "functionExternalInput", "defaultValue": "channel1"}],
+        [{"key": "routingTime", "value": "off"}],
+        [{"key": "functionRockerA", "value": 0}],
     ],
 )
 def test_configuration_defaults_and_unrelated_parameters_are_not_state(
@@ -307,13 +321,17 @@ def test_real_device_object_state_functions() -> None:
             {"key": "switch", "channel": 0, "value": "on", "age": 26576},
         ],
     }
+    # The reported timer of the D2-01-11 is a device setting and read as state.
+    timer = {"channel": 0, "key": "timer", "value": 300.0, "unit": "s"}
     assert protocol.device_state_functions(data) == [
         data["states"][0],
         data["states"][1],
         {"key": "batteryLevel", "value": "96%"},
+        timer,
     ]
     assert protocol.configuration_functions(data) == [
-        {"key": "batteryLevel", "value": "96%"}
+        {"key": "batteryLevel", "value": "96%"},
+        timer,
     ]
 
 

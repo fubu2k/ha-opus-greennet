@@ -1,7 +1,7 @@
 {
   "domain": "opus_greennet",
   "name": "Opus GreenNet Bridge",
-  "after_dependencies": ["zeroconf"],
+  "after_dependencies": ["network", "zeroconf"],
   "codeowners": ["@kegelmeier"],
   "config_flow": true,
   "documentation": "https://github.com/kegelmeier/ha-opus-greennet",

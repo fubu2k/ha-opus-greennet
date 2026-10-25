@@ -42,8 +42,21 @@ Verification legend: **[Code]** read from source, **[Test]** covered by tests,
 | `GET /devices/stream` | Event stream | See §3 **[HW]** |
 | `GET /devices/{id}` | Late discovery of a device that sends telegrams but was missing from the list | Retried at most once per hour per device **[Code][Test]** |
 | `PUT /devices/{id}/state` | Commands, status queries | Body `{"state": {"functions": [...]}}`; answers in ~30 ms **[HW]** |
-| `GET/PUT /devices/{id}/configuration` | Services (ReCom) | Several seconds over the radio (8 s observed) **[HW]** |
+| `GET/PUT /devices/{id}/configuration` | Services (ReCom) | Several seconds over the radio (8 s observed) **[HW]**. A **text value** is accepted too (`{"key": "ledColor", "value": "green"}`), changed on the device and confirmed by reading back (`ledColor` on one D2-01-01, firmware 1.21.30) |
 | `GET /devices/{id}/parameters` | Service (ReCom) | **[HW]** |
+| `GET /devices/{id}/linkTables` | Service (ReCom, read only) | Same structure as the `linkTables` block of the device object plus `lastUpdateTime`; `outbound` names the gateway itself **[HW]** |
+
+The device object of `GET /devices` and of the stream snapshot carries the same
+`linkTables` block for actuators (37 of them in the recorded list), without a
+radio request; sensors list an empty object **[HW]**. The integration keeps
+only the wall switch entries and their parameters as text (`LinkTables`
+model, `protocol.link_tables`). An empty object or a missing block means
+"not read" and never replaces a known table (missing fields are no deletion);
+a table with an `outbound` side and no `inbound` list is a read table with no
+wall switch (0 links). That the gateway omits an empty `inbound` list is
+inferred from the recorded list, not from documentation **[HW][Test]**. The
+gateway's own address is masked (`gateway`) in the service response, and the
+diagnostics download redacts all device addresses **[Code][Test]**.
 
 Device identifiers are URL-quoted. **[Code][Test]**
 
@@ -74,6 +87,22 @@ pretty-printed JSON documents back to back without delimiters
    report, `to` = command sent by the gateway), `functions` (list; per-function
    `channel` on multi-channel actuators) and `telegramInfo` (`dbm`, `rorg`,
    `data`, `status`). **[HW]**
+   **Framing (phase 3).** The client requests `?delimited=newLine`
+   (OPUS-IQ-DOT 1.21.30: one document per line, CRLF terminator, device list
+   about 90 KB instead of 150 KB, same telegram fields; hardware evidence of
+   phase 2) **[HW]**. `direction`, `output` and `levelOfDetail` are not
+   requested: `direction=from` is not proven to keep the needed directions,
+   `output=singleLine` only changes whitespace, `levelOfDetail=high` is an open
+   candidate. Firmware that ignores the parameter answers in the legacy format;
+   the same splitter reads both (blank lines, LF/CRLF and a last document
+   without terminator are accepted). Any status other than 200 on the request
+   with the parameter (except 401/403 and 429) gets one plain request in the
+   same attempt; the plain stream is kept once it delivered a document.
+   Timeouts and connection errors never switch. A gateway restart (falling uptime) offers the parameter
+   again. A stream that ends inside a document raises
+   `OpusResponseError` instead of ending silently. The splitter holds at most
+   one unfinished document (8 MB) plus the documents of one network chunk.
+   **[Code][Test]**; behaviour on firmware other than 1.21.30 is not verified.
 3. Observed behaviour **[HW]**:
    - status replies that do not change state are not streamed (the gateway's
      own HomeKit status sweeps appear only as `to` "query status" telegrams);
@@ -192,7 +221,10 @@ send it. **[Code][Test]**
   last vertical run, seconds) is kept per device and channel and shown in
   diagnostics as `last_vertical_movement_time`. It is never used for
   estimates, timers or queries and causes no request. Present only in
-  `GET /devices`, not in the streamed list. **[Upstream note][Code][Test]**
+  `GET /devices`, not in the streamed list. The key exists in the parameter
+  catalog (`GET /devices/{id}/parameters`, 0 to 655.35 s, step 0.01) and in the
+  configuration of a D2-05-02 on the maintainer's gateway (firmware 1.21.30).
+  **[HW][Upstream note][Code][Test]**
 - Diagnostics show per cover channel `position_origin`: `device list`,
   `reported` (device report or `device` document), `estimated` (foreign
   command or entity estimate after an acknowledgement) or `assumed` (travel
@@ -218,13 +250,32 @@ had registered. **[HW][Test]**
 - Reauthentication and reconfiguration reject an address that answers with a
   different EURID (`wrong_gateway`); setup does the same for a stored address.
   **[Code][Test]**
+- The gateway has no TLS (plain HTTP, basic authentication), so credentials are
+  sent only to the local network. `discovery.LOCAL_NETWORKS` is an allowlist
+  (RFC 1918, link-local, loopback, `100.64.0.0/10`, `fc00::/7`), extended by
+  the networks of Home Assistant's enabled adapters (`network` integration),
+  so an on-link global IPv6 address counts as local. Host names are resolved
+  with Home Assistant's shared session, like the connection. The config flow (user, reauth, reconfigure) refuses an
+  address outside it (`host_not_local`) and judges a host name by **all** its
+  addresses; a name that does not resolve is `cannot_connect`. A zeroconf
+  announcement or mDNS search result outside it is ignored
+  (`not_local_address`), so stored or default credentials are never tried on it.
+  Entries stored with a public address still set up and log a warning. The
+  check happens when the address is entered; a name that later resolves
+  elsewhere is not re-checked **[Code][Test]**.
 
 ## 10. Services (public, unchanged)
 
 `opus_greennet.get_device_configuration` (response only),
 `opus_greennet.set_device_configuration`, `opus_greennet.get_device_parameters`
-(response only), `opus_greennet.reload_entry`. All are admin services with an
-optional `config_entry_id`.
+(response only), `opus_greennet.get_device_link_tables` (response only; the
+gateway's own EURID in the answer is replaced by `gateway`, and no write action
+exists **[Code][Test]**), `opus_greennet.reload_entry`. All are admin services with an
+optional `config_entry_id`. `set_device_configuration` refuses a body that is
+not encodable JSON, nested deeper than 16 levels or larger than 64 KiB with the
+translated error `invalid_configuration` before any request is queued
+(`wire.json_body_problem`); the schema of the document is not known and not
+checked **[Code][Test]**.
 
 ## 11. Dispatcher signals (internal, unchanged)
 
@@ -239,4 +290,6 @@ optional `config_entry_id`.
   sensors and stand-alone rocker switches: not present on the test
   installation; covered by tests with the documented payloads.
 - Whether the gateway ever sends `content = "device"` documents on the stream.
-- The key `lastVerticalMovementTime` on the maintainer's gateway.
+- Text writes of `operationMode`, `functionExternalInput` and `ledChannel`, a
+  text write on other device types, and the answer to an invalid text value
+  (only `ledColor` on one D2-01-01 was verified).

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -42,7 +44,7 @@ from tests.ha_helpers import setup_bridge
 EAG_ID = "AABB0011"
 ENTRY_DATA = {
     "eag_id": EAG_ID,
-    "host": "192.0.2.10",
+    "host": "192.168.2.10",
     "port": 8080,
     "username": "admin",
     "password": "secret",
@@ -81,8 +83,20 @@ def _mock_setup(coordinator: MagicMock):
             "custom_components.opus_greennet.OpusGreenNetCoordinator",
             return_value=coordinator,
         ),
-        patch("custom_components.opus_greennet.async_get_clientsession"),
+        _session_and_issue_patch(),
     )
+
+
+@contextmanager
+def _session_and_issue_patch() -> Iterator[MagicMock]:
+    """Patch the HTTP session and the repair notice (a mocked hass has no registry)."""
+    with (
+        patch("custom_components.opus_greennet.async_get_clientsession"),
+        patch(
+            "custom_components.opus_greennet.async_set_non_local_address_issue"
+        ) as issue,
+    ):
+        yield issue
 
 
 # ── setup with the real gateway API ────────────────────────────────────────
@@ -212,9 +226,10 @@ async def test_failed_setup_raises_translated_errors(
     assert raised.value.translation_key == translation_key
     unload.assert_awaited_once()
     # Nothing was left running: at most the one failed stream attempt of the
-    # stream-first setup, and no further attempt afterwards.
+    # stream-first setup (the line-framed request and its plain retry), and no
+    # further attempt afterwards.
     attempts = len(gateway.requests_to("GET", "/devices/stream"))
-    assert attempts <= 1
+    assert attempts <= 2
     await asyncio.sleep(1.4)
     assert len(gateway.requests_to("GET", "/devices/stream")) == attempts
 
@@ -349,7 +364,7 @@ async def test_failed_setup_cleans_up_without_masking_programming_errors(
     coordinator = MagicMock()
     coordinator.async_setup = AsyncMock(side_effect=failure)
     coordinator.async_unload = AsyncMock()
-    entry = SimpleNamespace(data=ENTRY_DATA)
+    entry = SimpleNamespace(entry_id="entry-id", data=ENTRY_DATA)
     coordinator_patch, session_patch = _mock_setup(coordinator)
     with coordinator_patch, session_patch, pytest.raises(expected):
         await async_setup_entry(MagicMock(), entry)
@@ -385,7 +400,7 @@ async def test_failed_setup_logs_the_underlying_cause(
     coordinator = MagicMock()
     coordinator.async_setup = AsyncMock(side_effect=failure)
     coordinator.async_unload = AsyncMock()
-    entry = SimpleNamespace(data=ENTRY_DATA)
+    entry = SimpleNamespace(entry_id="entry-id", data=ENTRY_DATA)
     coordinator_patch, session_patch = _mock_setup(coordinator)
     with (
         coordinator_patch,

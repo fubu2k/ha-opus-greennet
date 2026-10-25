@@ -42,7 +42,7 @@ async def test_diagnostics_are_complete_and_redacted() -> None:
         title="My bridge",
         data={
             "eag_id": "AABB0011",
-            "host": "192.0.2.10",
+            "host": "192.168.2.10",
             "port": 8080,
             "username": "admin",
             "password": "AABB0011",
@@ -88,8 +88,8 @@ async def test_diagnostics_redact_identifiers_inside_titles_and_raw_errors() -> 
         devices={device_id: device},
         gateway_info={
             "serialNumber": "private-serial",
-            "network": {"ipAddress": "192.0.2.12", "macAddress": "AA:BB:CC:DD:EE:FF"},
-            "message": "private-serial at 192.0.2.12",
+            "network": {"ipAddress": "192.168.2.12", "macAddress": "AA:BB:CC:DD:EE:FF"},
+            "message": "private-serial at 192.168.2.12",
             "model": "GreenNet",
         },
         gateway_uptime="12 days",
@@ -108,7 +108,7 @@ async def test_diagnostics_redact_identifiers_inside_titles_and_raw_errors() -> 
         device_id,
         "Private bedroom",
         "private-serial",
-        "192.0.2.12",
+        "192.168.2.12",
         "AA:BB:CC:DD:EE:FF",
         "private-token",
         "private-pass",
@@ -159,7 +159,7 @@ SYSTEM_INFO = {
     "homekitPin": "246-80-135",
     "serialNumber": "SN-7731-PRIVATE",
     "baseId": "FF9A1280",
-    "network": {"ipAddress": "192.0.2.12", "macAddress": "AA:BB:CC:DD:EE:FF"},
+    "network": {"ipAddress": "192.168.2.12", "macAddress": "AA:BB:CC:DD:EE:FF"},
     "status": "paired with HomeKit using 246-80-135",
 }
 
@@ -219,7 +219,7 @@ async def test_rest_entry_and_gateway_system_info_are_redacted(
         "246-80-135",
         "SN-7731-PRIVATE",
         "FF9A1280",
-        "192.0.2.12",
+        "192.168.2.12",
         "AA:BB:CC:DD:EE:FF",
     ):
         assert secret.casefold() not in serialized

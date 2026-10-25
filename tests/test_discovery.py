@@ -112,8 +112,8 @@ async def test_search_collects_ipv4_addresses_of_announced_gateways(
         return MagicMock(async_cancel=AsyncMock())
 
     addresses = {
-        "a._enocean._tcp.local.": ["192.0.2.10"],
-        "b._enocean._tcp.local.": ["192.0.2.10", "192.0.2.11"],
+        "a._enocean._tcp.local.": ["192.168.2.10"],
+        "b._enocean._tcp.local.": ["192.168.2.10", "192.168.2.11"],
     }
 
     def service_info(service_type: str, name: str) -> MagicMock:
@@ -137,7 +137,10 @@ async def test_search_collects_ipv4_addresses_of_announced_gateways(
         patch(f"{DISCOVERY}.AsyncServiceInfo", side_effect=service_info),
         patch(f"{DISCOVERY}.BROWSE_SECONDS", 0),
     ):
-        assert await async_browse_gateway_hosts(hass) == ["192.0.2.10", "192.0.2.11"]
+        assert await async_browse_gateway_hosts(hass) == [
+            "192.168.2.10",
+            "192.168.2.11",
+        ]
 
 
 async def test_locate_accepts_the_gateway_with_the_same_eurid(
@@ -147,12 +150,26 @@ async def test_locate_accepts_the_gateway_with_the_same_eurid(
     await other.start()
     try:
         with patch(f"{DISCOVERY}.DEFAULT_PORT", other.port):
-            found_hosts[:] = ["192.0.2.1", other.host]
+            found_hosts[:] = ["192.168.2.1", other.host]
             # Unreachable candidates and other gateways are skipped.
             assert await async_locate_gateway(hass, gateway.eurid) is None
             assert await async_locate_gateway(hass, "11223344") == LocatedGateway(
                 other.host, verified=True
             )
+    finally:
+        await other.stop()
+
+
+async def test_locate_skips_a_gateway_that_reports_another_eurid(
+    hass: HomeAssistant, gateway: FakeGateway, found_hosts: list[str]
+) -> None:
+    """A candidate that accepts the credentials but is another gateway."""
+    other = FakeGateway(eurid="11223344", password=gateway.eurid)
+    await other.start()
+    try:
+        with patch(f"{DISCOVERY}.DEFAULT_PORT", other.port):
+            found_hosts[:] = [other.host]
+            assert await async_locate_gateway(hass, gateway.eurid) is None
     finally:
         await other.stop()
 
@@ -166,7 +183,7 @@ async def test_locate_keeps_a_single_gateway_that_rejects_the_default_password(
         gateway.host, verified=False
     )
     # With several candidates the rejecting one cannot be attributed.
-    found_hosts[:] = [gateway.host, "192.0.2.1"]
+    found_hosts[:] = [gateway.host, "192.168.2.1"]
     assert await async_locate_gateway(hass, gateway.eurid) is None
 
 

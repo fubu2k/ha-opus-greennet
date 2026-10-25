@@ -34,6 +34,18 @@ integration works the same.
 A gateway that was ignored under **Discovered** stays ignored; remove the
 ignored entry to see it again.
 
+### "The gateway address is not in the local network"
+
+Entries that were set up with a public IP address before the gateway address
+had to be local keep working, but **Settings → System → Repairs** shows this
+notice for them, because the gateway speaks unencrypted HTTP and its login can
+be read on the way. Re-authentication and reconfiguration only accept a local
+address (error `host_not_local`). Choose **Reconfigure** in the integration's
+menu and enter the gateway's address in your local network, or reach the
+gateway through a VPN. The notice disappears when the integration is loaded
+again with a local address. Only IP addresses are checked when the integration
+loads; a host name is checked when you enter it.
+
 ## Devices not appearing
 
 1. Check that the integration entry is loaded and the gateway is available.
@@ -66,6 +78,20 @@ Useful fields:
 
 - `first_device_list_seconds` (gateway): time from opening the event stream to
   its first device list at startup.
+- `stream` (gateway): facts about the event stream, read from the integration's
+  memory (no request to the gateway):
+  - `connected`: whether the stream is open now.
+  - `framing_requested`: `line` (one document per line) or `plain` (the
+    gateway refused the line request); empty before the first stream. It is
+    the request the gateway accepted; firmware that ignores the parameter
+    answers in the plain format anyway.
+  - `attempts`: opened stream requests since the integration was loaded.
+  - `connects` and `reconnects`: streams that delivered a document, and those
+    after the first one. Many attempts with few connects point to a
+    gateway or network that is often unreachable.
+  - `radio_queue_depth`: requests waiting for the gateway's radio queue at the
+    moment of the download. Values above 0 for long are worth reporting.
+  The counters start at 0 whenever the integration is reloaded.
 - `last_vertical_movement_time` (covers): the last run duration the gateway
   reports.
 - `position_origin` (covers, per channel): `device list`, `reported`,
