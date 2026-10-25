@@ -71,7 +71,7 @@ If phase 5 finds no measured load problem, no combining is introduced (E).
 
 | # | Point | Status |
 |---|---|---|
-| D1 | A repeated identical value is not written again, so Home Assistant's `last_reported` of that entity does not advance (`test_repeated_value_is_not_rewritten_but_a_change_is`). Suppressing RSSI-only writes was the aim; a repeated measurement is suppressed as well. Whether `last_reported` should follow device activity needs a decision. | A (needs decision, not changed) |
+| D1 | A repeated identical value is not written again, so Home Assistant's `last_reported` of that entity does not advance (`test_repeated_value_is_not_rewritten_but_a_change_is`). Suppressing RSSI-only writes was the aim; a repeated measurement is suppressed as well. Decided: accepted as is, `last_reported` does not follow repeated identical values. | E (accepted, unchanged) |
 | D2 | The estimate guard is per channel, not per field: any report on the channel, even a power value, withholds a pending switch estimate (`test_any_report_on_a_channel_supersedes_a_pending_estimate`). The state then comes from the switch report or the status check. Conservative, no wrong state. | E (kept) |
 | D3 | A `from` telegram without a usable function is ignored, including its `dbm` and timestamp (`_handle_telegram`: `if not functions: return`). Whether the gateway sends such telegrams is unproven. | A |
 | D4 | The event entity reads channel 0 only (`event.py`). Rocker buttons on another channel are unproven. | A |
