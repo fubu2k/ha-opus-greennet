@@ -74,6 +74,22 @@ pretty-printed JSON documents back to back without delimiters
    report, `to` = command sent by the gateway), `functions` (list; per-function
    `channel` on multi-channel actuators) and `telegramInfo` (`dbm`, `rorg`,
    `data`, `status`). **[HW]**
+   **Framing (phase 3).** The client requests `?delimited=newLine`
+   (OPUS-IQ-DOT 1.21.30: one document per line, CRLF terminator, device list
+   about 90 KB instead of 150 KB, same telegram fields; hardware evidence of
+   phase 2) **[HW]**. `direction`, `output` and `levelOfDetail` are not
+   requested: `direction=from` is not proven to keep the needed directions,
+   `output=singleLine` only changes whitespace, `levelOfDetail=high` is an open
+   candidate. Firmware that ignores the parameter answers in the legacy format;
+   the same splitter reads both (blank lines, LF/CRLF and a last document
+   without terminator are accepted). Only HTTP 400/405/422/501 on the request
+   with the parameter, before any document, switches the client to the plain
+   stream for the rest of its life; 401/403, 5xx, timeouts and connection
+   errors never do. A gateway restart (falling uptime) offers the parameter
+   again. A stream that ends inside a document raises
+   `OpusResponseError` instead of ending silently. The splitter holds at most
+   one unfinished document (8 MB) plus the documents of one network chunk.
+   **[Code][Test]**; behaviour on firmware other than 1.21.30 is not verified.
 3. Observed behaviour **[HW]**:
    - status replies that do not change state are not streamed (the gateway's
      own HomeKit status sweeps appear only as `to` "query status" telegrams);
