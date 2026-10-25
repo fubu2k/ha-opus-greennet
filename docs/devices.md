@@ -28,6 +28,9 @@ The settings stored on actuators, as far as the gateway's parameter catalog
 | Switches (D2-01-01) | Timer duration, Timer duration (long press), Switch-off warning, Switch-off warning signal, Illumination threshold | Operation mode, LED colour, External input function | Function of rocker A and B, routing time |
 | 2-channel switches (D2-01-11) | as D2-01-01 | as D2-01-01, plus LED channel | as D2-01-01 |
 
+Which of these settings were written on real hardware, and which only read, is
+listed in the [README](../README.md#what-was-verified-on-hardware).
+
 Every actuator whose device list contains a link table also has the diagnostic
 sensor *Wall switch links* (see [Sensor values](#sensor-values)). The
 functions of rocker A and B and the routing time are left out until a text
