@@ -67,7 +67,7 @@ in-process gateway that serves the REST API and its event stream over real HTTP
   of silently testing an older release.
 - It runs on pull requests, pushes to main, every Monday at 06:17 UTC and on
   manual dispatch.
-- Gates: Ruff, dependency compatibility, strict mypy, hassfest, icon check,
+- Gates: Ruff, dependency compatibility, strict mypy, hassfest, HACS validation, icon check,
   total coverage of at least 97 %, more than 95 % per module and 100 % for the
   config flow. Lifecycle and race suites run three more times.
 - `quality_scale.yaml` is validated against the official rule keys by
