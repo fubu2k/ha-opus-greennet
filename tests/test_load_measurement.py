@@ -15,7 +15,7 @@ import asyncio
 import json
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -76,14 +76,22 @@ async def _watch(meter: Meter, coordinator: Any) -> None:
         meter.queue_max = max(meter.queue_max, coordinator._radio_queue.queue_depth)
 
 
-def _report(name: str, framing: str, **values: Any) -> None:
-    row = {"workload": name, "framing": framing, **values}
-    RESULTS.append(row)
-    line = "LOADMEASURE " + json.dumps(row, sort_keys=True)
-    print(line)
-    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
-        with Path(summary).open("a", encoding="utf-8") as handle:
-            handle.write(f"`{line}`\n\n")
+@pytest.fixture
+def report(capsys: pytest.CaptureFixture[str]) -> Callable[..., None]:
+    """Return a function that shows one row even with output capturing on."""
+
+    def emit(name: str, framing: str, **values: Any) -> None:
+        row = {"workload": name, "framing": framing, **values}
+        RESULTS.append(row)
+        line = json.dumps(row, sort_keys=True)
+        with capsys.disabled():
+            # A workflow annotation: readable through the check-run API.
+            print(f"\n::notice title=LOADMEASURE::{line}")
+        if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+            with Path(summary).open("a", encoding="utf-8") as handle:
+                handle.write(f"`{line}`\n\n")
+
+    return emit
 
 
 def _burst(gateway: FakeGateway, documents: list[str]) -> int:
@@ -118,6 +126,7 @@ async def test_telegram_burst(
     hass: HomeAssistant,
     gateway: FakeGateway,
     meter: Meter,
+    report: Callable[..., None],
     framing: str,
     changing: bool,
 ) -> None:
@@ -158,7 +167,7 @@ async def test_telegram_burst(
         device_id: device.channels[0].is_on
         for device_id, device in coordinator.devices.items()
     }
-    _report(
+    report(
         "telegram_burst_" + ("changing" if changing else "identical"),
         framing,
         telegrams=TELEGRAMS,
@@ -181,6 +190,7 @@ async def test_command_burst_reuses_connections(
     hass: HomeAssistant,
     gateway: FakeGateway,
     meter: Meter,
+    report: Callable[..., None],
     framing: str,
 ) -> None:
     """Commands to all devices at once: queue depth and connection reuse."""
@@ -211,7 +221,7 @@ async def test_command_burst_reuses_connections(
     await watcher
     puts = sum(1 for method, _, _ in gateway.requests if method == "PUT") - puts_before
 
-    _report(
+    report(
         "command_burst",
         framing,
         commands=DEVICES,
