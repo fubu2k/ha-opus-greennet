@@ -45,7 +45,7 @@ work stops.
 - OPUS wire values, channel zero, `notAvailable`, cover inversion, the STOP payload
   and the proprietary HeatArea profiles are preserved (see `protocol-contract.md`).
 - No automatic write retries after a timeout.
-- No blanket migration to `DataUpdateCoordinator`.
+- No blanket migration to `DataUpdateCoordinator` (reasons: [coordinator-decision.md](coordinator-decision.md)).
 - No additional dependencies without a concrete need.
 
 ## Branch chain
