@@ -217,6 +217,9 @@
       },
       "rotation_time": {
         "name": "Rotationszeit"
+      },
+      "max_holding_time": {
+        "name": "Maximale Haltezeit"
       }
     }
   },

@@ -40,6 +40,7 @@ from .const import (
     KEY_LIQUID_DETECTED,
     KEY_LOCAL_CONTROL,
     KEY_LOCKING_MODE,
+    KEY_MAX_HOLDING_TIME,
     KEY_MISSING_TEMPERATURE,
     KEY_POSITION,
     KEY_POWER,
@@ -125,6 +126,7 @@ class EnOceanChannel:
     angle: int | None = None  # Tilt angle for blinds
     rotation_time: float | None = None  # Zero means the cover has no slat rotation
     vertical_movement_time: float | None = None
+    max_holding_time: float | None = None  # Seconds, D2-05-02 configuration
     movement: str | None = None  # Estimated opening/closing, never physical feedback
     local_control: bool | None = None
     locking_mode: str | None = None  # block, unblock or alarm (D2-05)
@@ -784,6 +786,13 @@ class EnOceanDevice:
             elif key == KEY_VERTICAL_MOVEMENT_TIME:
                 channel.vertical_movement_time = self._float_reading(
                     channel.vertical_movement_time, value, minimum=0
+                )
+
+            elif key == KEY_MAX_HOLDING_TIME:
+                # Range of the gateway's parameter catalog; anything else keeps
+                # the known value.
+                channel.max_holding_time = self._float_reading(
+                    channel.max_holding_time, value, minimum=0, maximum=65535
                 )
 
             elif key == KEY_ROTATION_TIME:
