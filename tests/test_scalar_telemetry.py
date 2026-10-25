@@ -41,15 +41,12 @@ async def _refresh_device_list(entry: ConfigEntry) -> None:
 async def _setup_with_signal_strength(
     hass: HomeAssistant, gateway: FakeGateway
 ) -> tuple[ConfigEntry, str]:
-    """Set up the gateway (the signal sensor is enabled by default) and reload it.
-
-    The reload lets the initial state writes settle, so tests that count state
-    writes start from a quiet entry.
-    """
+    """Set up the gateway with the (disabled by default) signal sensor enabled."""
     entry = await setup_bridge(hass, gateway)
     entity_id = await wait_for_entity(hass, "sensor", SIGNAL)
     registry = er.async_get(hass)
-    assert registry.async_get(entity_id).disabled_by is None
+    assert registry.async_get(entity_id).disabled_by is not None
+    registry.async_update_entity(entity_id, disabled_by=None)
     assert await hass.config_entries.async_reload(entry.entry_id)
     await wait_until(lambda: entry.runtime_data.coordinator._stream_connected)  # noqa: SLF001
     await hass.async_block_till_done()

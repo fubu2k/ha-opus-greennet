@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Final
 
 from homeassistant.components.sensor import (
@@ -26,6 +26,7 @@ from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from . import OpusGreenNetConfigEntry
 from .const import CONF_EAG_ID, DEFAULT_CHANNEL, DOMAIN
@@ -475,6 +476,7 @@ class OpusGreenNetSignalStrengthSensor(OpusGreenNetBaseSensor):
             "signal_strength",
             "signal_strength",
         )
+        self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> int | None:
@@ -518,6 +520,9 @@ class OpusGreenNetLastSeenSensor(OpusGreenNetBaseSensor):
         super().__init__(
             coordinator, eag_id, gateway_device_id, device, "last_seen", "last_seen"
         )
+        # Changes with every telegram: enabled on request only, so the
+        # recorder and logbook are not filled for every device.
+        self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> datetime | None:
@@ -729,29 +734,22 @@ class OpusGreenNetCoverRunSensor(OpusGreenNetEntity, RestoreSensor):
         }
 
 
-def format_uptime(uptime: str | None) -> str | None:
-    """Return the gateway uptime as days, hours, minutes and seconds.
-
-    ``uptime`` is the validated number of seconds from the health probe
-    (finite and not negative). Fractions are dropped.
-    """
-    if uptime is None:
-        return None
-    days, rest = divmod(int(float(uptime)), 86400)
-    hours, rest = divmod(rest, 3600)
-    minutes, seconds = divmod(rest, 60)
-    return f"{days} d {hours} h {minutes} min {seconds} s"
+# The boot time is derived from the uptime once a minute. Readings that only
+# drift by network delay keep the stored time, so the state changes only when
+# the gateway restarts.
+UPTIME_DRIFT: Final = timedelta(seconds=60)
 
 
 class OpusGreenNetGatewayUptimeSensor(SensorEntity):
-    """Time since the gateway started, on the gateway's own device.
+    """When the gateway started, on the gateway's own device.
 
-    The value is read by the health probe (once a minute) and shown after each
-    reading; it is not extrapolated between readings.
+    The health probe reads the uptime once a minute; the sensor shows the
+    resulting start time and changes only when the gateway restarts.
     """
 
     _attr_has_entity_name = True
     _attr_should_poll = False
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "gateway_uptime"
 
@@ -761,6 +759,7 @@ class OpusGreenNetGatewayUptimeSensor(SensorEntity):
         self._eag_id = eag_id
         self._attr_unique_id = f"{eag_id}_gateway_uptime"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, eag_id)})
+        self._started: datetime | None = None
 
     @property
     def available(self) -> bool:
@@ -768,26 +767,43 @@ class OpusGreenNetGatewayUptimeSensor(SensorEntity):
         return self._coordinator.available
 
     @property
-    def native_value(self) -> str | None:
-        """Return the uptime as days, hours, minutes and seconds."""
-        return format_uptime(self._coordinator.gateway_uptime)
+    def native_value(self) -> datetime | None:
+        """Return when the gateway started."""
+        return self._started
 
-    @property
-    def extra_state_attributes(self) -> dict[str, float] | None:
-        """Return the uptime in seconds, as the gateway reported it."""
+    def _update_started(self) -> bool:
+        """Derive the start time from the latest uptime; True if it changed."""
         uptime = self._coordinator.gateway_uptime
-        return None if uptime is None else {"uptime_seconds": float(uptime)}
+        if uptime is None:
+            return False
+        started = (dt_util.utcnow() - timedelta(seconds=float(uptime))).replace(
+            microsecond=0
+        )
+        if self._started is not None and abs(started - self._started) <= UPTIME_DRIFT:
+            return False
+        self._started = started
+        return True
 
     async def async_added_to_hass(self) -> None:
-        """Show every new reading and every availability change."""
+        """Show a restart of the gateway and every availability change."""
         await super().async_added_to_hass()
-        for signal in (SIGNAL_GATEWAY_UPTIME_UPDATE, SIGNAL_AVAILABILITY_UPDATE):
-            self.async_on_remove(
-                async_dispatcher_connect(
-                    self.hass, f"{signal}_{self._eag_id}", self._handle_update
-                )
+        self._update_started()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"{SIGNAL_GATEWAY_UPTIME_UPDATE}_{self._eag_id}",
+                self._handle_uptime,
             )
+        )
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"{SIGNAL_AVAILABILITY_UPDATE}_{self._eag_id}",
+                self.async_write_ha_state,
+            )
+        )
 
     @callback
-    def _handle_update(self) -> None:
-        self.async_write_ha_state()
+    def _handle_uptime(self) -> None:
+        if self._update_started():
+            self.async_write_ha_state()

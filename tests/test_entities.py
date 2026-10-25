@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -57,6 +58,7 @@ from custom_components.opus_greennet.light import (
 from custom_components.opus_greennet.sensor import (
     OpusGreenNetFeedTemperatureSensor,
     OpusGreenNetHumiditySensor,
+    OpusGreenNetLastSeenSensor,
     OpusGreenNetPowerConsumptionSensor,
     OpusGreenNetSignalStrengthSensor,
 )
@@ -358,7 +360,29 @@ def test_sensor_values_and_metadata() -> None:
     assert power.native_unit_of_measurement is UnitOfPower.KILO_WATT
     assert power.unique_id.endswith("_energy_consumption")
     assert signal.native_value == 0
-    assert signal.entity_registry_enabled_default is True
+    assert signal.entity_registry_enabled_default is False
+
+
+@pytest.mark.parametrize(
+    ("last_seen", "expected"),
+    [
+        ("2026-10-19T18:17:17.571+0200", "2026-10-19T16:17:17.571000+00:00"),
+        ("2026-10-19T18:17:17", None),
+        ("not a time", None),
+        ("", None),
+    ],
+)
+def test_last_seen_sensor(last_seen: str, expected: str | None) -> None:
+    device = _device("D2-01-01")
+    device.last_seen = last_seen
+    sensor = OpusGreenNetLastSeenSensor(
+        _coordinator(), EAG_ID, GATEWAY_DEVICE_ID, device
+    )
+    # Changes with every telegram, so it is enabled on request only.
+    assert sensor.entity_registry_enabled_default is False
+    assert sensor.device_class is SensorDeviceClass.TIMESTAMP
+    value = sensor.native_value
+    assert (None if value is None else value.astimezone(UTC).isoformat()) == expected
 
 
 def test_binary_sensor_values() -> None:
