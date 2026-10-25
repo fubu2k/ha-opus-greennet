@@ -103,8 +103,10 @@ per device, values from the device configuration, a new value is written with
 the ReCom configuration request (`{"key": ..., "value": "<value>"}`) and
 adopted only after it was read back, nothing is repeated automatically. A value
 the gateway reports that is not in the list shows as *unknown* and is never
-changed by the integration. Writing these settings was **not tested on
-hardware** (not even a numeric one on a switch), so try a single switch first.
+changed by the integration. Writing a text setting is **verified on hardware
+for the LED colour of one D2-01-01 switch** (changed, read back, restored; see
+[the evidence](quality/hardware-evidence-text-write.md)); the other selects
+were **not tested on hardware**, so try a single switch first.
 The function of the rocker buttons A and B is not offered: a switch reports a
 value there that its own catalog does not list, and a wrong choice would change
 which button switches which channel.
