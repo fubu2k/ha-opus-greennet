@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from typing import Final
 
 from homeassistant.components.sensor import (
@@ -247,6 +248,16 @@ async def async_setup_entry(
             )
         )
 
+        # Time of the last telegram or listed update (all devices, diagnostic).
+        entities.append(
+            OpusGreenNetLastSeenSensor(
+                coordinator=coordinator,
+                eag_id=eag_id,
+                gateway_device_id=gateway_device_id,
+                device=device,
+            )
+        )
+
         new_entities = [
             entity for entity in entities if entity.unique_id not in added_unique_ids
         ]
@@ -428,6 +439,48 @@ class OpusGreenNetSignalStrengthSensor(OpusGreenNetBaseSensor):
         if self._device.dbm is not None:
             return self._device.dbm
         return None
+
+
+def parse_last_seen(value: str) -> datetime | None:
+    """Return the gateway's last-seen time, or None when it is not usable.
+
+    The gateway writes an ISO 8601 time with a UTC offset (for example
+    ``2026-10-19T18:17:17.571+0200``). A missing, malformed or offset-less
+    value is unknown: a timestamp sensor must be timezone-aware, and the
+    time zone is never guessed.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+class OpusGreenNetLastSeenSensor(OpusGreenNetBaseSensor):
+    """When the gateway last heard from the device."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+    ) -> None:
+        """Initialize the last-seen sensor."""
+        super().__init__(
+            coordinator, eag_id, gateway_device_id, device, "last_seen", "last_seen"
+        )
+        self._attr_entity_registry_enabled_default = False
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the time of the newest report, unknown when not usable."""
+        return parse_last_seen(self._device.last_seen)
 
 
 class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
