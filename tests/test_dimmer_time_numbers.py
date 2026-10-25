@@ -92,7 +92,15 @@ async def test_no_dimmer_times_for_other_devices(hass: HomeAssistant) -> None:
             "SENSOR": EnOceanDevice("SENSOR", "Sensor", [{"eep": "A5-02-05"}]),
         },
     )
-    assert added == []
+    # The switches have number entities of their own, but no dimmer times.
+    switch_prefixes = (f"{EAG_ID}_SW_", f"{EAG_ID}_SW2_")
+    unique_ids = [entity.unique_id for entity in added]
+    assert [uid for uid in unique_ids if not uid.startswith(switch_prefixes)] == []
+    assert not [
+        uid
+        for uid in unique_ids
+        if uid.endswith(("_ramping_time", "_short_press_time", "_long_press_time"))
+    ]
 
 
 async def test_blinds_do_not_get_dimmer_times_and_dimmers_no_blind_times(

@@ -90,7 +90,8 @@ async def test_setup_creates_the_times_for_blinds_only(
     coordinator = MagicMock()
     coordinator.devices = {
         "DEV1": _blind(),
-        "SW": EnOceanDevice("SW", "Switch", [{"eep": "D2-01-01"}]),
+        # A D2-01 switch has number entities of its own (switch settings).
+        "SENSOR": EnOceanDevice("SENSOR", "Sensor", [{"eep": "A5-02-05"}]),
     }
     added: list = []
     await async_setup_entry(

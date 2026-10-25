@@ -324,9 +324,9 @@ async def test_warning_signal_keeps_three_decimals(
     device = coord.devices["DEV1"] = _switch()
     channel = device.get_or_create_channel()
     channel.switch_off_warning_signal = 0.5
-    radio.response = _document(switchOffWarningSignal=0.123)
+    radio.response = _document(switchOffWarningSignal=0.457)
 
-    await coord.async_set_device_parameter("DEV1", "switchOffWarningSignal", 0.1234567)
+    await coord.async_set_device_parameter("DEV1", "switchOffWarningSignal", 0.4567891)
 
     assert radio.sent == [
         (
@@ -334,13 +334,13 @@ async def test_warning_signal_keeps_three_decimals(
             CONFIG_PATH,
             {
                 "configuration": {
-                    "parameters": [{"key": "switchOffWarningSignal", "value": 0.123}]
+                    "parameters": [{"key": "switchOffWarningSignal", "value": 0.457}]
                 }
             },
         ),
         ("GET", CONFIG_PATH, None),
     ]
-    assert channel.switch_off_warning_signal == 0.123
+    assert channel.switch_off_warning_signal == 0.457
 
 
 async def test_a_read_back_one_step_off_is_not_confirmed(
@@ -350,10 +350,10 @@ async def test_a_read_back_one_step_off_is_not_confirmed(
     device = coord.devices["DEV1"] = _switch()
     channel = device.get_or_create_channel()
     channel.switch_off_warning_signal = 0.5
-    radio.response = _document(switchOffWarningSignal=0.124)
+    radio.response = _document(switchOffWarningSignal=0.458)
 
     with pytest.raises(HomeAssistantError) as error:
-        await coord.async_set_device_parameter("DEV1", "switchOffWarningSignal", 0.123)
+        await coord.async_set_device_parameter("DEV1", "switchOffWarningSignal", 0.457)
 
     assert error.value.translation_key == "parameter_not_confirmed"
     assert channel.switch_off_warning_signal == 0.5
