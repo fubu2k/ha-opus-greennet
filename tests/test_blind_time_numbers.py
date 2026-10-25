@@ -258,11 +258,7 @@ async def test_max_holding_time_write_is_adopted_after_the_read_back(
         (
             "PUT",
             CONFIG_PATH,
-            {
-                "configuration": {
-                    "parameters": [{"key": "maxHoldingTime", "value": 29}]
-                }
-            },
+            {"configuration": {"parameters": [{"key": "maxHoldingTime", "value": 29}]}},
         ),
         ("GET", CONFIG_PATH, None),
     ]

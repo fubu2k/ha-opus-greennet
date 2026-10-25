@@ -192,10 +192,7 @@ def configuration_state_functions(data: WireMapping) -> list[WireFunction]:
             continue
         if parameter.get("key") == KEY_CHANNEL:
             channel = parameter.get("value")
-        elif (
-            parameter.get("key") in COVER_CONFIGURATION_KEYS
-            and "value" in parameter
-        ):
+        elif parameter.get("key") in COVER_CONFIGURATION_KEYS and "value" in parameter:
             functions.append({"channel": channel, **parameter})
     return functions
 
