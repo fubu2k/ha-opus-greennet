@@ -177,6 +177,9 @@
       },
       "last_run_time": {
         "name": "Last run time"
+      },
+      "gateway_uptime": {
+        "name": "Uptime"
       }
     },
     "switch": {

@@ -30,6 +30,9 @@
           "not_requested": "mdi:lock-outline",
           "requested": "mdi:lock-clock"
         }
+      },
+      "gateway_uptime": {
+        "default": "mdi:timer-outline"
       }
     },
     "button": {

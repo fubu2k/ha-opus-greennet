@@ -177,6 +177,9 @@
       },
       "last_run_time": {
         "name": "Letzte Fahrzeit"
+      },
+      "gateway_uptime": {
+        "name": "Betriebszeit"
       }
     },
     "switch": {

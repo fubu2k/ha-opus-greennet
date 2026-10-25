@@ -22,14 +22,17 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import OpusGreenNetConfigEntry
-from .const import CONF_EAG_ID, DEFAULT_CHANNEL
+from .const import CONF_EAG_ID, DEFAULT_CHANNEL, DOMAIN
 from .coordinator import (
+    SIGNAL_AVAILABILITY_UPDATE,
     SIGNAL_DEVICE_DISCOVERED,
     SIGNAL_DEVICE_REMOVED,
+    SIGNAL_GATEWAY_UPTIME_UPDATE,
     CoverRun,
     OpusGreenNetCoordinator,
 )
@@ -77,6 +80,7 @@ async def async_setup_entry(
     gateway_device_id = entry.runtime_data.gateway_device_id
     eag_id = entry.data[CONF_EAG_ID]
     added_unique_ids: set[str] = set()
+    async_add_entities([OpusGreenNetGatewayUptimeSensor(coordinator, eag_id)])
 
     @callback
     def async_add_sensors(device: EnOceanDevice) -> None:
@@ -594,3 +598,67 @@ class OpusGreenNetCoverRunSensor(OpusGreenNetEntity, RestoreSensor):
             "full_travel": run.full_travel,
             "finished_at": run.finished_at,
         }
+
+
+def format_uptime(uptime: str | None) -> str | None:
+    """Return the gateway uptime as days, hours, minutes and seconds.
+
+    ``uptime`` is the validated number of seconds from the health probe
+    (finite and not negative). Fractions are dropped.
+    """
+    if uptime is None:
+        return None
+    days, rest = divmod(int(float(uptime)), 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, seconds = divmod(rest, 60)
+    return f"{days} d {hours} h {minutes} min {seconds} s"
+
+
+class OpusGreenNetGatewayUptimeSensor(SensorEntity):
+    """Time since the gateway started, on the gateway's own device.
+
+    The value is read by the health probe (once a minute) and shown after each
+    reading; it is not extrapolated between readings.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "gateway_uptime"
+
+    def __init__(self, coordinator: OpusGreenNetCoordinator, eag_id: str) -> None:
+        """Initialize the sensor for the gateway ``eag_id``."""
+        self._coordinator = coordinator
+        self._eag_id = eag_id
+        self._attr_unique_id = f"{eag_id}_gateway_uptime"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, eag_id)})
+
+    @property
+    def available(self) -> bool:
+        """Return whether the gateway is reachable."""
+        return self._coordinator.available
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the uptime as days, hours, minutes and seconds."""
+        return format_uptime(self._coordinator.gateway_uptime)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, float] | None:
+        """Return the uptime in seconds, as the gateway reported it."""
+        uptime = self._coordinator.gateway_uptime
+        return None if uptime is None else {"uptime_seconds": float(uptime)}
+
+    async def async_added_to_hass(self) -> None:
+        """Show every new reading and every availability change."""
+        await super().async_added_to_hass()
+        for signal in (SIGNAL_GATEWAY_UPTIME_UPDATE, SIGNAL_AVAILABILITY_UPDATE):
+            self.async_on_remove(
+                async_dispatcher_connect(
+                    self.hass, f"{signal}_{self._eag_id}", self._handle_update
+                )
+            )
+
+    @callback
+    def _handle_update(self) -> None:
+        self.async_write_ha_state()
