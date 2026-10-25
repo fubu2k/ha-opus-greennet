@@ -437,15 +437,17 @@ async def test_sensor_exists_only_for_devices_with_a_table(make_device) -> None:
 
 
 async def test_diagnostics_show_the_links_without_any_identifier() -> None:
-    coordinator = MagicMock()
-    coordinator.eag_id = GATEWAY_ID
-    coordinator.gateway_info = {}
-    coordinator.gateway_uptime = "1 day"
-    coordinator.available = True
     linked = EnOceanDevice(DEV, "Desk", [{"eep": "D2-01-01"}])
     linked.link_tables = RECORDED
     unread = EnOceanDevice("AABB2244", "Hall", [{"eep": "A5-07-03"}])
-    coordinator.devices = {DEV: linked, "AABB2244": unread}
+    # A plain namespace, not a MagicMock: the report must be JSON serializable.
+    coordinator = SimpleNamespace(
+        eag_id=GATEWAY_ID,
+        gateway_info={},
+        gateway_uptime="1 day",
+        available=True,
+        devices={DEV: linked, "AABB2244": unread},
+    )
     entry = SimpleNamespace(
         entry_id="entry-id",
         title="Bridge",
