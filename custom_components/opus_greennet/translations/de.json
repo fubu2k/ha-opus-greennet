@@ -54,6 +54,7 @@
     "error": {
       "cannot_connect": "Verbindung zum Gateway fehlgeschlagen. Prüfe Host und Port.",
       "invalid_host": "Gib nur die IP-Adresse oder den Hostnamen des Gateways ein, ohne http://, Port oder Pfad.",
+      "host_not_local": "Die Adresse muss im lokalen Netzwerk liegen (privat, Link-Local, Loopback oder Carrier-Grade-NAT). Das Gateway spricht nur unverschlüsseltes HTTP, daher werden öffentliche Adressen nicht unterstützt.",
       "invalid_auth": "Das Gateway hat Benutzername oder Passwort abgelehnt.",
       "unsupported_gateway": "Das Gerät unter dieser Adresse hat nicht wie ein OPUS-Gateway geantwortet.",
       "wrong_gateway": "Diese Adresse gehört zu einem anderen Gateway als {eag_id}.",
@@ -63,7 +64,8 @@
       "already_configured": "Dieses Gateway ist bereits eingerichtet. Seine Verbindungseinstellungen wurden aktualisiert.",
       "reauth_successful": "Die Verbindung zum Gateway wurde aktualisiert.",
       "reconfigure_successful": "Die Verbindung zum Gateway wurde aktualisiert.",
-      "not_ipv4_address": "Es werden nur Gateways mit einer IPv4-Adresse unterstützt."
+      "not_ipv4_address": "Es werden nur Gateways mit einer IPv4-Adresse unterstützt.",
+      "not_local_address": "Die angekündigte Adresse liegt nicht im lokalen Netzwerk und wird ignoriert."
     }
   },
   "entity": {

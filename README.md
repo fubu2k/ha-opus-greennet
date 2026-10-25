@@ -110,7 +110,7 @@ you only enter the password. To add it by hand, use
 
 | Field | Description |
 |-------|-------------|
-| **Host** | IP address or host name of the gateway |
+| **Host** | IP address or host name of the gateway. It must be in the local network (see below) |
 | **Port** | Port of the REST API, `8080` by default |
 | **Username** | API user, `admin` by default |
 | **Password** | API password, by default the gateway's EURID in capital letters (printed on the gateway; fictional example: `A1B2C3D4`) |
@@ -118,6 +118,14 @@ you only enter the password. To add it by hand, use
 The gateway's EURID becomes the stable identifier of the entry, its devices and
 entities. If the gateway gets a new IP address, discovery updates the entry
 automatically. To change the credentials, use **Reconfigure** on the entry.
+
+**Local addresses only:** the gateway speaks unencrypted HTTP, so Home Assistant
+sends its credentials only to private addresses (`10/8`, `172.16/12`,
+`192.168/16`), link-local (`169.254/16`, `fe80::/10`), unique local
+(`fc00::/7`), loopback and carrier-grade NAT (`100.64/10`, used by VPN meshes).
+A host name must resolve only to such addresses. For remote access use a VPN,
+not a port forward. Entries that already use a public address keep working and
+log a warning at setup.
 
 **Upgrading from an MQTT version (0.x):** nothing to enter in most cases. At the
 first start the integration finds the gateway in the local network and
@@ -144,8 +152,9 @@ diagnostics** on the integration entry). More in
   follows from the device's report or a status check.
 - Cover positions during movement are estimated from the configured travel
   time.
-- The gateway API is plain HTTP with basic authentication. Keep the gateway in
-  a trusted network.
+- The gateway API is plain HTTP with basic authentication (the gateway has no
+  TLS). Keep the gateway in a trusted network; new or changed addresses must be
+  local.
 - Devices cannot be added to or removed from the gateway yet, and device
   settings are only available as actions (see [Roadmap](#roadmap)).
 
