@@ -161,8 +161,9 @@ diagnostics** on the integration entry). More in
 - The gateway API is plain HTTP with basic authentication (the gateway has no
   TLS). Keep the gateway in a trusted network; new or changed addresses must be
   local.
-- Devices cannot be added to or removed from the gateway yet, and device
-  settings are only available as actions (see [Roadmap](#roadmap)).
+- Devices cannot be added to or removed from the gateway yet, and some device
+  settings (the function of rocker A and B, the routing time, the repeater
+  mode) are not offered yet (see [Roadmap](#roadmap)).
 
 All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 
@@ -171,7 +172,7 @@ All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 | Status | Topic |
 |--------|-------|
 | ✅ Released | 1.0 with the REST API instead of MQTT |
-| 🚧 In progress | Device settings as Home Assistant entities (blind travel, rotation and maximum holding times, dimmer ramping and press times and switch timers, warning and illumination threshold released as numbers; switch operation mode, LED and external input released as selects; more settings planned) |
+| 🚧 In progress | Device settings as Home Assistant entities. Available: blind times, dimmer times and switch timers as numbers, switch operation mode, LED and external input as selects, link tables read-only. Still open: function of rocker A and B, routing time, repeater mode and gateway diagnostics (see below) |
 | 🔍 Investigating | Adding and removing devices from Home Assistant |
 | 💡 Idea | HTTPS if the gateway offers it |
 
@@ -184,9 +185,8 @@ of blinds, the ramping, short-press and long-press time of D2-01-03 dimmers and
 the timer durations, switch-off warning, its signal duration and the
 illumination threshold of D2-01-01/-11 switches are already offered as number
 entities, and the operation mode, LED colour, LED channel and external input
-function of these switches as select entities (all disabled by default). The
-plan is to offer the other settings as configuration entities on each device in
-the same way, so they can be changed in the UI and in automations:
+function of these switches as select entities (all disabled by default). What
+is still open is offered the same way once it is safe to write:
 
 | Device | Settings |
 |--------|----------|
@@ -198,10 +198,25 @@ the same way, so they can be changed in the UI and in automations:
 Settings are written over the radio, so a change can take several seconds and
 needs the actuator to answer.
 
-> **Verified on hardware:** writing a text setting works. The LED colour of a
-> D2-01-01 switch was changed, read back from the device and restored (gateway
-> firmware 1.21.30). The other select settings are not verified yet. Details:
-> [hardware evidence](docs/quality/hardware-evidence-text-write.md).
+#### What was verified on hardware
+
+"Written on hardware" means the value was changed on a real device, read back
+from it and restored, with the other parameters unchanged (gateway firmware
+1.21.30, one device each). Everything else is **read from the gateway but never
+written by the integration on hardware so far**: try a single device first.
+
+| Setting | Entity | Written on hardware |
+|---------|--------|---------------------|
+| Blind: vertical movement time | Number | ✅ one blind |
+| Blind: maximum holding time | Number | ✅ one blind |
+| Blind: rotation time | Number | not tested |
+| Dimmer D2-01-03: ramping, short-press and long-press time | Number | not tested |
+| Switch D2-01-01/-11: timers, switch-off warning and signal, illumination threshold | Number | not tested |
+| Switch: LED colour | Select | ✅ one D2-01-01 (text value) |
+| Switch: operation mode, LED channel, external input function | Select | not tested |
+| Link tables (wall switch links) | Action, sensor, diagnostics | read only, read on hardware |
+
+Details of the text write: [hardware evidence](docs/quality/hardware-evidence-text-write.md).
 
 ### Adding and removing devices
 
