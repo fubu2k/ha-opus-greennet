@@ -92,9 +92,7 @@ def test_splitter_cuts_lines_with_any_terminator_and_chunking(
     terminator: str, size: int
 ) -> None:
     """Fragmented and bundled lines; LF, CRLF and blank lines; UTF-8 splits."""
-    raw = "".join(
-        json.dumps(doc, ensure_ascii=False) + terminator for doc in DOCUMENTS
-    )
+    raw = "".join(json.dumps(doc, ensure_ascii=False) + terminator for doc in DOCUMENTS)
     found = _feed_all(raw.encode(), size)
     assert [json.loads(text) for text in found] == DOCUMENTS
 
