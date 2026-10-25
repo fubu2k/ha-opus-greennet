@@ -42,7 +42,7 @@ Verification legend: **[Code]** read from source, **[Test]** covered by tests,
 | `GET /devices/stream` | Event stream | See §3 **[HW]** |
 | `GET /devices/{id}` | Late discovery of a device that sends telegrams but was missing from the list | Retried at most once per hour per device **[Code][Test]** |
 | `PUT /devices/{id}/state` | Commands, status queries | Body `{"state": {"functions": [...]}}`; answers in ~30 ms **[HW]** |
-| `GET/PUT /devices/{id}/configuration` | Services (ReCom) | Several seconds over the radio (8 s observed) **[HW]** |
+| `GET/PUT /devices/{id}/configuration` | Services (ReCom) | Several seconds over the radio (8 s observed) **[HW]**. A **text value** is accepted too (`{"key": "ledColor", "value": "green"}`), changed on the device and confirmed by reading back: [hardware evidence](hardware-evidence-text-write.md) |
 | `GET /devices/{id}/parameters` | Service (ReCom) | **[HW]** |
 | `GET /devices/{id}/linkTables` | Service (ReCom, read only) | Same structure as the `linkTables` block of the device object plus `lastUpdateTime`; `outbound` names the gateway itself **[HW]** |
 
@@ -288,3 +288,7 @@ checked **[Code][Test]**.
   sensors and stand-alone rocker switches: not present on the test
   installation; covered by tests with the documented payloads.
 - Whether the gateway ever sends `content = "device"` documents on the stream.
+- Text writes of `operationMode`, `functionExternalInput` and `ledChannel`, a
+  text write on other device types, and the answer to an invalid text value
+  (only `ledColor` on one D2-01-01 was verified, see
+  [hardware evidence](hardware-evidence-text-write.md)).

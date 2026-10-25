@@ -198,6 +198,11 @@ the same way, so they can be changed in the UI and in automations:
 Settings are written over the radio, so a change can take several seconds and
 needs the actuator to answer.
 
+> **Verified on hardware:** writing a text setting works. The LED colour of a
+> D2-01-01 switch was changed, read back from the device and restored (gateway
+> firmware 1.21.30). The other select settings are not verified yet. Details:
+> [hardware evidence](docs/quality/hardware-evidence-text-write.md).
+
 ### Adding and removing devices
 
 Today new devices are taught in with the OPUS app, and deleting a device in Home
@@ -222,6 +227,7 @@ could offer:
 | [How it works](docs/how-it-works.md) | Updates, availability, commands, all known limitations, REST API |
 | [Troubleshooting](docs/troubleshooting.md) | Diagnosis, diagnostics, debug logging, update lag |
 | [Upgrading](docs/upgrading.md) | From the MQTT versions and the community test versions |
+| [Hardware evidence: text write](docs/quality/hardware-evidence-text-write.md) | What was verified on a real gateway for writing text settings, and what was not |
 | [Development](docs/development.md) | Project structure, tests, CI, beta testing, contributing |
 | [Changelog](CHANGELOG.md) | Changes per release |
 
