@@ -475,7 +475,6 @@ class OpusGreenNetSignalStrengthSensor(OpusGreenNetBaseSensor):
             "signal_strength",
             "signal_strength",
         )
-        self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> int | None:

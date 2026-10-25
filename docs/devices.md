@@ -236,8 +236,9 @@ battery percentage is invented when the gateway publishes none.
 - Battery percentages accept an optional `%` suffix (the gateway reports for
   example `96%`) and must be within 0–100.
 - Battery level and signal strength come from the device list and are
-  refreshed every 30 minutes; the signal strength sensor is disabled by
-  default.
+  refreshed every 30 minutes; the signal strength sensor is enabled by
+  default for new installations (an entity that was disabled before stays
+  disabled until you enable it).
 - Every device also has a diagnostic **Last seen** sensor (enabled by
   default for new installations; an entity that was disabled before stays
   disabled until you enable it): the time of its newest report, from the telegram timestamp or the
