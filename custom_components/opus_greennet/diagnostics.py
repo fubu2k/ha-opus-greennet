@@ -107,16 +107,12 @@ def _redact_diagnostics(
     def redact_key(key: object) -> object:
         return redact_text_key(key) if isinstance(key, str) else key
 
-    def masked(key: object, item: object) -> object:
-        # An empty value hides nothing; keeping it shows that the field is
-        # unknown (for example a host name that does not resolve).
-        if sensitive_key(key):
-            return item if item is None or item == "" else REDACTED
-        return redact(item)
-
     def redact(value: object) -> object:
         if isinstance(value, dict):
-            return {redact_key(key): masked(key, item) for key, item in value.items()}
+            return {
+                redact_key(key): REDACTED if sensitive_key(key) else redact(item)
+                for key, item in value.items()
+            }
         if isinstance(value, list):
             return [redact(item) for item in value]
         if (decoded := json_container(value)) is not None:
@@ -125,7 +121,10 @@ def _redact_diagnostics(
             return pattern.sub(lambda _: REDACTED, value)
         return value
 
-    return {redact_text_key(key): masked(key, item) for key, item in data.items()}
+    return {
+        redact_text_key(key): REDACTED if sensitive_key(key) else redact(item)
+        for key, item in data.items()
+    }
 
 
 def _linked_devices(linked: tuple[LinkedDevice, ...]) -> list[dict[str, object]]:
@@ -267,7 +266,8 @@ async def async_get_config_entry_diagnostics(
                     if channel.position is not None
                 }
 
-    return _redact_diagnostics(
+    resolved = {"hostname": hostname, "ipv4": ipv4, "ipv6": ipv6}
+    result = _redact_diagnostics(
         {
             "entry": {
                 "entry_id": entry.entry_id,
@@ -285,8 +285,6 @@ async def async_get_config_entry_diagnostics(
                 ),
                 "average_dbm": _info_int(coordinator.gateway_info, "averageDbm"),
                 "info_read_at": getattr(coordinator, "gateway_info_read_at", None),
-                # Empty when the name or address cannot be resolved.
-                "connection": {"hostname": hostname, "ipv4": ipv4, "ipv6": ipv6},
                 "uptime": coordinator.gateway_uptime,
                 # Seconds from opening the event stream to its first device
                 # list at setup.
@@ -302,5 +300,15 @@ async def async_get_config_entry_diagnostics(
         {
             coordinator.eag_id,
             *(device.device_id for device in coordinator.devices.values()),
+            # Wherever else the name or address appears, it is masked as well.
+            *(value for value in resolved.values() if value),
         },
     )
+    # Added after the redaction: a value is masked, an unresolved one stays
+    # empty (None), so the download shows that it could not be resolved.
+    gateway = result["gateway"]
+    if isinstance(gateway, dict):
+        gateway["connection"] = {
+            key: REDACTED if value else None for key, value in resolved.items()
+        }
+    return result
