@@ -39,6 +39,26 @@ def _no_dns_in_diagnostics() -> Iterator[None]:
         yield
 
 
+@pytest.fixture(autouse=True)
+def _no_webui_2026_detection() -> Iterator[None]:
+    """Keep the tests from probing real addresses for the newer generation.
+
+    A gateway that does not answer would otherwise be asked for HTTPS on port
+    443. Tests of that path replace this patch with their own endpoint.
+    """
+    with (
+        patch(
+            "custom_components.opus_greennet.config_flow.async_detect_webui_2026",
+            AsyncMock(return_value=None),
+        ),
+        patch(
+            "custom_components.opus_greennet.async_detect_webui_2026",
+            AsyncMock(return_value=None),
+        ),
+    ):
+        yield
+
+
 @pytest.fixture
 async def hass(tmp_path: Path) -> AsyncIterator[HomeAssistant]:
     """Run real Home Assistant managers without starting external integrations.

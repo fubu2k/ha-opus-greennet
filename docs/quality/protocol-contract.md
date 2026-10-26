@@ -14,6 +14,26 @@ Verification legend: **[Code]** read from source, **[Test]** covered by tests,
 - Plain HTTP on port 8080, basic authentication. Vendor default user `admin`,
   password = gateway EURID in upper case. Wrong credentials: HTTP 401 with an
   empty body. **[HW][Code][Test]**
+- **Gateway generation WebUI 2026** (entry key `generation` = `webui2026`; a
+  missing key means the generation above): HTTPS on port 443, the same paths, a
+  self-signed certificate pinned by its SHA-256 fingerprint
+  (`certificate_fingerprint`), user login and token. `GET /auth/setup-status`
+  (no login) tells the generation apart. Source: vendor description of the
+  ConfigTool, **not** verified on a gateway. **[Ref][Code][Test]**
+  - **[Assumption]** The login is `POST /auth/login` with
+    `{"username", "password"}` and answers `{"token": "..."}`; the token is sent
+    as `Authorization: Bearer <token>`. Constants in `api.py`
+    (`_LOGIN_PATH`, `_LOGIN_TOKEN_KEY`).
+  - **[Assumption]** `/system/info` carries the EURID as before.
+  - Token lifetime 30 days, extended by use (vendor text); the renewal is not
+    known. The token is kept in memory only. HTTP 401 with a token: the token is
+    dropped, the request is not repeated (`OpusTokenExpiredError`, a connection
+    error); the next request logs in again. HTTP 403: `OpusAuthError`. A login
+    answered 401/403: `OpusAuthError` (re-authentication). A different
+    certificate: `OpusCertificateError` (an `OpusAuthError`), confirmed by the
+    user in the flow before credentials are sent to it.
+  - Role `installateur` may not do everything `admin` does (vendor text:
+    restart, firmware, reset); the integration uses none of it.
 - Every JSON answer carries `header.httpStatus`; `200` and `201` (SoftSmartAck)
   count as success. `201` means the gateway queued a state command until the
   sleeping device wakes up and fetches it: lights, switches and covers keep
@@ -250,8 +270,9 @@ had registered. **[HW][Test]**
 - Reauthentication and reconfiguration reject an address that answers with a
   different EURID (`wrong_gateway`); setup does the same for a stored address.
   **[Code][Test]**
-- The gateway has no TLS (plain HTTP, basic authentication), so credentials are
-  sent only to the local network. `discovery.LOCAL_NETWORKS` is an allowlist
+- A gateway before WebUI 2026 has no TLS (plain HTTP, basic authentication), so
+  credentials are sent only to the local network (the same allowlist applies to
+  WebUI 2026 gateways). `discovery.LOCAL_NETWORKS` is an allowlist
   (RFC 1918, link-local, loopback, `100.64.0.0/10`, `fc00::/7`, RFC 5737
   documentation ranges). The config flow (user, reauth, reconfigure) refuses an
   address outside it (`host_not_local`) and judges a host name by **all** its
