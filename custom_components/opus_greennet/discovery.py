@@ -112,6 +112,47 @@ async def async_resolve_host(host: str) -> list[IPAddress]:
         return []
 
 
+async def async_reverse_lookup(address: IPAddress) -> str | None:
+    """Return the host name of ``address``, or None when there is none.
+
+    A missing reverse entry, a timeout or an answer that is only the numeric
+    address is no error: the caller keeps the field empty.
+    """
+    try:
+        async with asyncio.timeout(RESOLVE_HOST_SECONDS):
+            name, _service = await asyncio.get_running_loop().getnameinfo(
+                (str(address), 0), socket.NI_NAMEREQD
+            )
+    except OSError, TimeoutError, ValueError:
+        return None
+    if not name or name == str(address):
+        return None
+    return name
+
+
+async def async_gateway_address(
+    host: str,
+) -> tuple[str | None, str | None, str | None]:
+    """Return ``(hostname, ipv4, ipv6)`` of the configured gateway host.
+
+    For diagnostics only; never raises. A configured name is the host name; a
+    configured address gets its host name from a reverse lookup. The host name
+    is then resolved for the address families the configuration did not name.
+    Whatever cannot be resolved stays None.
+    """
+    literal = parse_host_literal(host)
+    found: list[IPAddress] = [literal] if literal is not None else []
+    if literal is not None:
+        name = await async_reverse_lookup(literal)
+    else:
+        name = host.strip() or None
+    if name is not None:
+        found += await async_resolve_host(name)
+    ipv4 = next((str(a) for a in found if a.version == 4), None)
+    ipv6 = next((str(a) for a in found if a.version == 6), None)
+    return name, ipv4, ipv6
+
+
 async def async_read_gateway_id(hass: HomeAssistant, data: Mapping[str, Any]) -> str:
     """Connect to the gateway and return its EAG identifier (EURID).
 

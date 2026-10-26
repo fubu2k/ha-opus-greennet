@@ -10,9 +10,11 @@ from dataclasses import asdict
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.redact import REDACTED
 
+from .discovery import async_gateway_address
 from .enocean_device import EnOceanDevice, LinkedDevice, LinkTables
 from .wire import JsonList, JsonObject, parse_json
 
@@ -35,6 +37,8 @@ TO_REDACT = {
     "host",
     "hostname",
     "ip",
+    "ipv4",
+    "ipv6",
     "ipaddress",
     "mac",
     "macaddress",
@@ -177,6 +181,26 @@ def log_entity_state_write(
     )
 
 
+def _info_int(info: object, key: str) -> int | None:
+    value = info.get(key) if isinstance(info, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _gateway_versions(info: object) -> dict[str, str | None]:
+    """Return firmware, application and API version from the gateway reply."""
+    source = info if isinstance(info, dict) else {}
+
+    def text(key: str) -> str | None:
+        value = source.get(key)
+        return value if isinstance(value, str) and value else None
+
+    return {
+        "firmware": text("version"),
+        "app": text("appVersion"),
+        "api": text("apiVersion"),
+    }
+
+
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: OpusGreenNetConfigEntry
 ) -> dict[str, Any]:
@@ -190,6 +214,13 @@ async def async_get_config_entry_diagnostics(
     movement_times = getattr(coordinator, "last_vertical_movement_times", None)
     stream_facts = getattr(coordinator, "stream_diagnostics", None)
     stream = stream_facts() if callable(stream_facts) else None
+    configured_host = entry.data.get(CONF_HOST)
+    # Resolved when the download is made (bounded, never raises): no polling.
+    hostname, ipv4, ipv6 = (
+        await async_gateway_address(configured_host)
+        if isinstance(configured_host, str) and configured_host.strip()
+        else (None, None, None)
+    )
     origin = getattr(coordinator, "position_origin", None)
     for device in coordinator.devices.values():
         devices.append(
@@ -235,7 +266,8 @@ async def async_get_config_entry_diagnostics(
                     if channel.position is not None
                 }
 
-    return _redact_diagnostics(
+    resolved = {"hostname": hostname, "ipv4": ipv4, "ipv6": ipv6}
+    result = _redact_diagnostics(
         {
             "entry": {
                 "entry_id": entry.entry_id,
@@ -246,6 +278,13 @@ async def async_get_config_entry_diagnostics(
                 "eag_id": coordinator.eag_id,
                 "available": coordinator.available,
                 "info": coordinator.gateway_info,
+                # Read from /system/info every 30 minutes (and at setup).
+                "versions": _gateway_versions(coordinator.gateway_info),
+                "receive_counter": _info_int(
+                    coordinator.gateway_info, "receiveCounter"
+                ),
+                "average_dbm": _info_int(coordinator.gateway_info, "averageDbm"),
+                "info_read_at": getattr(coordinator, "gateway_info_read_at", None),
                 "uptime": coordinator.gateway_uptime,
                 # Seconds from opening the event stream to its first device
                 # list at setup.
@@ -261,5 +300,15 @@ async def async_get_config_entry_diagnostics(
         {
             coordinator.eag_id,
             *(device.device_id for device in coordinator.devices.values()),
+            # Wherever else the name or address appears, it is masked as well.
+            *(value for value in resolved.values() if value),
         },
     )
+    # Added after the redaction: a value is masked, an unresolved one stays
+    # empty (None), so the download shows that it could not be resolved.
+    gateway = result["gateway"]
+    if isinstance(gateway, dict):
+        gateway["connection"] = {
+            key: REDACTED if value else None for key, value in resolved.items()
+        }
+    return result
