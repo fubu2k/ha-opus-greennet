@@ -78,6 +78,16 @@ Useful fields:
 
 - `first_device_list_seconds` (gateway): time from opening the event stream to
   its first device list at startup.
+- `versions` (gateway): `firmware`, `app` and `api` version from the gateway's
+  `/system/info`. It is read at startup and then every 30 minutes together with
+  the device list refresh (a plain gateway read without radio traffic, never
+  with the health probe). `receive_counter` (received telegrams) and
+  `average_dbm` (mean signal strength) come from the same read, so they are as
+  old as `info_read_at`. A field the gateway does not report stays empty.
+- `connection` (gateway): `hostname` and `ip` of the configured gateway
+  address, resolved when the download is made. Both are redacted when they have
+  a value. An empty value means the name or address could not be resolved; that
+  is no error.
 - `stream` (gateway): facts about the event stream, read from the integration's
   memory (no request to the gateway):
   - `connected`: whether the stream is open now.
