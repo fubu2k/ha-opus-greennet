@@ -159,19 +159,27 @@ async def async_reverse_lookup(address: IPAddress) -> str | None:
     return name
 
 
-async def async_gateway_address(host: str) -> tuple[str | None, str | None]:
-    """Return ``(hostname, ip)`` of the configured gateway host for diagnostics.
+async def async_gateway_address(
+    host: str,
+) -> tuple[str | None, str | None, str | None]:
+    """Return ``(hostname, ipv4, ipv6)`` of the configured gateway host.
 
-    Never raises. A configured name is the host name and resolves to the first
-    address; a configured address is the IP and gets its host name from a
-    reverse lookup. Whatever cannot be resolved stays None.
+    For diagnostics only; never raises. A configured name is the host name; a
+    configured address gets its host name from a reverse lookup. The host name
+    is then resolved for the address families the configuration did not name.
+    Whatever cannot be resolved stays None.
     """
     literal = parse_host_literal(host)
+    found: list[IPAddress] = [literal] if literal is not None else []
     if literal is not None:
-        return await async_reverse_lookup(literal), str(literal)
-    name = host.strip() or None
-    addresses = await async_resolve_host(host) if name else []
-    return name, str(addresses[0]) if addresses else None
+        name = await async_reverse_lookup(literal)
+    else:
+        name = host.strip() or None
+    if name is not None:
+        found += await async_resolve_host(name)
+    ipv4 = next((str(a) for a in found if a.version == 4), None)
+    ipv6 = next((str(a) for a in found if a.version == 6), None)
+    return name, ipv4, ipv6
 
 
 async def async_read_gateway_id(hass: HomeAssistant, data: Mapping[str, Any]) -> str:
