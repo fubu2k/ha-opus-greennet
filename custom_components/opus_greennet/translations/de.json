@@ -331,6 +331,12 @@
     },
     "parameter_not_confirmed": {
       "message": "{device_id} hat den neuen Wert von {reason} nicht bestätigt. Home Assistant behält den bisherigen Wert; lies vor einem neuen Versuch die Gerätekonfiguration aus."
+    },
+    "parameter_write_failed": {
+      "message": "Das Gateway konnte den neuen Wert nicht auf {device_id} schreiben ({reason}). Home Assistant behält den bisherigen Wert. Das Gerät hat ihn vermutlich nicht erhalten; lies vor einem neuen Versuch die Gerätekonfiguration aus."
+    },
+    "parameter_read_back_failed": {
+      "message": "Das Gateway hat den neuen Wert für {device_id} angenommen, das Zurücklesen ist aber fehlgeschlagen ({reason}). Der Wert kann gespeichert sein; Home Assistant behält den bisherigen. Lies vor einem neuen Versuch die Gerätekonfiguration aus."
     }
   },
   "services": {
