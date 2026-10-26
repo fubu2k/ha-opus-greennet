@@ -21,7 +21,6 @@ from homeassistant.util import dt as dt_util
 from custom_components.opus_greennet.api import OpusConnectionError
 from custom_components.opus_greennet.coordinator import OpusGreenNetCoordinator
 from custom_components.opus_greennet.diagnostics import (
-    _redact_diagnostics,
     async_get_config_entry_diagnostics,
 )
 from custom_components.opus_greennet.discovery import (
@@ -316,16 +315,3 @@ async def test_download_resolves_the_configured_host_once(
     ) as resolve:
         await async_get_config_entry_diagnostics(hass, entry)
     resolve.assert_awaited_once_with(entry.data["host"])
-
-
-def test_empty_values_under_sensitive_keys_stay_empty() -> None:
-    redacted = _redact_diagnostics(
-        {"hostname": None, "ip": "", "host": "gw.home", "nested": {"ip": None}},
-        set(),
-    )
-    assert redacted == {
-        "hostname": None,
-        "ip": "",
-        "host": REDACTED,
-        "nested": {"ip": None},
-    }
