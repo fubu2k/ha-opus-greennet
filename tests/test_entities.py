@@ -524,6 +524,15 @@ async def test_sensor_setup_deduplicates_discovery_entities() -> None:
     assert [entity.unique_id for entity in initial_entities] == [
         f"{EAG_ID}_DEV1_signal_strength",
         f"{EAG_ID}_DEV1_last_seen",
+        # The settings stored on the switch, read only.
+        f"{EAG_ID}_DEV1_timer_setting",
+        f"{EAG_ID}_DEV1_timer_long_setting",
+        f"{EAG_ID}_DEV1_switch_off_warning_setting",
+        f"{EAG_ID}_DEV1_switch_off_warning_signal_setting",
+        f"{EAG_ID}_DEV1_illumination_threshold_setting",
+        f"{EAG_ID}_DEV1_operation_mode_setting",
+        f"{EAG_ID}_DEV1_led_color_setting",
+        f"{EAG_ID}_DEV1_function_external_input_setting",
     ]
 
 

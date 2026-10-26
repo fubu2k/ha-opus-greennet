@@ -50,7 +50,7 @@ connected directly to the OPUS gateway's EnOcean over IP REST API.
 | Blinds and shutters | D2-05-00, -01, -02 | Cover with position and tilt; blockage, reference run, last run time |
 | Heating areas | D1-4B-05, -06, -07 (Valve, CosiTherm, Electro) | Climate, feed temperature, power, humidity, window open, errors, battery |
 | Temperature and humidity sensors | A5-04-01, -02, -03 | Temperature, humidity |
-| Presence detectors (SMS) | A5-07-01, A5-07-03 | Motion, illuminance (A5-07-03), supply voltage, sensor error |
+| Presence detectors (SMS) | A5-07-01, A5-07-03 | Motion, illuminance (A5-07-03), supply voltage, sensor error; A5-07-03 also shows alive cycle, PIR off time and ReCom readiness cycle as read-only diagnostic values |
 | OPUS motion detector | F6-02-01 + A5-04-01 | Motion, temperature, humidity |
 | Smoke detectors (RWM) | F6-05-02 | Smoke alarm, low battery |
 | Water sensors | F6-05-01 | Moisture |
@@ -206,7 +206,11 @@ is still open is offered the same way once it is safe to write:
 | Gateway | Firmware, app and API version; services such as HomeKit, Alexa, MQTT, InfluxDB, scheduler and heating zones; received telegrams and average signal strength |
 
 Settings are written over the radio, so a change can take several seconds and
-needs the actuator to answer.
+needs the actuator to answer. Every device with settings also shows the stored
+values as read-only diagnostic sensors (enabled by default, named *… (stored)*)
+and has a *Read settings* diagnostic button that reads them from the device
+once, for example after a write whose outcome was unclear. The entities that
+change a setting stay disabled until you enable them.
 
 #### What was verified on hardware
 

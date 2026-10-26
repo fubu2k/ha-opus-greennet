@@ -72,8 +72,10 @@ loads; a host name is checked when you enter it.
   it rejects the **read-back**, the message says the gateway accepted the
   value but reading it back failed; the value may be stored. In both cases
   Home Assistant keeps the previous value, nothing is repeated automatically,
-  and the device configuration should be read before trying again. A timeout
-  or an unreachable gateway keeps its own message.
+  and the device configuration should be read before trying again: press the
+  device's **Read settings** button (diagnostic) or use the
+  `opus_greennet.get_device_configuration` action. A timeout or an unreachable
+  gateway keeps its own message.
 
 ## Diagnostics
 

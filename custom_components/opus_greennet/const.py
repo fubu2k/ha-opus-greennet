@@ -196,6 +196,11 @@ KEY_TIMER_LONG: Final = "timerLong"
 KEY_SWITCH_OFF_WARNING: Final = "switchOffWarning"
 KEY_SWITCH_OFF_WARNING_SIGNAL: Final = "switchOffWarningSignal"
 KEY_ILLUMINATION_THRESHOLD: Final = "illuminationThreshold"
+# A5-07-03 presence detector settings: alive telegram cycle (minutes), time
+# until the PIR reports "off" and cycle of the ReCom readiness (seconds).
+KEY_ALIVE_CYCLE: Final = "aliveCycle"
+KEY_PIR_OFF_TIME: Final = "pirOffTime"
+KEY_RECOM_READY_TIME: Final = "recomReadyTime"
 # Device settings and the channel field they fill, with the range of the
 # gateway's parameter catalog (a reported value outside it keeps the known one).
 # Like the holding time they are no state keys: a command of another controller
@@ -209,6 +214,9 @@ DEVICE_SETTINGS: Final = {
     KEY_SWITCH_OFF_WARNING: ("switch_off_warning", 0, 45),
     KEY_SWITCH_OFF_WARNING_SIGNAL: ("switch_off_warning_signal", 0.2, 2),
     KEY_ILLUMINATION_THRESHOLD: ("illumination_threshold", 0, 1500),
+    KEY_ALIVE_CYCLE: ("alive_cycle", 0, 1440),
+    KEY_PIR_OFF_TIME: ("pir_off_time", 0, 3600),
+    KEY_RECOM_READY_TIME: ("recom_ready_time", 0, 655350),
 }
 # Device settings with a fixed set of values (select entities): key -> channel
 # field. The field holds the value the gateway reported, listed or not; the

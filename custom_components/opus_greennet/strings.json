@@ -207,6 +207,82 @@
       },
       "gateway_ipv6_address": {
         "name": "IPv6 address"
+      },
+      "vertical_movement_time_setting": {
+        "name": "Vertical movement time (stored)"
+      },
+      "rotation_time_setting": {
+        "name": "Rotation time (stored)"
+      },
+      "max_holding_time_setting": {
+        "name": "Maximum holding time (stored)"
+      },
+      "ramping_time_setting": {
+        "name": "Ramping time (stored)"
+      },
+      "short_press_time_setting": {
+        "name": "Short-press time (stored)"
+      },
+      "long_press_time_setting": {
+        "name": "Long-press time (stored)"
+      },
+      "timer_setting": {
+        "name": "Timer duration (stored)"
+      },
+      "timer_long_setting": {
+        "name": "Timer duration (long press) (stored)"
+      },
+      "switch_off_warning_setting": {
+        "name": "Switch-off warning (stored)"
+      },
+      "switch_off_warning_signal_setting": {
+        "name": "Switch-off warning signal (stored)"
+      },
+      "illumination_threshold_setting": {
+        "name": "Illumination threshold (stored)"
+      },
+      "alive_cycle_setting": {
+        "name": "Alive cycle (stored)"
+      },
+      "pir_off_time_setting": {
+        "name": "PIR off time (stored)"
+      },
+      "recom_ready_time_setting": {
+        "name": "ReCom readiness cycle (stored)"
+      },
+      "operation_mode_setting": {
+        "name": "Operation mode (stored)",
+        "state": {
+          "bottom_on": "Bottom on",
+          "timer": "Timer",
+          "toggle": "Toggle",
+          "top_on": "Top on"
+        }
+      },
+      "led_color_setting": {
+        "name": "LED colour (stored)",
+        "state": {
+          "all": "All LEDs on",
+          "green": "Green LED on",
+          "off": "Both LEDs off",
+          "red": "Red LED on"
+        }
+      },
+      "led_channel_setting": {
+        "name": "LED channel (stored)",
+        "state": {
+          "channel1": "Channel 1",
+          "channel2": "Channel 2"
+        }
+      },
+      "function_external_input_setting": {
+        "name": "External input function (stored)",
+        "state": {
+          "channel1": "Channel 1",
+          "channel2": "Channel 2",
+          "channels_all": "Channel 1 + 2",
+          "inactive": "Inactive"
+        }
       }
     },
     "switch": {
@@ -228,6 +304,9 @@
       },
       "reference_run_down": {
         "name": "Reference run via bottom"
+      },
+      "read_settings": {
+        "name": "Read settings"
       }
     },
     "event": {
