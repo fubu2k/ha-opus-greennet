@@ -33,7 +33,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from time import monotonic, time
-from typing import Any, Final
+from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -78,6 +78,7 @@ from .const import (
     RAMPING_MODE_SWITCH,
     REPOSITIONING_FIRST_DOWN,
     REPOSITIONING_FIRST_UP,
+    SETTING_CACHE_GUARD_SECONDS,
     UNLOCK_ALLOWED,
     UNLOCK_NOT_ALLOWED,
     VALUE_UNKNOWN,
@@ -236,11 +237,6 @@ def request_error(key: str, device_id: str, reason: str = "") -> HomeAssistantEr
     )
 
 
-# How long a setting confirmed by a read-back wins over a device list that
-# still shows the previous value (the gateway reads devices again at night).
-SETTING_HOLD_SECONDS: Final = 26 * 3600
-
-
 def snap_to_step(value: float, step: float, minimum: float = 0) -> float | int:
     """Return ``value`` on the parameter's grid, as the device stores it.
 
@@ -260,20 +256,48 @@ def snap_to_step(value: float, step: float, minimum: float = 0) -> float | int:
     return snapped
 
 
-def _same_setting(listed: object, confirmed: object) -> bool:
-    """Return whether a listed setting equals the confirmed one."""
-    if isinstance(confirmed, str):
-        return listed == confirmed
-    try:
-        return abs(float(listed) - float(confirmed)) < 1e-6  # type: ignore[arg-type]
-    except TypeError, ValueError:
-        return False
-
-
 def _step_reason(key: str, err: HomeAssistantError) -> str:
     """Return the setting and the gateway's reason of a rejected request."""
     reason = (err.translation_placeholders or {}).get("reason")
     return f"{key}: {reason}" if reason else key
+
+
+# Older values a confirmed setting keeps for the protection, at most.
+_SETTING_GUARD_STALE_VALUES = 4
+
+
+@dataclass(slots=True)
+class SettingGuard:
+    """A confirmed setting and the older values the gateway's cache may repeat.
+
+    The device list carries the gateway's cached copy of the configuration. It
+    is not necessarily refreshed by a write, so a list that arrives after a
+    confirmed write can show the value from before it.
+    """
+
+    stale: tuple[float | str, ...]
+    written: float | str
+    at: float
+
+
+def _setting_number(value: object) -> float | None:
+    """Return a reported setting as a number; ``noRotation`` is zero."""
+    if isinstance(value, str) and value.strip() == "noRotation":
+        return 0.0
+    number = EnOceanDevice._parse_number(value)
+    return None if number is None else float(number)
+
+
+def _same_setting(left: object, right: object) -> bool:
+    """Return whether two reports of a setting mean the same value."""
+    left_number, right_number = _setting_number(left), _setting_number(right)
+    if left_number is not None and right_number is not None:
+        return abs(left_number - right_number) <= 1e-6
+    return (
+        isinstance(left, str)
+        and isinstance(right, str)
+        and left.strip() == right.strip()
+    )
 
 
 class GatewayMismatchError(OpusApiError):
@@ -397,11 +421,6 @@ class OpusGreenNetCoordinator:
         self._telegram_metadata_at: dict[str, float] = {}
         # One settings write (with its read-back) per device at a time.
         self._setting_locks: dict[str, asyncio.Lock] = {}
-        # Settings confirmed by a read-back: (device, key) -> (value, monotonic
-        # time). A device list that still lists another value is ignored for
-        # the key until it shows the confirmed one or SETTING_HOLD_SECONDS
-        # passed: the gateway may only read the device again at night.
-        self._confirmed_settings: dict[tuple[str, str], tuple[object, float]] = {}
         self._probe_task: asyncio.Task[None] | None = None
         self._refresh_task: asyncio.Task[None] | None = None
         # When ``gateway_info`` was last read from the gateway (ISO, UTC).
@@ -419,6 +438,9 @@ class OpusGreenNetCoordinator:
         # before an outage are never sent after the gateway returns.
         self._outage_generation = 0
         self._unknown_devices: dict[str, float] = {}
+        # Confirmed settings per device, protected against the gateway's cached
+        # copy of the configuration in a device list (see ``SettingGuard``).
+        self._setting_guards: dict[str, dict[str, SettingGuard]] = {}
         self._command_waiters: dict[str, int] = {}
         self._sent_commands: dict[str, list[tuple[float, frozenset[object]]]] = {}
         self._cover_movements: dict[tuple[str, int], CoverMovement] = {}
@@ -1085,6 +1107,7 @@ class OpusGreenNetCoordinator:
                 del runs[run_key]
         self._telegram_metadata_at.pop(device_id, None)
         self.last_vertical_movement_times.pop(device_id, None)
+        self._setting_guards.pop(device_id, None)
         for origin_key in [k for k in self._position_origins if k[0] == device_id]:
             del self._position_origins[origin_key]
         self._cancel_reconciliation_queries(device_id)
@@ -2263,37 +2286,76 @@ class OpusGreenNetCoordinator:
             values=_journal_values(configuration.get("parameters")),
         )
 
-    async def _async_write_and_read_back(
-        self, device_id: str, key: str, value: float | str
-    ) -> JsonObject:
-        """Write one setting, read the configuration back and return it.
+    def _guard_confirmed_setting(
+        self,
+        device_id: str,
+        key: str,
+        previous: float | str | None,
+        written: float | str,
+    ) -> None:
+        """Remember what a device list must not bring back after a confirmed write.
 
-        A rejection by the gateway says different things for the two steps, so
-        each gets its own message: a rejected write means the device probably
-        did not get the value, a rejected read-back means the write was
-        accepted and the value may be stored. Other failures (timeout, gateway
-        unavailable, cancelled) keep their own message. Neither step is
-        repeated.
+        ``previous`` is the value Home Assistant showed before. Earlier values
+        of a guard that still runs stay protected, so several changes in a row
+        do not let the oldest cached value return.
         """
-        try:
-            await self.async_set_device_configuration(
-                device_id,
-                {"configuration": {"parameters": [{"key": key, "value": value}]}},
-            )
-        except HomeAssistantError as err:
-            if err.translation_key != "request_rejected":
-                raise
-            raise request_error(
-                "parameter_write_failed", device_id, _step_reason(key, err)
-            ) from err
-        try:
-            return await self.async_get_device_configuration(device_id)
-        except HomeAssistantError as err:
-            if err.translation_key != "request_rejected":
-                raise
-            raise request_error(
-                "parameter_read_back_failed", device_id, _step_reason(key, err)
-            ) from err
+        guards = self._setting_guards.setdefault(device_id, {})
+        older = guards.get(key)
+        candidates: list[float | str] = [] if previous is None else [previous]
+        if older is not None:
+            candidates.extend(older.stale)
+        stale: list[float | str] = []
+        for value in candidates:
+            if not _same_setting(value, written) and not any(
+                _same_setting(value, known) for known in stale
+            ):
+                stale.append(value)
+        if not stale:
+            guards.pop(key, None)
+            if not guards:
+                self._setting_guards.pop(device_id, None)
+            return
+        guards[key] = SettingGuard(
+            tuple(stale[:_SETTING_GUARD_STALE_VALUES]), written, monotonic()
+        )
+
+    def _without_stale_settings(
+        self, device_id: str, functions: list[WireFunction]
+    ) -> list[WireFunction]:
+        """Drop settings of a device list that repeat the value from before a write.
+
+        A value that differs from the older ones, or equals the written one, is
+        the gateway's current copy or a change made elsewhere: it is applied and
+        ends the protection of that setting. Everything else is kept unchanged.
+        """
+        guards = self._setting_guards.get(device_id)
+        if not guards:
+            return functions
+        now = monotonic()
+        kept: list[WireFunction] = []
+        for function in functions:
+            key = function.get("key")
+            guard = guards.get(key) if isinstance(key, str) else None
+            if guard is None:
+                kept.append(function)
+                continue
+            value = function.get("value")
+            if now - guard.at <= SETTING_CACHE_GUARD_SECONDS and (
+                not _same_setting(value, guard.written)
+                and any(_same_setting(value, old) for old in guard.stale)
+            ):
+                _LOGGER.debug(
+                    "Ignored %s of device %s in a device list: it repeats the "
+                    "value from before a confirmed write",
+                    key,
+                    device_id,
+                )
+                continue
+            del guards[key]
+            kept.append(function)
+        if not guards:
+            self._setting_guards.pop(device_id, None)
+        return kept
 
     async def async_set_device_parameter(
         self,
@@ -2375,36 +2437,12 @@ class OpusGreenNetCoordinator:
                 raise request_error("parameter_not_confirmed", device_id, key) from err
             if stored is None:
                 raise request_error("parameter_not_confirmed", device_id, key)
+            previous = device.setting_reading(key)
             device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
-            self._confirmed_settings[(device_id, key)] = (stored, monotonic())
+            self._guard_confirmed_setting(device_id, key, previous, stored)
             self._dispatch_state(device)
             if not same(stored):
                 raise request_error("parameter_differs", device_id, key)
-
-    def _without_stale_settings(
-        self, device_id: str, functions: list[WireFunction]
-    ) -> list[WireFunction]:
-        """Drop listed settings that are older than a confirmed write."""
-        if not self._confirmed_settings:
-            return functions
-        kept: list[WireFunction] = []
-        for function in functions:
-            key = function.get("key")
-            if not isinstance(key, str):
-                kept.append(function)
-                continue
-            confirmed = self._confirmed_settings.get((device_id, key))
-            if confirmed is not None:
-                value, confirmed_at = confirmed
-                if _same_setting(function.get("value"), value) or (
-                    monotonic() - confirmed_at > SETTING_HOLD_SECONDS
-                ):
-                    # The gateway caught up, or the hold expired.
-                    del self._confirmed_settings[(device_id, key)]
-                else:
-                    continue
-            kept.append(function)
-        return kept
 
     async def async_get_device_parameters(self, device_id: str) -> JsonObject:
         """Read the configurable parameters a device supports."""

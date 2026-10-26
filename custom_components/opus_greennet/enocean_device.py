@@ -300,6 +300,32 @@ class EnOceanDevice:
         if listed.link_tables is not None:
             self.link_tables = listed.link_tables
 
+    def setting_reading(self, key: str) -> float | str | None:
+        """Return the stored value of a device setting, None while unknown.
+
+        Settings belong to the device and live on the default channel, where the
+        number and select entities read them.
+        """
+        channel = self.channels.get(DEFAULT_CHANNEL)
+        if channel is None:
+            return None
+        if key == KEY_VERTICAL_MOVEMENT_TIME:
+            attribute = "vertical_movement_time"
+        elif key == KEY_MAX_HOLDING_TIME:
+            attribute = "max_holding_time"
+        elif key == KEY_ROTATION_TIME:
+            attribute = "rotation_time"
+        elif key in DEVICE_OPTIONS:
+            attribute = DEVICE_OPTIONS[key]
+        elif key in DEVICE_SETTINGS:
+            attribute = DEVICE_SETTINGS[key][0]
+        else:
+            return None
+        value = getattr(channel, attribute, None)
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            return None
+        return value
+
     @property
     def primary_eep(self) -> str | None:
         """Get the primary EEP for this device."""
