@@ -93,7 +93,9 @@ Useful fields:
 - `first_device_list_seconds` (gateway): time from opening the event stream to
   its first device list at startup.
 - `versions` (gateway): `firmware`, `app` and `api` version from the gateway's
-  `/system/info`. It is read at startup and then every 30 minutes together with
+  `/system/info` (also written to the log at startup as
+  `OPUS gateway versions: firmware=… app=… api=…`, and again when a version
+  changes). It is read at startup and then every 30 minutes together with
   the device list refresh (a plain gateway read without radio traffic, never
   with the health probe). `receive_counter` (received telegrams) and
   `average_dbm` (mean signal strength) come from the same read, so they are as

@@ -286,3 +286,47 @@ async def test_identifiers_in_gateway_texts_reach_neither_export_nor_debug_log(
     export = json.dumps(await async_get_config_entry_diagnostics(hass, entry))
     assert serial not in export
     assert gateway.eurid.casefold() not in export.casefold()
+
+
+async def test_versions_are_in_the_download_and_the_log_even_when_offline(
+    hass: HomeAssistant, gateway: FakeGateway, caplog: pytest.LogCaptureFixture
+) -> None:
+    gateway.system_info = {
+        "version": "OPUS-GW 2.4.1",
+        "appVersion": 1.5,
+        "apiVersion": "2.7.0.0",
+    }
+    caplog.set_level(logging.INFO, logger="custom_components.opus_greennet")
+    entry = await setup_bridge(hass, gateway)
+    coordinator = entry.runtime_data.coordinator
+
+    assert (
+        "OPUS gateway versions: firmware=OPUS-GW 2.4.1 app=1.5 api=2.7.0.0"
+        in caplog.text
+    )
+    # The versions are no identifiers: the download names them, also numbers.
+    expected = {"firmware": "OPUS-GW 2.4.1", "app": "1.5", "api": "2.7.0.0"}
+    result = await async_get_config_entry_diagnostics(hass, entry)
+    assert result["gateway"]["versions"] == expected
+
+    # The last known versions stay in the download while the gateway is away.
+    coordinator._set_gateway_available(False)  # noqa: SLF001
+    result = await async_get_config_entry_diagnostics(hass, entry)
+    assert result["gateway"]["versions"] == expected
+
+
+async def test_a_changed_version_is_logged_once_by_the_refresh(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    coordinator = OpusGreenNetCoordinator(MagicMock(), MagicMock(), EAG_ID)
+    coordinator._gateway_available = True  # noqa: SLF001
+    coordinator.gateway_info = {"eurid": EAG_ID, "version": "FW 1"}
+    caplog.set_level(logging.INFO, logger="custom_components.opus_greennet")
+    with patch(f"{COORDINATOR}.async_dispatcher_send"):
+        for version in ("FW 1", "FW 2", "FW 2"):
+            coordinator.client.async_get = AsyncMock(
+                return_value={"systemInfo": {"eurid": EAG_ID, "version": version}}
+            )
+            await coordinator._async_refresh_system_info()  # noqa: SLF001
+    lines = [r.getMessage() for r in caplog.records if "versions" in r.getMessage()]
+    assert lines == ["OPUS gateway versions: firmware=FW 2 app=None api=None"]
