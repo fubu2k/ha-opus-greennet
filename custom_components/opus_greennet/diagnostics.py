@@ -222,6 +222,9 @@ async def async_get_config_entry_diagnostics(
         else (None, None, None)
     )
     origin = getattr(coordinator, "position_origin", None)
+    # What was sent over the radio and how the gateway answered, per device.
+    journal_facts = getattr(coordinator, "radio_journal", None)
+    journal = journal_facts() if callable(journal_facts) else None
     for device in coordinator.devices.values():
         devices.append(
             {
@@ -248,6 +251,14 @@ async def async_get_config_entry_diagnostics(
                 },
             }
         )
+        if isinstance(journal, list):
+            # Oldest first; "seq" orders the entries across devices. The device
+            # is the block they sit in, its identifier is redacted anyway.
+            devices[-1]["radio_journal"] = [
+                {key: value for key, value in entry.items() if key != "device_id"}
+                for entry in journal
+                if entry.get("device_id") == device.device_id
+            ]
         runs = getattr(coordinator, "last_cover_runs", None)
         if isinstance(runs, dict):
             devices[-1]["last_cover_run"] = {
