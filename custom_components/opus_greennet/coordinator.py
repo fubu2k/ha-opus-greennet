@@ -224,6 +224,12 @@ def request_error(key: str, device_id: str, reason: str = "") -> HomeAssistantEr
     )
 
 
+def _step_reason(key: str, err: HomeAssistantError) -> str:
+    """Return the setting and the gateway's reason of a rejected request."""
+    reason = (err.translation_placeholders or {}).get("reason")
+    return f"{key}: {reason}" if reason else key
+
+
 class GatewayMismatchError(OpusApiError):
     """The configured address answers with a different gateway identity."""
 
@@ -2139,6 +2145,38 @@ class OpusGreenNetCoordinator:
             values=_journal_values(configuration.get("parameters")),
         )
 
+    async def _async_write_and_read_back(
+        self, device_id: str, key: str, value: float | str
+    ) -> JsonObject:
+        """Write one setting, read the configuration back and return it.
+
+        A rejection by the gateway says different things for the two steps, so
+        each gets its own message: a rejected write means the device probably
+        did not get the value, a rejected read-back means the write was
+        accepted and the value may be stored. Other failures (timeout, gateway
+        unavailable, cancelled) keep their own message. Neither step is
+        repeated.
+        """
+        try:
+            await self.async_set_device_configuration(
+                device_id,
+                {"configuration": {"parameters": [{"key": key, "value": value}]}},
+            )
+        except HomeAssistantError as err:
+            if err.translation_key != "request_rejected":
+                raise
+            raise request_error(
+                "parameter_write_failed", device_id, _step_reason(key, err)
+            ) from err
+        try:
+            return await self.async_get_device_configuration(device_id)
+        except HomeAssistantError as err:
+            if err.translation_key != "request_rejected":
+                raise
+            raise request_error(
+                "parameter_read_back_failed", device_id, _step_reason(key, err)
+            ) from err
+
     async def async_set_device_parameter(
         self, device_id: str, key: str, value: float
     ) -> None:
@@ -2155,12 +2193,8 @@ class OpusGreenNetCoordinator:
         # The step of the parameter decides how many decimals the device keeps.
         decimals = PARAMETER_DECIMALS.get(key, DEFAULT_PARAMETER_DECIMALS)
         value = round(value, decimals)
-        await self.async_set_device_configuration(
-            device_id,
-            {"configuration": {"parameters": [{"key": key, "value": value}]}},
-        )
         stored = protocol.configuration_parameter(
-            await self.async_get_device_configuration(device_id), key
+            await self._async_write_and_read_back(device_id, key, value), key
         )
         if stored is None or abs(stored - value) > 0.5 * 10**-decimals:
             raise request_error("parameter_not_confirmed", device_id, key)
@@ -2180,12 +2214,8 @@ class OpusGreenNetCoordinator:
         device = self.get_device(device_id)
         if device is None:
             raise request_error("device_not_found", device_id)
-        await self.async_set_device_configuration(
-            device_id,
-            {"configuration": {"parameters": [{"key": key, "value": option}]}},
-        )
         stored = protocol.configuration_option(
-            await self.async_get_device_configuration(device_id), key
+            await self._async_write_and_read_back(device_id, key, option), key
         )
         if stored != option:
             raise request_error("parameter_not_confirmed", device_id, key)

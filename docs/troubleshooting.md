@@ -65,6 +65,15 @@ loads; a host name is checked when you enter it.
   restarting Home Assistant. Pending requests are cancelled.
 - An action that timed out may still have been executed: check the physical
   state before repeating it.
+- Changing a setting of a device (for example the vertical movement time of a
+  blind) is a write followed by a read-back. If the gateway rejects the
+  **write** (for example `504`, no response from device), the message says
+  the new value could not be written; the device probably did not get it. If
+  it rejects the **read-back**, the message says the gateway accepted the
+  value but reading it back failed; the value may be stored. In both cases
+  Home Assistant keeps the previous value, nothing is repeated automatically,
+  and the device configuration should be read before trying again. A timeout
+  or an unreachable gateway keeps its own message.
 
 ## Diagnostics
 
