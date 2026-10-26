@@ -593,7 +593,8 @@ async def test_a_new_generation_entry_keeps_its_login_and_certificate_on_a_new_a
     # The gateway is asked at the new address with what the entry stores: over
     # HTTPS, with its certificate and its own login.
     (call,) = read.await_args_list
-    assert call.args[1] == {**WEBUI_DATA, "host": "192.168.1.9"}
+    connection = {key: value for key, value in WEBUI_DATA.items() if key != "eag_id"}
+    assert call.args[1] == {**connection, "host": "192.168.1.9"}
     assert entry.data == {**WEBUI_DATA, "host": "192.168.1.9"}
 
 
