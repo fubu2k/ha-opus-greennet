@@ -353,6 +353,8 @@ class OpusGreenNetCoordinator:
         self._confirmed_settings: dict[tuple[str, str], tuple[object, float]] = {}
         self._probe_task: asyncio.Task[None] | None = None
         self._refresh_task: asyncio.Task[None] | None = None
+        # When ``gateway_info`` was last read from the gateway (ISO, UTC).
+        self.gateway_info_read_at: str | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         self._timers: list[Callable[[], None]] = []
         # One radio request in flight at a time, dispatched by priority.
@@ -486,6 +488,7 @@ class OpusGreenNetCoordinator:
                 f"The gateway at {self.client.host} reports EURID {eurid}"
             )
         self.gateway_info = info
+        self.gateway_info_read_at = dt_util.utcnow().isoformat()
 
     def _create_task(
         self, coroutine: Coroutine[object, object, None], name: str
@@ -727,8 +730,43 @@ class OpusGreenNetCoordinator:
     def _async_refresh_tick(self, _now: datetime) -> None:
         if self._refresh_task is None or self._refresh_task.done():
             self._refresh_task = self._create_task(
-                self._async_refresh_device_list(), "device list refresh"
+                self._async_periodic_refresh(), "device list refresh"
             )
+
+    async def _async_periodic_refresh(self) -> None:
+        """Run the 30 min reads: gateway information, then the device list."""
+        await self._async_refresh_system_info()
+        await self._async_refresh_device_list()
+
+    async def _async_refresh_system_info(self) -> None:
+        """Read ``/system/info`` again for versions and receive statistics.
+
+        A plain gateway read without radio traffic, once per refresh interval
+        and never with the health probe. Fields the gateway leaves out keep
+        their last value; a reply for another gateway is ignored.
+        """
+        if not self.available:
+            return
+        try:
+            document = await self.client.async_get("/system/info")
+        except OpusAuthError:
+            self._handle_auth_failure()
+            return
+        except OpusApiError as err:
+            _LOGGER.debug("Could not refresh the OPUS gateway information: %s", err)
+            return
+        info = as_object(document.get("systemInfo")) or {}
+        if not info:
+            return
+        eurid = info.get("eurid")
+        if isinstance(eurid, str) and eurid.upper() != self.eag_id:
+            _LOGGER.warning(
+                "Ignoring the gateway information of %s: it reports another EURID",
+                self.client.host,
+            )
+            return
+        self.gateway_info = {**self.gateway_info, **info}
+        self.gateway_info_read_at = dt_util.utcnow().isoformat()
 
     async def _async_load_profiles(self) -> None:
         """Read one gateway profile per announced EEP combination.

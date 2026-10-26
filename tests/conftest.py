@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,6 +27,16 @@ class _PlainResolver(aiohttp.ThreadedResolver):
 
     async def real_close(self) -> None:
         await self.close()
+
+
+@pytest.fixture(autouse=True)
+def _no_dns_in_diagnostics() -> Iterator[None]:
+    """Keep the diagnostics download from asking a real resolver."""
+    with patch(
+        "custom_components.opus_greennet.diagnostics.async_gateway_address",
+        AsyncMock(return_value=(None, None)),
+    ):
+        yield
 
 
 @pytest.fixture

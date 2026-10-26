@@ -36,7 +36,7 @@ Verification legend: **[Code]** read from source, **[Test]** covered by tests,
 
 | Method and path | Use | Notes |
 |-----------------|-----|-------|
-| `GET /system/info` | Config flow, setup | `systemInfo.eurid` = EAG identifier; also version, serial number, base ID and the HomeKit setup code (redacted in diagnostics) **[HW]** |
+| `GET /system/info` | Config flow, setup, refresh every 30 min (with the device list; versions, `receiveCounter`, `averageDbm`) | `systemInfo.eurid` = EAG identifier; also version, serial number, base ID and the HomeKit setup code (redacted in diagnostics) **[HW]** |
 | `GET /system/uptime` | Setup, health check every 60 s | `systemUptimeResponse.uptime` in seconds; a decrease means a gateway restart **[HW][Code][Test]** |
 | `GET /devices` | Setup, device list refresh every 30 min | Same device objects as the stream snapshot **[HW]** |
 | `GET /devices/stream` | Event stream | See §3 **[HW]** |

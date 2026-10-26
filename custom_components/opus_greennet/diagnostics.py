@@ -10,9 +10,11 @@ from dataclasses import asdict
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.redact import REDACTED
 
+from .discovery import async_gateway_address
 from .enocean_device import EnOceanDevice, LinkedDevice, LinkTables
 from .wire import JsonList, JsonObject, parse_json
 
@@ -103,12 +105,16 @@ def _redact_diagnostics(
     def redact_key(key: object) -> object:
         return redact_text_key(key) if isinstance(key, str) else key
 
+    def masked(key: object, item: object) -> object:
+        # An empty value hides nothing; keeping it shows that the field is
+        # unknown (for example a host name that does not resolve).
+        if sensitive_key(key):
+            return item if item is None or item == "" else REDACTED
+        return redact(item)
+
     def redact(value: object) -> object:
         if isinstance(value, dict):
-            return {
-                redact_key(key): REDACTED if sensitive_key(key) else redact(item)
-                for key, item in value.items()
-            }
+            return {redact_key(key): masked(key, item) for key, item in value.items()}
         if isinstance(value, list):
             return [redact(item) for item in value]
         if (decoded := json_container(value)) is not None:
@@ -117,10 +123,7 @@ def _redact_diagnostics(
             return pattern.sub(lambda _: REDACTED, value)
         return value
 
-    return {
-        redact_text_key(key): REDACTED if sensitive_key(key) else redact(item)
-        for key, item in data.items()
-    }
+    return {redact_text_key(key): masked(key, item) for key, item in data.items()}
 
 
 def _linked_devices(linked: tuple[LinkedDevice, ...]) -> list[dict[str, object]]:
@@ -177,6 +180,26 @@ def log_entity_state_write(
     )
 
 
+def _info_int(info: object, key: str) -> int | None:
+    value = info.get(key) if isinstance(info, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _gateway_versions(info: object) -> dict[str, str | None]:
+    """Return firmware, application and API version from the gateway reply."""
+    source = info if isinstance(info, dict) else {}
+
+    def text(key: str) -> str | None:
+        value = source.get(key)
+        return value if isinstance(value, str) and value else None
+
+    return {
+        "firmware": text("version"),
+        "app": text("appVersion"),
+        "api": text("apiVersion"),
+    }
+
+
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: OpusGreenNetConfigEntry
 ) -> dict[str, Any]:
@@ -190,6 +213,13 @@ async def async_get_config_entry_diagnostics(
     movement_times = getattr(coordinator, "last_vertical_movement_times", None)
     stream_facts = getattr(coordinator, "stream_diagnostics", None)
     stream = stream_facts() if callable(stream_facts) else None
+    configured_host = entry.data.get(CONF_HOST)
+    # Resolved when the download is made (bounded, never raises): no polling.
+    hostname, ip_address = (
+        await async_gateway_address(configured_host)
+        if isinstance(configured_host, str) and configured_host.strip()
+        else (None, None)
+    )
     origin = getattr(coordinator, "position_origin", None)
     for device in coordinator.devices.values():
         devices.append(
@@ -246,6 +276,15 @@ async def async_get_config_entry_diagnostics(
                 "eag_id": coordinator.eag_id,
                 "available": coordinator.available,
                 "info": coordinator.gateway_info,
+                # Read from /system/info every 30 minutes (and at setup).
+                "versions": _gateway_versions(coordinator.gateway_info),
+                "receive_counter": _info_int(
+                    coordinator.gateway_info, "receiveCounter"
+                ),
+                "average_dbm": _info_int(coordinator.gateway_info, "averageDbm"),
+                "info_read_at": getattr(coordinator, "gateway_info_read_at", None),
+                # Empty when the name or address cannot be resolved.
+                "connection": {"hostname": hostname, "ip": ip_address},
                 "uptime": coordinator.gateway_uptime,
                 # Seconds from opening the event stream to its first device
                 # list at setup.
