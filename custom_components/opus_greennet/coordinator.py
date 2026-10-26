@@ -24,7 +24,8 @@ import asyncio
 import logging
 import math
 import random
-from collections.abc import Callable, Coroutine, Sequence
+from collections import deque
+from collections.abc import Callable, Coroutine, Mapping, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -155,6 +156,40 @@ OUTBOUND_STATE_RECONCILIATION_DELAYS = (5.0, 20.0)
 OWN_COMMAND_ECHO_SECONDS = 2.0
 # Internal reason for a background status check dropped before sending.
 SUPERSEDED = "superseded"
+# Radio requests (and the feedback that confirmed a command) kept for the
+# diagnostics download, oldest dropped first. Memory only, never persisted.
+RADIO_JOURNAL_SIZE = 300
+# Longest gateway text and string value kept in one journal entry.
+JOURNAL_TEXT_LENGTH = 200
+JOURNAL_VALUE_LENGTH = 64
+JOURNAL_VALUE_COUNT = 20
+_PRIORITY_NAMES = {
+    PRIORITY_COMMAND: "command",
+    PRIORITY_QUERY: "query",
+    PRIORITY_BACKGROUND: "background",
+}
+
+
+def _journal_values(items: object) -> dict[str, object]:
+    """Return ``{key: value}`` of ``[{"key": ..., "value": ...}]`` for the journal.
+
+    Only what the integration sends itself is of interest, so scalars are kept
+    (strings shortened) and any other value is replaced by its type name. A
+    value of a malformed list is skipped.
+    """
+    values: dict[str, object] = {}
+    for item in object_items(items)[:JOURNAL_VALUE_COUNT]:
+        key = item.get("key")
+        if not isinstance(key, str):
+            continue
+        value = item.get("value")
+        if isinstance(value, str):
+            values[key] = value[:JOURNAL_VALUE_LENGTH]
+        elif isinstance(value, bool | int | float) or value is None:
+            values[key] = value
+        else:
+            values[key] = f"<{type(value).__name__}>"
+    return values
 
 
 def stream_retry_delay(failures: int, random_share: float | None = None) -> float:
@@ -359,6 +394,10 @@ class OpusGreenNetCoordinator:
         self._timers: list[Callable[[], None]] = []
         # One radio request in flight at a time, dispatched by priority.
         self._radio_queue = PriorityLock()
+        # What was sent over the radio and how the gateway answered, for the
+        # diagnostics download only. Never read to decide anything.
+        self._radio_journal: deque[dict[str, object]] = deque(maxlen=RADIO_JOURNAL_SIZE)
+        self._radio_journal_seq = 0
         self._device_generations: dict[str, int] = {}
         # Incremented whenever the gateway becomes unavailable: requests queued
         # before an outage are never sent after the gateway returns.
@@ -1359,6 +1398,22 @@ class OpusGreenNetCoordinator:
             pending_key = (device_id, channel_id)
             expected = self._pending_reconciliation_fields.get(pending_key)
             if expected is not None:
+                if awaited := sorted(expected & fields):
+                    # The device reported what a command of ours was waiting
+                    # for: the only evidence beyond the gateway's acknowledgement.
+                    self._journal(
+                        device_id,
+                        "feedback",
+                        channel=channel_id,
+                        outcome="confirmed",
+                        fields=awaited,
+                    )
+                    _LOGGER.debug(
+                        "OPUS device %s channel %s reported %s",
+                        device_id,
+                        channel_id,
+                        awaited,
+                    )
                 expected.difference_update(fields)
             if not expected:
                 self._cancel_reconciliation_queries(device_id, channel_id)
@@ -1599,15 +1654,120 @@ class OpusGreenNetCoordinator:
         """Identify the device and connection state a request was queued for."""
         return (self._outage_generation, self._device_generations.get(device_id, 0))
 
+    def radio_journal(self) -> list[dict[str, object]]:
+        """Return the recorded radio requests, oldest first (diagnostics).
+
+        A copy of memory: reading it sends nothing.
+        """
+        return [dict(entry) for entry in self._radio_journal]
+
+    def _journal(
+        self, device_id: str, kind: str, **fields: object
+    ) -> dict[str, object]:
+        self._radio_journal_seq += 1
+        entry: dict[str, object] = {
+            "seq": self._radio_journal_seq,
+            "at": dt_util.utcnow().isoformat(),
+            "device_id": device_id,
+            "request": kind,
+            **fields,
+        }
+        self._radio_journal.append(entry)
+        return entry
+
+    def _journal_radio_request(
+        self,
+        device_id: str,
+        kind: str,
+        priority: int,
+        values: Mapping[str, object] | None,
+        *,
+        waited: float,
+        started: float,
+        result: JsonObject | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        """Record how one request that reached the radio slot ended.
+
+        The gateway's answer is not the device's state: ``ok`` only says that
+        the gateway accepted the request, ``deferred`` that it stored it for a
+        sleeping device. Gateway texts are untrusted data and kept short.
+        """
+        http_status: int | None = None
+        gateway_status: int | None = None
+        message: str | None = None
+        if error is None:
+            outcome = "ok"
+            try:
+                gateway_status = response_status(result) if result else None
+            except ValueError:
+                gateway_status = None
+            if gateway_status in (SOFT_SMART_ACK_STATUS, TARGET_STATE_STATUS):
+                outcome = "deferred"
+        elif isinstance(error, asyncio.CancelledError):
+            outcome = "cancelled"
+        elif isinstance(error, OpusAuthError):
+            outcome = "auth_rejected"
+        elif isinstance(error, OpusTimeoutError):
+            outcome = "timeout"
+        elif isinstance(error, OpusConnectionError):
+            outcome = "connection_error"
+        elif isinstance(error, OpusResponseError):
+            outcome = "rejected"
+            http_status = error.http_status
+            gateway_status = error.gateway_status
+            message = error.reason[:JOURNAL_TEXT_LENGTH]
+        else:
+            outcome = "error"
+        if message is None and error is not None:
+            message = str(error)[:JOURNAL_TEXT_LENGTH] or None
+        duration_ms = round((monotonic() - started) * 1000, 1)
+        waited_ms = round(waited * 1000, 1)
+        priority_name = _PRIORITY_NAMES.get(priority, str(priority))
+        entry = self._journal(
+            device_id,
+            kind,
+            priority=priority_name,
+            outcome=outcome,
+            http_status=http_status,
+            gateway_status=gateway_status,
+            message=message,
+            duration_ms=duration_ms,
+            waited_ms=waited_ms,
+        )
+        if values:
+            entry["values"] = dict(values)
+        _LOGGER.debug(
+            "OPUS radio request: device=%s request=%s priority=%s outcome=%s "
+            "http_status=%s gateway_status=%s duration_ms=%s waited_ms=%s "
+            "values=%s message=%r",
+            device_id,
+            kind,
+            priority_name,
+            outcome,
+            http_status,
+            gateway_status,
+            duration_ms,
+            waited_ms,
+            dict(values) if values else None,
+            message,
+        )
+
     async def _async_radio_request(
         self,
         device_id: str,
         request: Callable[[], Coroutine[object, object, JsonObject]],
         *,
         priority: int,
+        kind: str,
+        values: Mapping[str, object] | None = None,
         before_send: Callable[[], None] | None = None,
     ) -> JsonObject:
-        """Run one radio request while owning the single in-flight slot."""
+        """Run one radio request while owning the single in-flight slot.
+
+        ``kind`` and ``values`` (what is sent, key and value) are only recorded
+        in the diagnostics journal and the debug log.
+        """
         generation = self._request_generation(device_id)
         self._check_request_valid(device_id, generation)
         queued_at = monotonic()
@@ -1626,10 +1786,41 @@ class OpusGreenNetCoordinator:
             self._check_request_valid(device_id, generation)
             if before_send is not None:
                 before_send()
+            started = monotonic()
             try:
                 result = await request()
             except OpusApiError as err:
+                self._journal_radio_request(
+                    device_id,
+                    kind,
+                    priority,
+                    values,
+                    waited=waited,
+                    started=started,
+                    error=err,
+                )
                 raise self._request_error(err, device_id) from err
+            except asyncio.CancelledError as err:
+                # The request may have reached the gateway: recorded, not undone.
+                self._journal_radio_request(
+                    device_id,
+                    kind,
+                    priority,
+                    values,
+                    waited=waited,
+                    started=started,
+                    error=err,
+                )
+                raise
+            self._journal_radio_request(
+                device_id,
+                kind,
+                priority,
+                values,
+                waited=waited,
+                started=started,
+                result=result,
+            )
             # The gateway answered: only unload or a removed device make the
             # result meaningless. An outage declared meanwhile does not undo
             # an accepted request.
@@ -1710,6 +1901,8 @@ class OpusGreenNetCoordinator:
                         OpusGatewayClient.device_path(device_id, "state"), body
                     ),
                     priority=priority,
+                    kind="status_query" if is_query else "command",
+                    values=_journal_values(functions),
                     before_send=snapshot_feedback,
                 )
             except HomeAssistantError as err:
@@ -1984,6 +2177,7 @@ class OpusGreenNetCoordinator:
             device_id,
             lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
             priority=PRIORITY_QUERY,
+            kind="configuration_read",
         )
 
     async def async_set_device_configuration(
@@ -1997,10 +2191,13 @@ class OpusGreenNetCoordinator:
                 translation_placeholders={"device_id": device_id, "reason": problem},
             )
         path = OpusGatewayClient.device_path(device_id, "configuration")
+        configuration = as_object(config.get("configuration")) or {}
         await self._async_radio_request(
             device_id,
             lambda: self.client.async_put(path, config, timeout=RECOM_TIMEOUT),
             priority=PRIORITY_QUERY,
+            kind="configuration_write",
+            values=_journal_values(configuration.get("parameters")),
         )
 
     async def async_set_device_parameter(
@@ -2108,6 +2305,7 @@ class OpusGreenNetCoordinator:
             device_id,
             lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
             priority=PRIORITY_QUERY,
+            kind="parameters_read",
         )
 
     async def async_get_device_link_tables(self, device_id: str) -> JsonObject:
@@ -2122,6 +2320,7 @@ class OpusGreenNetCoordinator:
             device_id,
             lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
             priority=PRIORITY_QUERY,
+            kind="link_tables_read",
         )
         masked = protocol.mask_gateway_id(document, self.eag_id)
         # mask_gateway_id keeps the type of a JSON object.

@@ -102,6 +102,33 @@ Useful fields:
   - `radio_queue_depth`: requests waiting for the gateway's radio queue at the
     moment of the download. Values above 0 for long are worth reporting.
   The counters start at 0 whenever the integration is reloaded.
+- `radio_journal` (in the block of every device): what the integration sent to
+  that device over the radio, from the last 300 requests of all devices
+  together, oldest first. It is kept in memory only (empty after a reload or
+  restart). Each entry has:
+  - `seq`: a counter that orders the entries across devices.
+  - `at`: when the request ended (UTC).
+  - `request`: `command` (a state command), `status_query`,
+    `configuration_write`, `configuration_read` (also the read-back after a
+    write), `parameters_read`, `link_tables_read`, or `feedback`.
+  - `priority`, `duration_ms` and `waited_ms` (time in the queue before the
+    request was sent).
+  - `values`: the keys and values that were sent. Text is shortened, nested
+    values show their type.
+  - `outcome`: `ok` (the gateway accepted the request), `deferred` (the gateway
+    stored it for a sleeping device), `rejected` (with `gateway_status`, the
+    optional `http_status` and the gateway's text in `message`), `timeout`,
+    `connection_error`, `auth_rejected`, `cancelled` (the caller gave up while
+    the request was in flight, so it may still have been sent) or `error`.
+  - A `feedback` entry is written when a device reported a field that one of
+    our commands was still waiting for (`fields`, `channel`).
+
+  `ok` only means that the gateway accepted the request; it is neither the
+  stored value nor the device's state. A configuration write has two entries:
+  the write and the read-back. If the write is `ok` and the read-back is
+  `rejected` (for example `504`, no response from device), the value may have
+  been stored. Nothing is repeated automatically. Requests that were not sent
+  (gateway offline, device unknown, queued check dropped) have no entry.
 - `last_vertical_movement_time` (covers): the last run duration the gateway
   reports. It is not a measurement of the travel: on 24 D2-05-02 blinds in one
   installation (firmware 1.21.30) it equalled the stored vertical movement time
@@ -120,6 +147,13 @@ Useful fields:
 For a one-off check use **Settings → Devices & services → Opus GreenNet Bridge
 → ⋮ → Enable debug logging**, reproduce the problem and disable it again to
 download the log.
+
+With debug logging every radio request writes one line, `OPUS radio request:
+device=… request=… outcome=… gateway_status=… duration_ms=… values=…
+message=…`, with the same content as a `radio_journal` entry, and a device
+report that confirms a command writes `OPUS device … reported […]`. The
+journal in the diagnostics download is filled without debug logging; the log
+adds the exact time order with other messages.
 
 For persistent logging add to `configuration.yaml`:
 
