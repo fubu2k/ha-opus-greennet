@@ -34,6 +34,7 @@ from .coordinator import (
     SIGNAL_DEVICE_DISCOVERED,
     SIGNAL_DEVICE_REMOVED,
     SIGNAL_DEVICE_STATE_UPDATE,
+    SIGNAL_GATEWAY_INFO_UPDATE,
     SIGNAL_GATEWAY_UPTIME_UPDATE,
     CoverRun,
     OpusGreenNetCoordinator,
@@ -87,7 +88,15 @@ async def async_setup_entry(
     added_unique_ids: set[str] = set()
     # Devices waiting for their first link table: device id -> unsubscribe.
     waiting_for_links: dict[str, CALLBACK_TYPE] = {}
-    async_add_entities([OpusGreenNetGatewayUptimeSensor(coordinator, eag_id)])
+    async_add_entities(
+        [
+            OpusGreenNetGatewayUptimeSensor(coordinator, eag_id),
+            *(
+                OpusGreenNetGatewayInfoSensor(coordinator, eag_id, key)
+                for key in GATEWAY_INFO_READINGS
+            ),
+        ]
+    )
 
     @callback
     def async_add_sensors(device: EnOceanDevice) -> None:
@@ -782,6 +791,79 @@ class OpusGreenNetGatewayUptimeSensor(SensorEntity):
         """Show every new reading and every availability change."""
         await super().async_added_to_hass()
         for signal in (SIGNAL_GATEWAY_UPTIME_UPDATE, SIGNAL_AVAILABILITY_UPDATE):
+            self.async_on_remove(
+                async_dispatcher_connect(
+                    self.hass, f"{signal}_{self._eag_id}", self._handle_update
+                )
+            )
+
+    @callback
+    def _handle_update(self) -> None:
+        self.async_write_ha_state()
+
+
+def _info_text(coordinator: OpusGreenNetCoordinator, key: str) -> str | None:
+    """Return a text field of the gateway information, or None."""
+    value = coordinator.gateway_info.get(key)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return str(value)
+    return value if isinstance(value, str) and value.strip() else None
+
+
+# Identity, versions and network address of the gateway: key (also the
+# translation key and the end of the unique ID) -> reading.
+GATEWAY_INFO_READINGS: Final[
+    dict[str, Callable[[OpusGreenNetCoordinator], str | None]]
+] = {
+    "gateway_eurid": lambda coordinator: coordinator.eag_id,
+    "gateway_firmware_version": lambda coordinator: _info_text(coordinator, "version"),
+    "gateway_app_version": lambda coordinator: _info_text(coordinator, "appVersion"),
+    "gateway_api_version": lambda coordinator: _info_text(coordinator, "apiVersion"),
+    "gateway_hostname": lambda coordinator: coordinator.gateway_address[0],
+    "gateway_ipv4_address": lambda coordinator: coordinator.gateway_address[1],
+    "gateway_ipv6_address": lambda coordinator: coordinator.gateway_address[2],
+}
+
+
+class OpusGreenNetGatewayInfoSensor(SensorEntity):
+    """One identity, version or address reading of the gateway.
+
+    Diagnostic sensors on the gateway's own device. The gateway information is
+    read at setup and every 30 minutes, the address is resolved on the same
+    schedule; nothing is polled by the entity.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self, coordinator: OpusGreenNetCoordinator, eag_id: str, key: str
+    ) -> None:
+        """Initialize the sensor ``key`` of GATEWAY_INFO_READINGS."""
+        self._coordinator = coordinator
+        self._eag_id = eag_id
+        self._reading = GATEWAY_INFO_READINGS[key]
+        self._attr_translation_key = key
+        self._attr_unique_id = f"{eag_id}_{key}"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, eag_id)})
+
+    @property
+    def available(self) -> bool:
+        """Return whether the gateway is reachable."""
+        return self._coordinator.available
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the reading, or None while the gateway did not report it."""
+        return self._reading(self._coordinator)
+
+    async def async_added_to_hass(self) -> None:
+        """Show every new reading and every availability change."""
+        await super().async_added_to_hass()
+        for signal in (SIGNAL_GATEWAY_INFO_UPDATE, SIGNAL_AVAILABILITY_UPDATE):
             self.async_on_remove(
                 async_dispatcher_connect(
                     self.hass, f"{signal}_{self._eag_id}", self._handle_update

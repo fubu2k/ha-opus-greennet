@@ -286,6 +286,7 @@ async def async_setup_entry(
 
     try:
         version = coordinator.gateway_info.get("version")
+        serial = coordinator.gateway_info.get("serialNumber")
         device_registry = dr.async_get(hass)
         gateway_device = device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
@@ -293,7 +294,7 @@ async def async_setup_entry(
             manufacturer="OPUS",
             model="GreenNet Bridge",
             name=entry.title,
-            serial_number=eag_id,
+            serial_number=serial if isinstance(serial, str) and serial else None,
             sw_version=version if isinstance(version, str) else None,
         )
         entry.runtime_data = OpusGreenNetRuntimeData(

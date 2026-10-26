@@ -186,6 +186,27 @@
       },
       "gateway_uptime": {
         "name": "Uptime"
+      },
+      "gateway_eurid": {
+        "name": "EURID"
+      },
+      "gateway_firmware_version": {
+        "name": "Firmware version"
+      },
+      "gateway_app_version": {
+        "name": "App version"
+      },
+      "gateway_api_version": {
+        "name": "API version"
+      },
+      "gateway_hostname": {
+        "name": "Hostname"
+      },
+      "gateway_ipv4_address": {
+        "name": "IPv4 address"
+      },
+      "gateway_ipv6_address": {
+        "name": "IPv6 address"
       }
     },
     "switch": {

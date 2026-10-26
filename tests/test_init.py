@@ -105,7 +105,7 @@ def _session_and_issue_patch() -> Iterator[MagicMock]:
 async def test_setup_creates_gateway_registry_device(
     hass: HomeAssistant, gateway: FakeGateway
 ) -> None:
-    gateway.system_info = {"version": "OPUS-GW 2.4.1"}
+    gateway.system_info = {"version": "OPUS-GW 2.4.1", "serialNumber": "02022774"}
     entry = await setup_bridge(hass, gateway)
 
     assert entry.state is ConfigEntryState.LOADED
@@ -118,8 +118,20 @@ async def test_setup_creates_gateway_registry_device(
     assert gateway_device.manufacturer == "OPUS"
     assert gateway_device.model == "GreenNet Bridge"
     assert gateway_device.name == f"Opus GreenNet ({EAG_ID})"
-    assert gateway_device.serial_number == EAG_ID
+    # The serial number is the gateway's own, not its EURID.
+    assert gateway_device.serial_number == "02022774"
     assert gateway_device.sw_version == "OPUS-GW 2.4.1"
+
+
+@pytest.mark.parametrize("serial", [None, "", 2022774, ["02022774"]])
+async def test_gateway_without_text_serial_number_has_none(
+    hass: HomeAssistant, gateway: FakeGateway, serial: object
+) -> None:
+    gateway.system_info = {"serialNumber": serial}
+    entry = await setup_bridge(hass, gateway)
+    gateway_device = dr.async_get(hass).async_get(entry.runtime_data.gateway_device_id)
+    assert gateway_device is not None
+    assert gateway_device.serial_number is None
 
 
 @pytest.mark.parametrize("version", [None, 241, ["2.4.1"]])
