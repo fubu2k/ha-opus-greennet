@@ -7,6 +7,7 @@ through the fake gateway's event stream.
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -812,3 +813,49 @@ async def test_homekit_command_is_applied_then_verified(
     await gateway.push(telegram("050BF714", [{"key": "switch", "value": "on"}]))
     coordinator = entry.runtime_data.coordinator
     assert ("050BF714", 0) not in coordinator._pending_reconciliation_queries
+
+
+# ── Outbound status queries (hardware: D5, 25 Oct 2026) ─────────────────────
+# The gateway streams the status request that was sent to an actuator as a `to`
+# telegram whose only function is `query` (value `status`). It describes no
+# target state and must change nothing.
+
+
+def test_outbound_status_query_changes_nothing(coord, dispatch, call_later) -> None:
+    device = _device(coord, "D2-01-02")
+    before = copy.deepcopy(device.channels)
+    coord._handle_telegram(
+        _telegram([{"key": "query", "value": "status"}], direction="to")
+    )
+    assert device.channels == before
+    assert device.last_update_source != "telegram/to"
+    dispatch.assert_not_called()
+    call_later.assert_not_called()
+    assert coord._pending_reconciliation_queries == {}
+    assert coord.tasks == []
+
+
+def test_outbound_status_query_for_an_unknown_device_starts_no_lookup(
+    coord, dispatch
+) -> None:
+    coord._handle_telegram(
+        _telegram(
+            [{"key": "query", "value": "status"}], direction="to", device_id="NEW"
+        )
+    )
+    assert coord.tasks == []
+    assert "NEW" not in coord._unknown_devices
+
+
+def test_a_state_in_the_same_outbound_telegram_is_still_applied(
+    coord, dispatch, call_later
+) -> None:
+    device = _device(coord, "D2-01-02")
+    coord._handle_telegram(
+        _telegram(
+            [{"key": "query", "value": "status"}, {"key": "switch", "value": "on"}],
+            direction="to",
+        )
+    )
+    assert device.channels[0].is_on is True
+    assert device.last_update_source == "telegram/to"
