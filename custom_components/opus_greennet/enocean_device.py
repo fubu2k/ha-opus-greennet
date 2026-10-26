@@ -141,6 +141,11 @@ class EnOceanChannel:
     switch_off_warning: float | None = None
     switch_off_warning_signal: float | None = None
     illumination_threshold: float | None = None
+    # A5-07-03 presence detector settings (DEVICE_SETTINGS): alive cycle in
+    # minutes, PIR off time and ReCom readiness cycle in seconds.
+    alive_cycle: float | None = None
+    pir_off_time: float | None = None
+    recom_ready_time: float | None = None
     # D2-01 switch settings with fixed values, as reported (DEVICE_OPTIONS).
     operation_mode: str | None = None
     led_color: str | None = None

@@ -207,6 +207,82 @@
       },
       "gateway_ipv6_address": {
         "name": "IPv6-Adresse"
+      },
+      "vertical_movement_time_setting": {
+        "name": "Fahrzeit vertikal (gespeichert)"
+      },
+      "rotation_time_setting": {
+        "name": "Rotationszeit (gespeichert)"
+      },
+      "max_holding_time_setting": {
+        "name": "Maximale Haltezeit (gespeichert)"
+      },
+      "ramping_time_setting": {
+        "name": "Rampenzeit (gespeichert)"
+      },
+      "short_press_time_setting": {
+        "name": "Zeit Kurzdruck (gespeichert)"
+      },
+      "long_press_time_setting": {
+        "name": "Zeit Langdruck (gespeichert)"
+      },
+      "timer_setting": {
+        "name": "Timerdauer (gespeichert)"
+      },
+      "timer_long_setting": {
+        "name": "Timerdauer (langer Tastendruck) (gespeichert)"
+      },
+      "switch_off_warning_setting": {
+        "name": "Ausschaltwarnung (gespeichert)"
+      },
+      "switch_off_warning_signal_setting": {
+        "name": "Dauer des Warnsignals (gespeichert)"
+      },
+      "illumination_threshold_setting": {
+        "name": "Helligkeitsschwelle (gespeichert)"
+      },
+      "alive_cycle_setting": {
+        "name": "Alive-Zyklus (gespeichert)"
+      },
+      "pir_off_time_setting": {
+        "name": "PIR-Aus-Zeit (gespeichert)"
+      },
+      "recom_ready_time_setting": {
+        "name": "ReCom-Bereitschaftszyklus (gespeichert)"
+      },
+      "operation_mode_setting": {
+        "name": "Betriebsart (gespeichert)",
+        "state": {
+          "bottom_on": "Unten EIN",
+          "timer": "Timer",
+          "toggle": "Umschalten",
+          "top_on": "Oben EIN"
+        }
+      },
+      "led_color_setting": {
+        "name": "LED-Farbe (gespeichert)",
+        "state": {
+          "all": "Alle LEDs an",
+          "green": "Grüne LED an",
+          "off": "Beide LEDs aus",
+          "red": "Rote LED an"
+        }
+      },
+      "led_channel_setting": {
+        "name": "LED-Kanal (gespeichert)",
+        "state": {
+          "channel1": "Kanal 1",
+          "channel2": "Kanal 2"
+        }
+      },
+      "function_external_input_setting": {
+        "name": "Funktion externer Eingang (gespeichert)",
+        "state": {
+          "channel1": "Kanal 1",
+          "channel2": "Kanal 2",
+          "channels_all": "Kanal 1 + 2",
+          "inactive": "Inaktiv"
+        }
       }
     },
     "switch": {
@@ -228,6 +304,9 @@
       },
       "reference_run_down": {
         "name": "Referenzfahrt über unten"
+      },
+      "read_settings": {
+        "name": "Einstellungen lesen"
       }
     },
     "event": {

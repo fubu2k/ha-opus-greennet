@@ -31,6 +31,30 @@ The settings stored on actuators, as far as the gateway's parameter catalog
 Which of these settings were written on real hardware, and which only read, is
 listed in the [README](../README.md#what-was-verified-on-hardware).
 
+**Stored values.** Every device that has settings also shows their current
+values as read-only diagnostic sensors, **enabled by default** and named like
+the setting plus *(stored)*, for example *Vertical movement time (stored)* or
+*LED colour (stored)*. They show the values at a glance on the device page
+without enabling anything. The number and select entities that change a
+setting stay disabled: enable the one you want to change, and the sensor keeps
+showing the stored value alongside it. The values come from the last device
+list, from the last write the device confirmed, or from the *Read settings*
+button below. A value of a select that the gateway's catalog does not list
+shows as *unknown*.
+
+**Read settings button.** Every device that has one of these settings also gets
+a diagnostic button *Read settings* (enabled by default). Pressing it reads
+the settings stored on the device once over the radio, which takes a few
+seconds, and shows what the device reports. Use it after a write whose outcome
+was unclear, or after a setting was changed with the OPUS app. Nothing is
+written, nothing is repeated, and the integration never presses it itself. A
+setting the device does not report keeps its known value. A press while the
+device is being read is ignored, and an answer that arrives after a write to
+the same device started or ended meanwhile is dropped, because the write is
+newer. The button is offered for blinds, D2-01-03 dimmers, D2-01-01/-11
+switches and A5-07-03 presence detectors, the devices that have settings; reading is verified on hardware as the
+read-back after a write, not yet as a button press.
+
 Every actuator whose device list contains a link table also has the diagnostic
 sensor *Wall switch links* (see [Sensor values](#sensor-values)). The
 functions of rocker A and B and the routing time are left out until a text
@@ -186,6 +210,22 @@ are not taken over.
 - The diagnostic *Sensor error* binary sensor is on while the detector reports
   an error code (251–255).
 - A5-07-01 has no illumination sensor, so it gets no illuminance entity.
+- A5-07-03 detectors also show three of their settings as read-only diagnostic
+  sensors, enabled by default: *Alive cycle (stored)* (minutes),
+  *PIR off time (stored)* and *ReCom readiness cycle (stored)* (seconds), in the
+  unit the gateway reports. The values come from the gateway's cached device
+  list (it reads them from the detector itself, so they can be up to about a day
+  old) and from the *Read settings* button. Nothing writes them: there is no
+  number entity, because a battery detector answers a ReCom request only while it
+  is ready (the readiness cycle, four hours on the gateway this was read from)
+  and a write has not been tried on hardware. The detector sensitivity is not
+  listed by the gateway, so it is not shown.
+- The *Read settings* button of a detector is enabled like the others, but it
+  asks the detector over the radio, which is answered only inside the readiness
+  window. Outside it the gateway reports *no response from device* after up to
+  45 seconds, and the radio queue is busy meanwhile, so press it once and wait.
+  One press reads once and is never repeated. That the detector answers such a
+  read has not been verified on hardware.
 - The OPUS motion detector (F6-02-01 + A5-04-01) reports motion as
   `buttonAI` and no motion as `buttonA0`; it also gets temperature and
   humidity sensors.

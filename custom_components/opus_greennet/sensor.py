@@ -41,6 +41,8 @@ from .coordinator import (
 )
 from .enocean_device import EnOceanChannel, EnOceanDevice
 from .entity import OpusGreenNetEntity, migrate_legacy_entity_suffix
+from .number import DEVICE_TIMES, PRESENCE_SETTINGS, DeviceTime
+from .select import DEVICE_SELECTS, DeviceSelect, option_slug
 
 # Actuators hold link tables; sensors and wall switches never list one.
 LINKABLE_ENTITY_TYPES: Final = frozenset({"switch", "light", "cover"})
@@ -272,6 +274,24 @@ async def async_setup_entry(
                 device=device,
             )
         )
+
+        # The settings stored on the device, read only (diagnostic). The number
+        # and select entities that write them are disabled by default.
+        entities.extend(
+            OpusGreenNetSettingSensor(
+                coordinator, eag_id, gateway_device_id, device, device_time
+            )
+            for device_time in (*DEVICE_TIMES, *PRESENCE_SETTINGS)
+            if device_time.applies_to(device)
+        )
+        if device.entity_type == "switch":
+            entities.extend(
+                OpusGreenNetSettingChoiceSensor(
+                    coordinator, eag_id, gateway_device_id, device, select, values
+                )
+                for select in DEVICE_SELECTS
+                if (values := select.values_for(device)) is not None
+            )
 
         # Wall switches linked to an actuator (diagnostic). Only devices whose
         # gateway listed a link table get one; the others have no such table.
@@ -566,6 +586,77 @@ class OpusGreenNetWallSwitchLinksSensor(OpusGreenNetBaseSensor):
         """
         tables = self._device.link_tables
         return None if tables is None else len(tables.inbound)
+
+
+class OpusGreenNetSettingSensor(OpusGreenNetBaseSensor):
+    """A time or threshold stored on the device, shown read only.
+
+    It reads the same channel field as the number entity of the setting, which
+    stays disabled until someone wants to change the value. The value is as
+    known from the last device list, the last confirmed write or the *Read
+    settings* button.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        device_time: DeviceTime,
+    ) -> None:
+        """Initialize the setting sensor."""
+        key = f"{device_time.translation_key}_setting"
+        super().__init__(coordinator, eag_id, gateway_device_id, device, key, key)
+        self._device_time = device_time
+        self._attr_native_unit_of_measurement = device_time.unit
+        self._attr_device_class = SensorDeviceClass(device_time.device_class.value)
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the stored value, or None while it is unknown."""
+        channel = self._device.channels.get(DEFAULT_CHANNEL)
+        if channel is None:
+            return None
+        value: float | None = getattr(channel, self._device_time.attribute)
+        return value
+
+
+class OpusGreenNetSettingChoiceSensor(OpusGreenNetBaseSensor):
+    """A setting with a fixed set of values stored on the switch, read only.
+
+    A value the catalog does not list is shown as unknown, like the select.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.ENUM
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        select: DeviceSelect,
+        values: tuple[str, ...],
+    ) -> None:
+        """Initialize the setting sensor."""
+        key = f"{select.translation_key}_setting"
+        super().__init__(coordinator, eag_id, gateway_device_id, device, key, key)
+        self._select = select
+        self._slugs = {value: option_slug(value) for value in values}
+        self._attr_options = list(self._slugs.values())
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the stored option, or None while it is unknown or unlisted."""
+        channel = self._device.channels.get(DEFAULT_CHANNEL)
+        if channel is None:
+            return None
+        value: str | None = getattr(channel, self._select.attribute)
+        return None if value is None else self._slugs.get(value)
 
 
 class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):

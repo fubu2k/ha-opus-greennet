@@ -65,6 +65,9 @@
       },
       "reference_run_down": {
         "default": "mdi:arrow-collapse-down"
+      },
+      "read_settings": {
+        "default": "mdi:refresh"
       }
     }
   },
