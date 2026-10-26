@@ -441,6 +441,12 @@ class OpusGreenNetCoordinator:
         # Confirmed settings per device, protected against the gateway's cached
         # copy of the configuration in a device list (see ``SettingGuard``).
         self._setting_guards: dict[str, dict[str, SettingGuard]] = {}
+        # Counts the configuration writes of a device (one before and one after
+        # each), so a settings read that overlapped a write is recognised and
+        # dropped instead of replacing the newer value.
+        self._setting_writes: dict[str, int] = {}
+        # Devices whose settings are being read on request right now.
+        self._settings_reading: set[str] = set()
         self._command_waiters: dict[str, int] = {}
         self._sent_commands: dict[str, list[tuple[float, frozenset[object]]]] = {}
         self._cover_movements: dict[tuple[str, int], CoverMovement] = {}
@@ -1108,6 +1114,8 @@ class OpusGreenNetCoordinator:
         self._telegram_metadata_at.pop(device_id, None)
         self.last_vertical_movement_times.pop(device_id, None)
         self._setting_guards.pop(device_id, None)
+        self._setting_writes.pop(device_id, None)
+        self._settings_reading.discard(device_id)
         for origin_key in [k for k in self._position_origins if k[0] == device_id]:
             del self._position_origins[origin_key]
         self._cancel_reconciliation_queries(device_id)
@@ -2278,13 +2286,64 @@ class OpusGreenNetCoordinator:
             )
         path = OpusGatewayClient.device_path(device_id, "configuration")
         configuration = as_object(config.get("configuration")) or {}
-        await self._async_radio_request(
-            device_id,
-            lambda: self.client.async_put(path, config, timeout=RECOM_TIMEOUT),
-            priority=PRIORITY_QUERY,
-            kind="configuration_write",
-            values=_journal_values(configuration.get("parameters")),
-        )
+        self._note_setting_write(device_id)
+        try:
+            await self._async_radio_request(
+                device_id,
+                lambda: self.client.async_put(path, config, timeout=RECOM_TIMEOUT),
+                priority=PRIORITY_QUERY,
+                kind="configuration_write",
+                values=_journal_values(configuration.get("parameters")),
+            )
+        finally:
+            self._note_setting_write(device_id)
+
+    def _note_setting_write(self, device_id: str) -> None:
+        """Count a configuration write step of a device (see ``_setting_writes``)."""
+        self._setting_writes[device_id] = self._setting_writes.get(device_id, 0) + 1
+
+    async def async_reread_device_settings(self, device_id: str) -> None:
+        """Read the settings stored on a device and show them (on request only).
+
+        One ReCom read over the radio, never repeated and never started by the
+        integration itself. The values the device reports replace what Home
+        Assistant shows, also a value that a device list or an earlier write
+        left behind, and end the protection of a confirmed write for these
+        settings. A setting the device does not report keeps its known value.
+        A press while the same device is being read is ignored. An answer that
+        arrives after a write to the device started or finished meanwhile is
+        dropped: the write is newer.
+        """
+        device = self.get_device(device_id)
+        if device is None:
+            raise request_error("device_not_found", device_id)
+        if device_id in self._settings_reading:
+            return
+        self._settings_reading.add(device_id)
+        started = self._setting_writes.get(device_id, 0)
+        try:
+            document = await self.async_get_device_configuration(device_id)
+        finally:
+            self._settings_reading.discard(device_id)
+        if self._setting_writes.get(device_id, 0) != started:
+            _LOGGER.debug(
+                "Dropped the settings read of device %s: a write overlapped it",
+                device_id,
+            )
+            return
+        if self.devices.get(device_id) is not device:
+            return
+        functions = protocol.configuration_state_functions(document)
+        if not functions:
+            return
+        device.update_from_telegram({"functions": functions})
+        if guards := self._setting_guards.get(device_id):
+            for function in functions:
+                if isinstance(key := function.get("key"), str):
+                    guards.pop(key, None)
+            if not guards:
+                self._setting_guards.pop(device_id, None)
+        self._dispatch_state(device)
 
     def _guard_confirmed_setting(
         self,
@@ -2417,27 +2476,41 @@ class OpusGreenNetCoordinator:
         lock = self._setting_locks.setdefault(device_id, asyncio.Lock())
         async with lock:
             try:
-                await self.async_set_device_configuration(
-                    device_id,
-                    {"configuration": {"parameters": [{"key": key, "value": value}]}},
-                )
-            except HomeAssistantError as err:
-                # A rejected write: the device probably did not get the value.
-                if err.translation_key != "request_rejected":
-                    raise
-                raise request_error(
-                    "parameter_write_failed", device_id, _step_reason(key, err)
-                ) from err
-            try:
-                stored = read(await self.async_get_device_configuration(device_id), key)
-            except HomeAssistantError as err:
-                # Written, but the outcome could not be read back. A rejected
-                # read-back means the write was accepted and may be stored.
-                if err.translation_key == "request_rejected":
+                try:
+                    await self.async_set_device_configuration(
+                        device_id,
+                        {
+                            "configuration": {
+                                "parameters": [{"key": key, "value": value}]
+                            }
+                        },
+                    )
+                except HomeAssistantError as err:
+                    # A rejected write: the device probably did not get the value.
+                    if err.translation_key != "request_rejected":
+                        raise
                     raise request_error(
-                        "parameter_read_back_failed", device_id, _step_reason(key, err)
+                        "parameter_write_failed", device_id, _step_reason(key, err)
                     ) from err
-                raise request_error("parameter_not_confirmed", device_id, key) from err
+                try:
+                    document = await self.async_get_device_configuration(device_id)
+                    stored = read(document, key)
+                except HomeAssistantError as err:
+                    # Written, but the outcome could not be read back. A rejected
+                    # read-back means the write was accepted and may be stored.
+                    if err.translation_key == "request_rejected":
+                        raise request_error(
+                            "parameter_read_back_failed",
+                            device_id,
+                            _step_reason(key, err),
+                        ) from err
+                    raise request_error(
+                        "parameter_not_confirmed", device_id, key
+                    ) from err
+            finally:
+                # The read-back ends the write: a settings read that overlapped
+                # it is dropped (see ``_setting_writes``).
+                self._note_setting_write(device_id)
             if stored is None:
                 raise request_error("parameter_not_confirmed", device_id, key)
             previous = device.setting_reading(key)

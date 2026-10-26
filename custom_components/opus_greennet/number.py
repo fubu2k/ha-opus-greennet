@@ -18,10 +18,14 @@ from . import OpusGreenNetConfigEntry
 from .const import (
     CONF_EAG_ID,
     DEFAULT_CHANNEL,
+    DEVICE_SETTINGS,
+    KEY_ALIVE_CYCLE,
     KEY_ILLUMINATION_THRESHOLD,
     KEY_LONG_PRESS,
     KEY_MAX_HOLDING_TIME,
+    KEY_PIR_OFF_TIME,
     KEY_RAMPING_TIME,
+    KEY_RECOM_READY_TIME,
     KEY_ROTATION_TIME,
     KEY_SHORT_PRESS,
     KEY_SWITCH_OFF_WARNING,
@@ -61,6 +65,8 @@ MAX_ILLUMINATION_LUX = 1500
 BLIND_TIME_EEPS = frozenset({"D2-05-02"})
 DIMMER_TIME_EEPS = frozenset({"D2-01-03"})
 SWITCH_SETTING_EEPS = frozenset({"D2-01-01", "D2-01-11"})
+# Only the device list of an A5-07-03 presence detector was read so far.
+PRESENCE_SETTING_EEPS = frozenset({"A5-07-03"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +200,36 @@ SWITCH_SETTINGS: tuple[DeviceTime, ...] = (
 )
 
 DEVICE_TIMES = BLIND_TIMES + DIMMER_TIMES + SWITCH_SETTINGS
+
+
+def _presence_setting(
+    translation_key: str, parameter: str, unit: str = UnitOfTime.SECONDS
+) -> DeviceTime:
+    """Describe a presence detector setting, with the model range of its key."""
+    attribute, minimum, maximum = DEVICE_SETTINGS[parameter]
+    return DeviceTime(
+        translation_key,
+        parameter,
+        attribute,
+        maximum=maximum,
+        step=1,
+        minimum=minimum,
+        unit=unit,
+        entity_type="binary_sensor",
+        eeps=PRESENCE_SETTING_EEPS,
+    )
+
+
+# Settings of the presence detectors, shown as read-only sensors only. They are
+# deliberately not part of DEVICE_TIMES: no number entity is created, so the
+# integration offers no way to write them. A battery detector answers a ReCom
+# request only while it is ready (its readiness cycle), which is not proven
+# for a write.
+PRESENCE_SETTINGS: tuple[DeviceTime, ...] = (
+    _presence_setting("alive_cycle", KEY_ALIVE_CYCLE, UnitOfTime.MINUTES),
+    _presence_setting("pir_off_time", KEY_PIR_OFF_TIME),
+    _presence_setting("recom_ready_time", KEY_RECOM_READY_TIME),
+)
 
 
 async def async_setup_entry(
