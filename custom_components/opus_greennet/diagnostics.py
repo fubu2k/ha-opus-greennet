@@ -37,6 +37,8 @@ TO_REDACT = {
     "host",
     "hostname",
     "ip",
+    "ipv4",
+    "ipv6",
     "ipaddress",
     "mac",
     "macaddress",
@@ -215,10 +217,10 @@ async def async_get_config_entry_diagnostics(
     stream = stream_facts() if callable(stream_facts) else None
     configured_host = entry.data.get(CONF_HOST)
     # Resolved when the download is made (bounded, never raises): no polling.
-    hostname, ip_address = (
+    hostname, ipv4, ipv6 = (
         await async_gateway_address(configured_host)
         if isinstance(configured_host, str) and configured_host.strip()
-        else (None, None)
+        else (None, None, None)
     )
     origin = getattr(coordinator, "position_origin", None)
     for device in coordinator.devices.values():
@@ -284,7 +286,7 @@ async def async_get_config_entry_diagnostics(
                 "average_dbm": _info_int(coordinator.gateway_info, "averageDbm"),
                 "info_read_at": getattr(coordinator, "gateway_info_read_at", None),
                 # Empty when the name or address cannot be resolved.
-                "connection": {"hostname": hostname, "ip": ip_address},
+                "connection": {"hostname": hostname, "ipv4": ipv4, "ipv6": ipv6},
                 "uptime": coordinator.gateway_uptime,
                 # Seconds from opening the event stream to its first device
                 # list at setup.

@@ -34,7 +34,7 @@ def _no_dns_in_diagnostics() -> Iterator[None]:
     """Keep the diagnostics download from asking a real resolver."""
     with patch(
         "custom_components.opus_greennet.diagnostics.async_gateway_address",
-        AsyncMock(return_value=(None, None)),
+        AsyncMock(return_value=(None, None, None)),
     ):
         yield
 
