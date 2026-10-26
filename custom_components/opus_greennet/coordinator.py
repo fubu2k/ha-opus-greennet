@@ -546,6 +546,19 @@ class OpusGreenNetCoordinator:
             )
         self.gateway_info = info
         self.gateway_info_read_at = dt_util.utcnow().isoformat()
+        self._log_gateway_versions()
+
+    def _gateway_versions(self) -> tuple[object, object, object]:
+        """Return firmware, app and API version as the gateway reported them."""
+        info = self.gateway_info
+        return info.get("version"), info.get("appVersion"), info.get("apiVersion")
+
+    def _log_gateway_versions(self) -> None:
+        """Name the gateway versions in the log (support reports include it)."""
+        firmware, app, api = self._gateway_versions()
+        _LOGGER.info(
+            "OPUS gateway versions: firmware=%s app=%s api=%s", firmware, app, api
+        )
 
     def _create_task(
         self, coroutine: Coroutine[object, object, None], name: str
@@ -835,8 +848,11 @@ class OpusGreenNetCoordinator:
                 self.client.host,
             )
             return
+        versions = self._gateway_versions()
         self.gateway_info = {**self.gateway_info, **info}
         self.gateway_info_read_at = dt_util.utcnow().isoformat()
+        if self._gateway_versions() != versions:
+            self._log_gateway_versions()
         async_dispatcher_send(self.hass, f"{SIGNAL_GATEWAY_INFO_UPDATE}_{self.eag_id}")
 
     async def _async_load_profiles(self) -> None:
