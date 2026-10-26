@@ -154,3 +154,79 @@ def test_no_event_for_unknown_button_action(event_entity, rocker_device):
     event_entity._handle_state_update(rocker_device)
 
     event_entity._trigger_event.assert_not_called()
+
+
+# ── Button occurrences on another channel than 0 (state semantics D4) ─────────
+
+
+def test_event_of_another_channel_is_fired_with_its_channel(
+    event_entity, rocker_device
+):
+    """Before the fix a button reported on channel 1 was silently dropped."""
+    rocker_device.channels[1] = EnOceanChannel(
+        channel_id=1, last_button="buttonA0", last_button_action="pressed"
+    )
+
+    event_entity._handle_state_update(rocker_device)
+
+    event_entity._trigger_event.assert_called_once_with(
+        "buttonA0_pressed", {"button": "buttonA0", "action": "pressed", "channel": 1}
+    )
+    event_entity.async_write_ha_state.assert_called_once()
+
+
+def test_channel_zero_events_keep_their_data_without_a_channel(
+    event_entity, rocker_device
+):
+    rocker_device.channels[0] = EnOceanChannel(
+        channel_id=0, last_button="buttonB0", last_button_action="released"
+    )
+
+    event_entity._handle_state_update(rocker_device)
+
+    (_, data), _ = event_entity._trigger_event.call_args
+    assert data == {"button": "buttonB0", "action": "released"}
+
+
+def test_occurrences_on_two_channels_fire_in_channel_order(event_entity, rocker_device):
+    rocker_device.channels[1] = EnOceanChannel(
+        channel_id=1, last_button="buttonAI", last_button_action="pressed"
+    )
+    rocker_device.channels[0] = EnOceanChannel(
+        channel_id=0, last_button="buttonA0", last_button_action="pressed"
+    )
+
+    event_entity._handle_state_update(rocker_device)
+
+    assert [call.args[0] for call in event_entity._trigger_event.call_args_list] == [
+        "buttonA0_pressed",
+        "buttonAI_pressed",
+    ]
+    assert event_entity.async_write_ha_state.call_count == 2
+
+
+def test_unknown_event_type_on_one_channel_does_not_hide_the_other(
+    event_entity, rocker_device
+):
+    # F6-02-01 has rockers A and B only: buttonC0 is not one of its event types.
+    rocker_device.channels[0] = EnOceanChannel(
+        channel_id=0, last_button="buttonC0", last_button_action="pressed"
+    )
+    rocker_device.channels[1] = EnOceanChannel(
+        channel_id=1, last_button="buttonB0", last_button_action="pressed"
+    )
+
+    event_entity._handle_state_update(rocker_device)
+
+    event_entity._trigger_event.assert_called_once_with(
+        "buttonB0_pressed", {"button": "buttonB0", "action": "pressed", "channel": 1}
+    )
+
+
+def test_a_button_function_names_its_channel_in_the_device_model(rocker_device):
+    """The model already stores a press on the channel the telegram names."""
+    rocker_device.update_from_telegram(
+        {"functions": [{"key": "buttonA0", "value": "pressed", "channel": 1}]}
+    )
+    assert rocker_device.channels[1].last_button == "buttonA0"
+    assert 0 not in rocker_device.channels
