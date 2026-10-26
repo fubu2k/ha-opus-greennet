@@ -20,6 +20,7 @@ from homeassistant.helpers.selector import (
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 from .api import (
+    GENERATION_WEBUI_2026,
     OpusApiError,
     OpusAuthError,
     OpusCertificateError,
@@ -33,7 +34,6 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_USERNAME,
     DOMAIN,
-    GENERATION_WEBUI_2026,
     WEBUI_2026_PORT,
 )
 from .discovery import (

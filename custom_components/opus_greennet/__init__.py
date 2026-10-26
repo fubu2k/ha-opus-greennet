@@ -31,7 +31,13 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.typing import ConfigType
 
-from .api import OpusApiError, OpusAuthError, OpusConnectionError, OpusGatewayClient
+from .api import (
+    GENERATION_LEGACY,
+    OpusApiError,
+    OpusAuthError,
+    OpusConnectionError,
+    OpusGatewayClient,
+)
 from .const import (
     CONF_CERTIFICATE_FINGERPRINT,
     CONF_EAG_ID,
@@ -39,7 +45,6 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_USERNAME,
     DOMAIN,
-    GENERATION_LEGACY,
     REPOSITIONING_DIRECT,
     REPOSITIONING_FIRST_DOWN,
     REPOSITIONING_FIRST_UP,

@@ -27,6 +27,7 @@ from zeroconf import IPVersion, ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo
 
 from .api import (
+    GENERATION_LEGACY,
     OpusApiError,
     OpusAuthError,
     OpusConnectionError,
@@ -40,7 +41,6 @@ from .const import (
     CONF_GENERATION,
     DEFAULT_PORT,
     DEFAULT_USERNAME,
-    GENERATION_LEGACY,
     WEBUI_2026_PORT,
 )
 from .wire import as_object

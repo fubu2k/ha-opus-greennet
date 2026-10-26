@@ -21,8 +21,6 @@ DEFAULT_USERNAME: Final = "admin"
 # a user login and a token, and a self-signed certificate that is remembered.
 CONF_GENERATION: Final = "generation"
 CONF_CERTIFICATE_FINGERPRINT: Final = "certificate_fingerprint"
-GENERATION_LEGACY: Final = "legacy"
-GENERATION_WEBUI_2026: Final = "webui2026"
 WEBUI_2026_PORT: Final = 443
 
 # EEP (EnOcean Equipment Profile) to entity type mappings
