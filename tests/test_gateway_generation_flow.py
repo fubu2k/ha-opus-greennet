@@ -13,6 +13,7 @@ The network functions are replaced; the client itself is covered in
 
 from __future__ import annotations
 
+from ipaddress import ip_address
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,6 +23,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 from custom_components.opus_greennet import async_setup_entry
 from custom_components.opus_greennet.api import (
@@ -552,3 +554,68 @@ async def test_reading_the_identity_uses_the_generation_of_the_data(hass):
         {"generation": "legacy", "fingerprint": None},
         {"generation": "webui2026", "fingerprint": FINGERPRINT},
     ]
+
+
+# ── address change announced by zeroconf ───────────────────────────────────
+
+
+def _announcement(host: str) -> ZeroconfServiceInfo:
+    address = ip_address(host)
+    return ZeroconfServiceInfo(
+        ip_address=address,
+        ip_addresses=[address],
+        port=80,
+        hostname="opusshgw.local.",
+        type="_enocean._tcp.local.",
+        name="opusshgw._enocean._tcp.local.",
+        properties={},
+    )
+
+
+async def _announce(hass: HomeAssistant, host: str) -> dict[str, Any]:
+    return await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_ZEROCONF},
+        data=_announcement(host),
+    )
+
+
+async def test_a_new_generation_entry_keeps_its_login_and_certificate_on_a_new_address(
+    hass,
+):
+    entry = await _add(hass, WEBUI_DATA)
+
+    with _read(EAG_ID) as read:
+        result = await _announce(hass, "192.168.1.9")
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    # The gateway is asked at the new address with what the entry stores: over
+    # HTTPS, with its certificate and its own login.
+    (call,) = read.await_args_list
+    assert call.args[1] == {**WEBUI_DATA, "host": "192.168.1.9"}
+    assert entry.data == {**WEBUI_DATA, "host": "192.168.1.9"}
+
+
+async def test_an_earlier_generation_entry_stays_one_on_a_new_address(hass):
+    entry = await _add(hass, LEGACY_DATA)
+
+    with _read(EAG_ID) as read:
+        result = await _announce(hass, "192.168.1.9")
+
+    assert result["reason"] == "already_configured"
+    (call,) = read.await_args_list
+    assert "generation" not in call.args[1]
+    assert entry.data == {**LEGACY_DATA, "host": "192.168.1.9"}
+
+
+async def test_a_gateway_with_another_eurid_does_not_move_a_new_generation_entry(
+    hass,
+):
+    entry = await _add(hass, WEBUI_DATA)
+
+    with _read("CCDD0022"):
+        result = await _announce(hass, "192.168.1.9")
+
+    assert result["type"] is FlowResultType.FORM
+    assert entry.data == WEBUI_DATA
