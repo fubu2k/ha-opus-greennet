@@ -13,9 +13,9 @@
         },
         "data_description": {
           "host": "IP address or host name of the OPUS gateway in your network.",
-          "port": "Port of the gateway's REST API (8080 by default).",
-          "username": "API user of the gateway (admin by default).",
-          "password": "API password. By default this is the gateway's EURID in capital letters, as printed on the gateway."
+          "port": "Port of the gateway's REST API: 8080 for gateways before WebUI 2026. A gateway with WebUI 2026 is recognised automatically and uses port 443 (HTTPS).",
+          "username": "API user of the gateway (admin by default). For a gateway with WebUI 2026 enter a user of its web interface (role admin or installer).",
+          "password": "API password. For gateways before WebUI 2026 this is by default the gateway's EURID in capital letters, as printed on the gateway. For a gateway with WebUI 2026 enter the password of that user; Home Assistant never creates users on the gateway."
         }
       },
       "reauth_confirm": {
@@ -29,9 +29,9 @@
         },
         "data_description": {
           "host": "IP address or host name of the OPUS gateway in your network.",
-          "port": "Port of the gateway's REST API (8080 by default).",
-          "username": "API user of the gateway (admin by default).",
-          "password": "API password. By default this is the gateway's EURID in capital letters, as printed on the gateway."
+          "port": "Port of the gateway's REST API: 8080 for gateways before WebUI 2026. A gateway with WebUI 2026 is recognised automatically and uses port 443 (HTTPS).",
+          "username": "API user of the gateway (admin by default). For a gateway with WebUI 2026 enter a user of its web interface (role admin or installer).",
+          "password": "API password. For gateways before WebUI 2026 this is by default the gateway's EURID in capital letters, as printed on the gateway. For a gateway with WebUI 2026 enter the password of that user; Home Assistant never creates users on the gateway."
         }
       },
       "reconfigure": {
@@ -45,10 +45,14 @@
         },
         "data_description": {
           "host": "IP address or host name of the OPUS gateway in your network.",
-          "port": "Port of the gateway's REST API (8080 by default).",
-          "username": "API user of the gateway (admin by default).",
-          "password": "API password. By default this is the gateway's EURID in capital letters, as printed on the gateway."
+          "port": "Port of the gateway's REST API: 8080 for gateways before WebUI 2026. A gateway with WebUI 2026 is recognised automatically and uses port 443 (HTTPS).",
+          "username": "API user of the gateway (admin by default). For a gateway with WebUI 2026 enter a user of its web interface (role admin or installer).",
+          "password": "API password. For gateways before WebUI 2026 this is by default the gateway's EURID in capital letters, as printed on the gateway. For a gateway with WebUI 2026 enter the password of that user; Home Assistant never creates users on the gateway."
         }
+      },
+      "certificate": {
+        "title": "Confirm the gateway certificate",
+        "description": "Gateway {eag_id} presents a different certificate than the one remembered at the first connection. This happens after a factory reset or when the gateway was replaced, but also when another device answers at this address. Nothing was sent to it. Fingerprint (SHA-256): {fingerprint}. Continue only if you expect the change."
       }
     },
     "error": {
@@ -437,6 +441,9 @@
     },
     "parameter_read_back_failed": {
       "message": "The gateway accepted the new value for {device_id}, but reading it back failed ({reason}). The value may be stored; Home Assistant kept the previous one. Read the device configuration before trying again."
+    },
+    "webui_2026_login_required": {
+      "message": "The OPUS gateway now requires the login of the new gateway generation (WebUI 2026). Enter the user and password of its web interface to continue; all devices and entities are kept."
     }
   },
   "services": {

@@ -26,8 +26,23 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from zeroconf import IPVersion, ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo
 
-from .api import OpusApiError, OpusAuthError, OpusGatewayClient, OpusResponseError
-from .const import DEFAULT_PORT, DEFAULT_USERNAME
+from .api import (
+    GENERATION_LEGACY,
+    OpusApiError,
+    OpusAuthError,
+    OpusConnectionError,
+    OpusGatewayClient,
+    OpusResponseError,
+    async_probe_webui_2026,
+    async_read_certificate_fingerprint,
+)
+from .const import (
+    CONF_CERTIFICATE_FINGERPRINT,
+    CONF_GENERATION,
+    DEFAULT_PORT,
+    DEFAULT_USERNAME,
+    WEBUI_2026_PORT,
+)
 from .wire import as_object
 
 _LOGGER = logging.getLogger(__name__)
@@ -165,6 +180,8 @@ async def async_read_gateway_id(hass: HomeAssistant, data: Mapping[str, Any]) ->
         data[CONF_PORT],
         data[CONF_USERNAME],
         data[CONF_PASSWORD],
+        generation=data.get(CONF_GENERATION, GENERATION_LEGACY),
+        fingerprint=data.get(CONF_CERTIFICATE_FINGERPRINT),
     )
     document = await client.async_get("/system/info")
     info = as_object(document.get("systemInfo")) or {}
@@ -172,6 +189,35 @@ async def async_read_gateway_id(hass: HomeAssistant, data: Mapping[str, Any]) ->
     if not isinstance(eurid, str) or not EAG_ID_PATTERN.fullmatch(eurid):
         raise OpusResponseError("The gateway did not report its EURID")
     return eurid.upper()
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayEndpoint:
+    """Where a WebUI 2026 gateway answers and the certificate it presents."""
+
+    port: int
+    fingerprint: str
+
+
+async def async_detect_webui_2026(
+    hass: HomeAssistant, host: str, port: int
+) -> GatewayEndpoint | None:
+    """Return the endpoint of a WebUI 2026 gateway at ``host``, if there is one.
+
+    Called after a gateway of the earlier generation did not answer on the
+    entered port. The default port of that generation (8080) stands for "not
+    chosen", so the HTTPS port 443 is tried; any other port is tried as
+    entered. No credentials are sent.
+    """
+    tls_port = WEBUI_2026_PORT if port == DEFAULT_PORT else port
+    session = async_get_clientsession(hass)
+    if not await async_probe_webui_2026(session, host, tls_port):
+        return None
+    try:
+        fingerprint = await async_read_certificate_fingerprint(host, tls_port)
+    except OpusConnectionError, OpusResponseError:
+        return None
+    return GatewayEndpoint(tls_port, fingerprint)
 
 
 def default_connection(host: str, eag_id: str) -> dict[str, Any]:

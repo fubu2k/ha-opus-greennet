@@ -125,8 +125,10 @@ cancels the queued commands instead of replaying them after recovery.
   handle wakes up (for example at its next button press).
 - Discovery needs mDNS between Home Assistant and the gateway. Without it, a
   changed gateway address has to be entered with **Reconfigure**.
-- The gateway API is plain HTTP with basic authentication, as provided by the
-  manufacturer. Keep the gateway in a trusted network.
+- The gateway API before WebUI 2026 is plain HTTP with basic authentication, as
+  provided by the manufacturer. Keep the gateway in a trusted network. Gateways
+  with WebUI 2026 use HTTPS with a pinned certificate and a token (see the
+  README).
 - Battery level and signal strength are refreshed every 30 minutes.
 - Devices cannot be added to or removed from the gateway from Home Assistant
   yet, and device settings are only available as actions (see the
