@@ -2335,7 +2335,10 @@ class OpusGreenNetCoordinator:
         kept: list[WireFunction] = []
         for function in functions:
             key = function.get("key")
-            guard = guards.get(key) if isinstance(key, str) else None
+            if not isinstance(key, str):
+                kept.append(function)
+                continue
+            guard = guards.get(key)
             if guard is None:
                 kept.append(function)
                 continue
