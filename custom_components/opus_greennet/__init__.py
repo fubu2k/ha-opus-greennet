@@ -279,8 +279,23 @@ async def async_setup_entry(
             generation=generation,
             fingerprint=entry.data.get(CONF_CERTIFICATE_FINGERPRINT),
         )
+
+    async def _newer_generation_answers() -> bool:
+        return (
+            await async_detect_webui_2026(
+                hass, entry.data[CONF_HOST], entry.data.get(CONF_PORT, DEFAULT_PORT)
+            )
+            is not None
+        )
+
     coordinator = OpusGreenNetCoordinator(
-        hass, client, eag_id, on_auth_failed=lambda: entry.async_start_reauth(hass)
+        hass,
+        client,
+        eag_id,
+        on_auth_failed=lambda: entry.async_start_reauth(hass),
+        generation_check=(
+            _newer_generation_answers if generation == GENERATION_LEGACY else None
+        ),
     )
 
     try:
