@@ -197,7 +197,11 @@ def test_config_flow_errors_and_aborts_are_translated() -> None:
     assert steps == set(STRINGS["config"]["step"])
     for step in steps:
         texts = STRINGS["config"]["step"][step]
-        assert set(texts["data"]) == set(texts["data_description"]), step
+        # A step without input fields (the certificate confirmation) has no
+        # ``data`` block at all.
+        assert set(texts.get("data", {})) == set(texts.get("data_description", {})), (
+            step
+        )
 
 
 def test_services_yaml_matches_service_strings() -> None:

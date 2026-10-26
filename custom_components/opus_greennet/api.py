@@ -36,10 +36,15 @@ from urllib.parse import quote
 
 import aiohttp
 
-from .const import GENERATION_LEGACY, GENERATION_WEBUI_2026
 from .wire import JsonObject, as_object, parse_json
 
 _LOGGER = logging.getLogger(__name__)
+
+# The two access profiles of the client. The integration stores them in its
+# entry data (``const.py`` re-exports them); the client module itself must not
+# import integration code.
+GENERATION_LEGACY: Final = "legacy"
+GENERATION_WEBUI_2026: Final = "webui2026"
 
 # Bounds for one request/response exchange (seconds).
 REQUEST_TIMEOUT: Final = 10.0

@@ -26,6 +26,8 @@ import pytest
 
 from custom_components.opus_greennet import api
 from custom_components.opus_greennet.api import (
+    GENERATION_LEGACY,
+    GENERATION_WEBUI_2026,
     OpusAuthError,
     OpusCertificateError,
     OpusConnectionError,
@@ -34,10 +36,6 @@ from custom_components.opus_greennet.api import (
     OpusTokenExpiredError,
     async_probe_webui_2026,
     async_read_certificate_fingerprint,
-)
-from custom_components.opus_greennet.const import (
-    GENERATION_LEGACY,
-    GENERATION_WEBUI_2026,
 )
 
 PIN = hashlib.sha256(b"certificate of the gateway").hexdigest()
