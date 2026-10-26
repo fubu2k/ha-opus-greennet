@@ -1,6 +1,6 @@
 # Fixed reference environment of the REST-only series.
 # Change only in a reviewed phase; update REFERENCE_HA_VERSION and
 # REFERENCE_HA_CORE_SHA in .github/workflows/tests.yml together.
-# home-assistant/core tag 2026.10.3 = commit 1f214b8461dd1fbbd66e10765c6905f49d3c1d86
+# home-assistant/core tag 2026.10.4 = commit 357cae5c598dfcd7a0ea7dc5b1facccd4ec6037b
 -r requirements_test.txt
-homeassistant==2026.10.3
+homeassistant==2026.10.4
