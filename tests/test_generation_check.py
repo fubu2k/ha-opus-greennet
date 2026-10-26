@@ -9,6 +9,7 @@ user login once. A gateway that is only restarting is left alone.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -117,8 +118,13 @@ async def test_no_check_is_made_for_a_gateway_of_the_new_generation(clock) -> No
 # ── what the setup hands to the coordinator ────────────────────────────────
 
 
+@asynccontextmanager
 async def _coordinator_check(hass, data, detect):
-    """Run the setup of ``data`` and return what the coordinator was given."""
+    """Run the setup of ``data``; yield what the coordinator was given.
+
+    ``detect`` stays in place while the caller uses the check, which looks the
+    function up when it is called.
+    """
     coordinator = MagicMock()
     coordinator.async_setup = AsyncMock(side_effect=OpusConnectionError("down"))
     coordinator.async_unload = AsyncMock()
@@ -128,25 +134,26 @@ async def _coordinator_check(hass, data, detect):
         patch("custom_components.opus_greennet.OpusGatewayClient", MagicMock()),
         patch("custom_components.opus_greennet.OpusGreenNetCoordinator", constructor),
         patch("custom_components.opus_greennet.async_detect_webui_2026", detect),
-        pytest.raises((ConfigEntryNotReady, ConfigEntryAuthFailed)),
     ):
-        await async_setup_entry(hass, _setup_entry(dict(data)))
-    return constructor.call_args.kwargs["generation_check"]
+        with pytest.raises((ConfigEntryNotReady, ConfigEntryAuthFailed)):
+            await async_setup_entry(hass, _setup_entry(dict(data)))
+        yield constructor.call_args.kwargs["generation_check"]
 
 
 async def test_an_earlier_generation_entry_can_ask_whether_it_was_updated(hass):
     detect = AsyncMock(return_value=None)
 
-    check = await _coordinator_check(hass, LEGACY_DATA, detect)
+    async with _coordinator_check(hass, LEGACY_DATA, detect) as check:
+        assert await check() is False
+        detect.return_value = ENDPOINT
+        assert await check() is True
 
-    assert await check() is False
-    detect.return_value = ENDPOINT
-    assert await check() is True
     # The address and the port of the entry are asked, nothing else.
     assert detect.await_args.args[1:] == ("192.168.1.5", 8080)
 
 
 async def test_a_new_generation_entry_asks_nothing_when_it_is_unreachable(hass):
-    check = await _coordinator_check(hass, WEBUI_DATA, AsyncMock(return_value=None))
+    detect = AsyncMock(return_value=None)
 
-    assert check is None
+    async with _coordinator_check(hass, WEBUI_DATA, detect) as check:
+        assert check is None
