@@ -123,6 +123,8 @@ Rocker switches (F6-02, F6-03) get one event entity with an event per button
 and action: `buttonA0_pressed`, `buttonA0_released`, …,
 `multipleButtons_released`, with the attributes `button` and `action`. F6-03
 rockers also report `buttonC0` … `buttonDI`.
+A button the gateway reports on another channel than 0 fires the same event with
+an additional `channel` attribute; events of channel 0 have none.
 
 Many OPUS actuators also announce a rocker profile (F6-03-01) for their own
 buttons. They get an event entity named *Buttons* with the unique ID suffix
