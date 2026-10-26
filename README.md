@@ -64,6 +64,16 @@ Every device also has a diagnostic **Last seen** time, and the gateway's own
 device shows when it started (**Uptime**). Signal strength and Last seen are
 disabled by default because they change with every telegram; enable them where
 you need them.
+
+The gateway's device information shows its **serial number** (as reported by
+`/system/info`, not the EURID). Further diagnostic sensors, enabled by default,
+show the **EURID**, **firmware version**, **app version**, **API version**,
+**hostname**, **IPv4 address** and **IPv6 address**. Versions are read at
+startup and every 30 minutes; host name and addresses are looked up from the
+configured host at the same times, and stay *unknown* where they do not
+resolve. The EURID is the default gateway password, so it is also visible in
+the entity history.
+
 Details per device type: [docs/devices.md](docs/devices.md).
 
 ## Compatibility

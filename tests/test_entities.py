@@ -531,11 +531,18 @@ async def test_sensor_setup_deduplicates_discovery_entities() -> None:
     discovery_callback = connect.call_args.args[2]
     discovery_callback(device)
 
-    # The gateway's own sensor comes first, then the device entities once.
+    # The gateway's own sensors come first, then the device entities once.
     assert async_add_entities.call_count == 2
     gateway_entities = async_add_entities.call_args_list[0].args[0]
     assert [entity.unique_id for entity in gateway_entities] == [
-        f"{EAG_ID}_gateway_uptime"
+        f"{EAG_ID}_gateway_uptime",
+        f"{EAG_ID}_gateway_eurid",
+        f"{EAG_ID}_gateway_firmware_version",
+        f"{EAG_ID}_gateway_app_version",
+        f"{EAG_ID}_gateway_api_version",
+        f"{EAG_ID}_gateway_hostname",
+        f"{EAG_ID}_gateway_ipv4_address",
+        f"{EAG_ID}_gateway_ipv6_address",
     ]
     initial_entities = async_add_entities.call_args_list[1].args[0]
     assert [entity.unique_id for entity in initial_entities] == [

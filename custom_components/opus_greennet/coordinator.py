@@ -24,6 +24,7 @@ import asyncio
 import logging
 import math
 import random
+import re
 from collections import deque
 from collections.abc import Callable, Coroutine, Mapping, Sequence
 from contextlib import aclosing
@@ -81,6 +82,7 @@ from .const import (
     UNLOCK_NOT_ALLOWED,
     VALUE_UNKNOWN,
 )
+from .discovery import async_gateway_address
 from .enocean_device import DeviceProfile, EnOceanDevice
 from .wire import (
     JsonObject,
@@ -117,6 +119,7 @@ class CommandDelivery(StrEnum):
 SIGNAL_DEVICE_STATE_UPDATE = f"{DOMAIN}_device_state_update"
 SIGNAL_AVAILABILITY_UPDATE = f"{DOMAIN}_availability_update"
 SIGNAL_GATEWAY_UPTIME_UPDATE = f"{DOMAIN}_gateway_uptime_update"
+SIGNAL_GATEWAY_INFO_UPDATE = f"{DOMAIN}_gateway_info_update"
 
 GATEWAY_HEALTH_INTERVAL = timedelta(seconds=60)
 # The stream reports live changes; the periodic device list additionally
@@ -361,6 +364,13 @@ class OpusGreenNetCoordinator:
         self.devices: dict[str, EnOceanDevice] = {}
         self.gateway_info: JsonObject = {}
         self.gateway_uptime: str | None = None
+        # ``(hostname, ipv4, ipv6)`` of the configured gateway host, as far as
+        # it resolves (shown by the gateway's diagnostic sensors).
+        self.gateway_address: tuple[str | None, str | None, str | None] = (
+            None,
+            None,
+            None,
+        )
         self._on_auth_failed = on_auth_failed
         self._auth_failed = False
         self._unloaded = False
@@ -483,6 +493,8 @@ class OpusGreenNetCoordinator:
         # Entities are created after setup returns, so their type and channel
         # count can follow the gateway profiles read here.
         await self._async_load_profiles()
+        # Name resolution can take seconds on a slow network: not part of setup.
+        self._create_task(self._async_refresh_gateway_address(), "address lookup")
         _LOGGER.debug(
             "OPUS gateway %s sent its first device list after %.3f s",
             self.eag_id,
@@ -781,7 +793,20 @@ class OpusGreenNetCoordinator:
     async def _async_periodic_refresh(self) -> None:
         """Run the 30 min reads: gateway information, then the device list."""
         await self._async_refresh_system_info()
+        await self._async_refresh_gateway_address()
         await self._async_refresh_device_list()
+
+    async def _async_refresh_gateway_address(self) -> None:
+        """Resolve host name and addresses of the gateway for display.
+
+        A local name lookup, no gateway request. Whatever does not resolve is
+        None; the sensors are told only when the result changed.
+        """
+        address = await async_gateway_address(self.client.host)
+        if self._unloaded or address == self.gateway_address:
+            return
+        self.gateway_address = address
+        async_dispatcher_send(self.hass, f"{SIGNAL_GATEWAY_INFO_UPDATE}_{self.eag_id}")
 
     async def _async_refresh_system_info(self) -> None:
         """Read ``/system/info`` again for versions and receive statistics.
@@ -812,6 +837,7 @@ class OpusGreenNetCoordinator:
             return
         self.gateway_info = {**self.gateway_info, **info}
         self.gateway_info_read_at = dt_util.utcnow().isoformat()
+        async_dispatcher_send(self.hass, f"{SIGNAL_GATEWAY_INFO_UPDATE}_{self.eag_id}")
 
     async def _async_load_profiles(self) -> None:
         """Read one gateway profile per announced EEP combination.
@@ -1681,6 +1707,19 @@ class OpusGreenNetCoordinator:
         self._radio_journal.append(entry)
         return entry
 
+    def _mask_gateway_identifiers(self, text: str) -> str:
+        """Hide the gateway's EURID and serial number in a text.
+
+        Gateway texts reach the journal and the debug log verbatim; neither
+        identifier belongs in a log or report that is shared for support.
+        """
+        for identifier in (self.eag_id, self.gateway_info.get("serialNumber")):
+            if isinstance(identifier, str) and identifier:
+                text = re.sub(
+                    re.escape(identifier), "<gateway-id>", text, flags=re.IGNORECASE
+                )
+        return text
+
     def _journal_radio_request(
         self,
         device_id: str,
@@ -1722,11 +1761,13 @@ class OpusGreenNetCoordinator:
             outcome = "rejected"
             http_status = error.http_status
             gateway_status = error.gateway_status
-            message = error.reason[:JOURNAL_TEXT_LENGTH]
+            message = self._mask_gateway_identifiers(error.reason)[:JOURNAL_TEXT_LENGTH]
         else:
             outcome = "error"
         if message is None and error is not None:
-            message = str(error)[:JOURNAL_TEXT_LENGTH] or None
+            message = (
+                self._mask_gateway_identifiers(str(error))[:JOURNAL_TEXT_LENGTH] or None
+            )
         duration_ms = round((monotonic() - started) * 1000, 1)
         waited_ms = round(waited * 1000, 1)
         priority_name = _PRIORITY_NAMES.get(priority, str(priority))
