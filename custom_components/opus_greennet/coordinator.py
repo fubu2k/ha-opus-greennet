@@ -13,7 +13,11 @@ Lifecycle:
   then delivers every telegram the moment the gateway handles it.
 * A health probe reads the uptime every minute. It detects an unreachable
   gateway even while the stream is silent, and a gateway restart (falling
-  uptime) whose old stream connection could otherwise stay half open.
+  uptime) whose old stream connection could otherwise stay half open. A
+  gateway of the earlier generation that fails several probes in a row is
+  also asked, at most every ten minutes and without credentials, whether a
+  WebUI 2026 gateway answers at its address now (it was updated); the user is
+  then asked for a login.
 * Commands are HTTP PUTs. The gateway acknowledges them synchronously; one
   radio request is in flight at a time, user commands first.
 """
@@ -26,7 +30,7 @@ import math
 import random
 import re
 from collections import deque
-from collections.abc import Callable, Coroutine, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -123,6 +127,12 @@ SIGNAL_GATEWAY_UPTIME_UPDATE = f"{DOMAIN}_gateway_uptime_update"
 SIGNAL_GATEWAY_INFO_UPDATE = f"{DOMAIN}_gateway_info_update"
 
 GATEWAY_HEALTH_INTERVAL = timedelta(seconds=60)
+# A gateway of the earlier generation that fails this many health probes in a
+# row is asked whether a WebUI 2026 gateway answers at its address now (it was
+# updated). The question is repeated at most this often; it sends no
+# credentials and no radio request.
+GENERATION_CHECK_AFTER_FAILURES = 3
+GENERATION_CHECK_INTERVAL = 600.0
 # The stream reports live changes; the periodic device list additionally
 # refreshes slowly changing metadata (battery level, signal, movement times)
 # and picks up newly paired devices.
@@ -380,8 +390,14 @@ class OpusGreenNetCoordinator:
         eag_id: str,
         *,
         on_auth_failed: Callable[[], None] | None = None,
+        generation_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> None:
-        """Initialize the coordinator."""
+        """Initialize the coordinator.
+
+        ``generation_check`` is given for a gateway of the earlier generation
+        only: it tells whether a gateway of the newer generation answers at
+        the address now.
+        """
         self.hass = hass
         self.client = client
         self.eag_id = eag_id
@@ -396,6 +412,9 @@ class OpusGreenNetCoordinator:
             None,
         )
         self._on_auth_failed = on_auth_failed
+        self._generation_check = generation_check
+        self._probe_failures = 0
+        self._generation_checked_at: float | None = None
         self._auth_failed = False
         self._unloaded = False
         self._gateway_available = False
@@ -810,7 +829,9 @@ class OpusGreenNetCoordinator:
                 self._set_gateway_available(False)
                 # The open stream may be half open towards a rebooting gateway.
                 self._restart_stream()
+            await self._async_check_generation()
             return
+        self._probe_failures = 0
         previous = self.gateway_uptime
         self.gateway_uptime = uptime
         async_dispatcher_send(
@@ -823,6 +844,37 @@ class OpusGreenNetCoordinator:
             self._restart_stream()
         elif self._stream_connected and not self._gateway_available:
             self._set_gateway_available(True)
+
+    async def _async_check_generation(self) -> None:
+        """Ask whether the unreachable gateway was updated to WebUI 2026.
+
+        Only after several failed probes in a row and not more often than
+        ``GENERATION_CHECK_INTERVAL``, so a gateway that is merely restarting
+        is left alone. The answer needs a user login, which the
+        reauthentication asks for; nothing is changed before that.
+        """
+        self._probe_failures += 1
+        if (
+            self._generation_check is None
+            or self._auth_failed
+            or self._probe_failures < GENERATION_CHECK_AFTER_FAILURES
+        ):
+            return
+        now = monotonic()
+        if (
+            self._generation_checked_at is not None
+            and now - self._generation_checked_at < GENERATION_CHECK_INTERVAL
+        ):
+            return
+        self._generation_checked_at = now
+        if not await self._generation_check():
+            return
+        _LOGGER.warning(
+            "OPUS gateway %s no longer answers as before, but a gateway with "
+            "WebUI 2026 does; a user login is needed",
+            self.eag_id,
+        )
+        self._handle_auth_failure()
 
     @callback
     def _async_refresh_tick(self, _now: datetime) -> None:

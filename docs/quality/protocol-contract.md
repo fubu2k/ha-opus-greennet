@@ -290,6 +290,12 @@ had registered. **[HW][Test]**
   without credentials (`GET /auth/setup-status`, certificate handshake); only
   when no WebUI 2026 gateway answers there is the plain-HTTP read made
   **[Code][Test]**.
+- A running entry of the earlier generation whose gateway fails three health
+  probes in a row is asked, at most every ten minutes, whether a WebUI 2026
+  gateway answers at its address (`GET /auth/setup-status`, certificate
+  handshake: no credentials, no radio request). If so, the entry asks for a
+  login (reauthentication) and its stream stops; a gateway that only restarts
+  and answers again is left alone **[Code][Test]**.
 
 ## 10. Services (public, unchanged)
 

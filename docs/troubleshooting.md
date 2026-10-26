@@ -16,7 +16,7 @@ the configuration:
 | Link | Symptom | Check |
 |------|---------|-------|
 | Network to the gateway | All entities unavailable; actions fail with "The OPUS gateway is unavailable" | Gateway power and address; `http://<gateway>:8080/system/uptime` must answer (with the API credentials). With WebUI 2026 the address is `https://<gateway>/system/uptime` with a login token |
-| Gateway credentials | The entry asks for re-authentication | User and password of the gateway API. After a gateway update to WebUI 2026: enter the user and password of its web interface. A *Confirm the gateway certificate* step means the gateway presents another certificate than the remembered one |
+| Gateway credentials | The entry asks for re-authentication | User and password of the gateway API. After a gateway update to WebUI 2026: enter the user and password of its web interface (Home Assistant notices the update by itself after the gateway stayed unreachable for a few minutes, or at the next start of the integration). A *Confirm the gateway certificate* step means the gateway presents another certificate than the remembered one |
 | EnOcean radio | Entities available, but the device does not follow | Range, power and pairing of the actuator; the debug log of the follow-up status queries |
 
 A gateway outage makes the entities unavailable and cancels queued commands;
