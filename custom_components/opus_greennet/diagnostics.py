@@ -192,6 +192,10 @@ def _gateway_versions(info: object) -> dict[str, str | None]:
 
     def text(key: str) -> str | None:
         value = source.get(key)
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int | float):
+            return str(value)
         return value if isinstance(value, str) and value else None
 
     return {
