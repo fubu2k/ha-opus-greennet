@@ -228,6 +228,12 @@ DEVICE_SETTING_KEYS: Final = frozenset(DEVICE_SETTINGS) | frozenset(DEVICE_OPTIO
 # 0.01 or more.
 DEFAULT_PARAMETER_DECIMALS: Final = 2
 PARAMETER_DECIMALS: Final = {KEY_SWITCH_OFF_WARNING_SIGNAL: 3}
+# How long a confirmed setting is protected against the gateway's cached copy of
+# the configuration. The device list carries that cache; the gateway reads the
+# configuration itself only now and then (nightly in the E0 catalog), so a list
+# can repeat the value from before a confirmed write. A list that shows the
+# written value or a third value ends the protection earlier.
+SETTING_CACHE_GUARD_SECONDS: Final = 26 * 3600.0
 COVER_MOVEMENT_GRACE_SECONDS: Final = 5.0
 COVER_RECONCILIATION_DELAYS: Final = (10.0, 20.0)
 KEY_CHANNEL: Final = "channel"
