@@ -23,11 +23,22 @@ from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from .api import (
     OpusApiError,
     OpusAuthError,
+    OpusCertificateError,
     OpusConnectionError,
     OpusResponseError,
 )
-from .const import CONF_EAG_ID, DEFAULT_PORT, DEFAULT_USERNAME, DOMAIN
+from .const import (
+    CONF_CERTIFICATE_FINGERPRINT,
+    CONF_EAG_ID,
+    CONF_GENERATION,
+    DEFAULT_PORT,
+    DEFAULT_USERNAME,
+    DOMAIN,
+    GENERATION_WEBUI_2026,
+    WEBUI_2026_PORT,
+)
 from .discovery import (
+    async_detect_webui_2026,
     async_local_networks,
     async_read_gateway_id,
     async_resolve_host,
@@ -110,11 +121,30 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     _discovered_host: str | None = None
+    # What a validated WebUI 2026 gateway adds to the connection data (port,
+    # generation, certificate); empty for a gateway of the earlier generation.
+    _extra: dict[str, Any]
+    # A changed certificate waiting for the user's confirmation, and the one
+    # the user already confirmed.
+    _certificate_review: str | None = None
+    _trusted_fingerprint: str | None = None
+    _connection_step: str = ""
+    _pending_input: dict[str, Any] | None = None
 
     async def _async_validate(
-        self, user_input: Mapping[str, Any], errors: dict[str, str]
+        self,
+        user_input: Mapping[str, Any],
+        errors: dict[str, str],
+        known: Mapping[str, Any] | None = None,
     ) -> str | None:
-        """Return the gateway's EAG identifier, or None with ``errors`` set."""
+        """Return the gateway's EAG identifier, or None with ``errors`` set.
+
+        ``known`` is the connection data of a configured gateway (reauthentication
+        and reconfiguration): it keeps a WebUI 2026 gateway from being asked over
+        plain HTTP and its remembered certificate from being replaced silently.
+        """
+        self._extra = {}
+        self._certificate_review = None
         host = user_input[CONF_HOST].strip()
         if not _is_host(host):
             errors[CONF_HOST] = "invalid_host"
@@ -130,8 +160,70 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         if not all(is_local_address(address, networks) for address in addresses):
             errors[CONF_HOST] = "host_not_local"
             return None
+        port = user_input[CONF_PORT]
+        # A gateway of the earlier generation is tried first, at the entered
+        # port. The HTTPS port, and the port of a configured WebUI 2026 gateway,
+        # are never asked over plain HTTP: the credentials would travel
+        # unencrypted.
+        webui_port = port == WEBUI_2026_PORT or (
+            known is not None
+            and known.get(CONF_GENERATION) == GENERATION_WEBUI_2026
+            and known.get(CONF_PORT) == port
+        )
+        if not webui_port:
+            try:
+                return await async_read_gateway_id(self.hass, user_input)
+            except OpusAuthError:
+                errors["base"] = "invalid_auth"
+                return None
+            except OpusConnectionError:
+                pass  # Nothing answered there: maybe a WebUI 2026 gateway.
+            except OpusResponseError:
+                errors["base"] = "unsupported_gateway"
+                return None
+            except Exception:
+                _LOGGER.exception("Unexpected exception")
+                errors["base"] = "unknown"
+                return None
+        return await self._async_validate_webui_2026(
+            user_input,
+            errors,
+            None if known is None else known.get(CONF_CERTIFICATE_FINGERPRINT),
+        )
+
+    async def _async_validate_webui_2026(
+        self,
+        user_input: Mapping[str, Any],
+        errors: dict[str, str],
+        known_fingerprint: str | None,
+    ) -> str | None:
+        """Read the EAG identifier of a WebUI 2026 gateway (HTTPS, user login).
+
+        The certificate of the first contact is remembered. A different one
+        than the remembered certificate is not used before the user confirmed
+        it: no credentials are sent to it.
+        """
+        endpoint = await async_detect_webui_2026(
+            self.hass, user_input[CONF_HOST].strip(), user_input[CONF_PORT]
+        )
+        if endpoint is None:
+            errors["base"] = "cannot_connect"
+            return None
+        if known_fingerprint is not None and endpoint.fingerprint not in (
+            known_fingerprint,
+            self._trusted_fingerprint,
+        ):
+            self._certificate_review = endpoint.fingerprint
+            return None
+        extra = {
+            CONF_PORT: endpoint.port,
+            CONF_GENERATION: GENERATION_WEBUI_2026,
+            CONF_CERTIFICATE_FINGERPRINT: endpoint.fingerprint,
+        }
         try:
-            return await async_read_gateway_id(self.hass, user_input)
+            eag_id = await async_read_gateway_id(self.hass, {**user_input, **extra})
+        except OpusCertificateError:
+            errors["base"] = "cannot_connect"
         except OpusAuthError:
             errors["base"] = "invalid_auth"
         except OpusConnectionError:
@@ -141,6 +233,9 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         except Exception:
             _LOGGER.exception("Unexpected exception")
             errors["base"] = "unknown"
+        else:
+            self._extra = extra
+            return eag_id
         return None
 
     async def async_step_user(
@@ -151,7 +246,7 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             eag_id = await self._async_validate(user_input, errors)
             if eag_id is not None:
-                data = _connection_data(user_input)
+                data = {**_connection_data(user_input), **self._extra}
                 await self.async_set_unique_id(eag_id)
                 # Adding a known gateway again updates its address (this also
                 # completes the move of an entry from the former MQTT setup).
@@ -220,7 +315,13 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
             **default_connection(host, eag_id),
             **{
                 key: entry.data[key]
-                for key in (CONF_PORT, CONF_USERNAME, CONF_PASSWORD)
+                for key in (
+                    CONF_PORT,
+                    CONF_USERNAME,
+                    CONF_PASSWORD,
+                    CONF_GENERATION,
+                    CONF_CERTIFICATE_FINGERPRINT,
+                )
                 if key in entry.data
             },
         }
@@ -268,7 +369,11 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         eag_id = entry_data[CONF_EAG_ID]
         errors: dict[str, str] = {}
         if user_input is not None:
-            found = await self._async_validate(user_input, errors)
+            found = await self._async_validate(user_input, errors, entry_data)
+            if self._certificate_review is not None:
+                self._connection_step = step_id
+                self._pending_input = user_input
+                return await self.async_step_certificate()
             if found is not None and found != eag_id:
                 errors["base"] = "wrong_gateway"
             elif found is not None:
@@ -277,8 +382,16 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
                     if step_id == "reauth_confirm"
                     else self._get_reconfigure_entry()
                 )
+                # The entry keeps its other data; the generation and the
+                # certificate are those of the gateway just validated, so a
+                # gateway of the earlier generation drops what a newer one had.
+                data = {
+                    key: value
+                    for key, value in entry.data.items()
+                    if key not in (CONF_GENERATION, CONF_CERTIFICATE_FINGERPRINT)
+                }
                 return self.async_update_reload_and_abort(
-                    entry, data_updates=_connection_data(user_input)
+                    entry, data={**data, **_connection_data(user_input), **self._extra}
                 )
         # The vendor default password is the gateway's EURID.
         defaults = {CONF_PASSWORD: eag_id, **entry_data, **(user_input or {})}
@@ -287,4 +400,34 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=_connection_schema(defaults),
             errors=errors,
             description_placeholders={"eag_id": eag_id},
+        )
+
+    async def async_step_certificate(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask whether to trust a certificate that differs from the remembered one.
+
+        The gateway presents another certificate than the one remembered at the
+        first contact: after a factory reset or a replaced device, but also when
+        something else answers at the address. Nothing was sent to it.
+        """
+        fingerprint = self._certificate_review
+        # Only reachable from ``_async_step_connection``, which sets both.
+        assert fingerprint is not None
+        assert self._pending_input is not None
+        if user_input is not None:
+            self._trusted_fingerprint = fingerprint
+            entry = (
+                self._get_reauth_entry()
+                if self._connection_step == "reauth_confirm"
+                else self._get_reconfigure_entry()
+            )
+            return await self._async_step_connection(
+                self._connection_step, entry.data, self._pending_input
+            )
+        pairs = [fingerprint[i : i + 2].upper() for i in range(0, len(fingerprint), 2)]
+        return self.async_show_form(
+            step_id="certificate",
+            data_schema=vol.Schema({}),
+            description_placeholders={"fingerprint": ":".join(pairs)},
         )

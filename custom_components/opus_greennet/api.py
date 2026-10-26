@@ -1,7 +1,10 @@
 """Client for the OPUS gateway's EnOcean over IP REST API.
 
-The gateway serves every endpoint below on one HTTP port (8080 by default)
-with basic authentication. Responses are JSON objects carrying their own
+Gateways before WebUI 2026 serve every endpoint below on one HTTP port (8080 by
+default) with basic authentication. Gateways with WebUI 2026 serve the same
+paths over HTTPS (port 443) with a user login and a token, and a self-signed
+certificate that is pinned by its fingerprint (see ``OpusGatewayClient``).
+Responses are JSON objects carrying their own
 ``header.httpStatus``. Both statuses are checked: the HTTP status line must
 report success (2xx) and the document status must be 200, 201 or 202 (phase
 R3, finding B-1). ``GET /devices/stream`` keeps the response open and writes one
@@ -20,9 +23,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import codecs
+import hashlib
 import heapq
 import itertools
 import logging
+import ssl
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import aclosing
 from math import isfinite
@@ -31,6 +36,7 @@ from urllib.parse import quote
 
 import aiohttp
 
+from .const import GENERATION_LEGACY, GENERATION_WEBUI_2026
 from .wire import JsonObject, as_object, parse_json
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,6 +59,14 @@ MAX_RESPONSE_SIZE: Final = MAX_DOCUMENT_SIZE
 _READ_CHUNK_SIZE: Final = 64 * 1024
 
 _STREAM_PATH: Final = "/devices/stream"
+# WebUI 2026 gateways. ASSUMPTION (not verified on a gateway of that
+# generation): the login is ``POST /auth/login`` with the user name and the
+# password as JSON, the answer carries the token as ``token``, and the token
+# travels as a bearer token. Only ``/auth/setup-status`` is documented by the
+# vendor. Everything that depends on these guesses is in this block.
+_SETUP_STATUS_PATH: Final = "/auth/setup-status"
+_LOGIN_PATH: Final = "/auth/login"
+_LOGIN_TOKEN_KEY: Final = "token"
 # Line-delimited stream: one JSON document per line, terminated by CRLF
 # (hardware-verified on OPUS-IQ-DOT 1.21.30). ``direction``, ``output`` and
 # ``levelOfDetail`` are deliberately not requested (docs/quality/phases).
@@ -85,6 +99,22 @@ class OpusTimeoutError(OpusConnectionError):
 
 class OpusAuthError(OpusApiError):
     """The gateway rejected the credentials."""
+
+
+class OpusCertificateError(OpusAuthError):
+    """The gateway's certificate is not the remembered one (or none is known).
+
+    It is an authentication failure on purpose: the connection is only trusted
+    again after the user confirmed the certificate.
+    """
+
+
+class OpusTokenExpiredError(OpusConnectionError):
+    """The gateway rejected the access token (expired or revoked).
+
+    The token is dropped and requested again with the next request; the request
+    that met the rejection is not sent again.
+    """
 
 
 class OpusResponseError(OpusApiError):
@@ -345,7 +375,15 @@ class PriorityLock:
 
 
 class OpusGatewayClient:
-    """HTTP access to one gateway."""
+    """HTTP access to one gateway.
+
+    ``generation`` selects the access: ``GENERATION_LEGACY`` (plain HTTP, basic
+    authentication) or ``GENERATION_WEBUI_2026`` (HTTPS pinned to
+    ``fingerprint``, SHA-256 of the certificate as hexadecimal text, and a
+    token). The token is requested with the first request, kept in memory only
+    and requested again after the gateway rejected it. A rejected token is
+    reported (``OpusTokenExpiredError``) and the request is never sent again.
+    """
 
     def __init__(
         self,
@@ -354,17 +392,96 @@ class OpusGatewayClient:
         port: int,
         username: str,
         password: str,
+        *,
+        generation: str = GENERATION_LEGACY,
+        fingerprint: str | None = None,
     ) -> None:
         self._session = session
         self._line_framing_rejected = False
         self._stream_framing: str | None = None
         self.host = host
         self.port = port
+        self.generation = generation
         # IPv6 literals need brackets inside a URL.
         url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
-        self._base_url = f"http://{url_host}:{port}"
-        credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
-        self._headers = {"Authorization": f"Basic {credentials}"}
+        self._token: str | None = None
+        self._login_lock = asyncio.Lock()
+        self._pin: aiohttp.Fingerprint | None = None
+        if generation == GENERATION_WEBUI_2026:
+            self._base_url = f"https://{url_host}:{port}"
+            self._credentials: dict[str, str] | None = {
+                "username": username,
+                "password": password,
+            }
+            self._headers: dict[str, str] = {}
+            self._pin = _pinned_fingerprint(fingerprint)
+        else:
+            self._base_url = f"http://{url_host}:{port}"
+            self._credentials = None
+            basic = base64.b64encode(f"{username}:{password}".encode()).decode()
+            self._headers = {"Authorization": f"Basic {basic}"}
+
+    @property
+    def _tls(self) -> aiohttp.Fingerprint | bool:
+        """Return the ``ssl`` option of a request: the pin, or the default."""
+        if self.generation != GENERATION_WEBUI_2026:
+            return True
+        if self._pin is None:
+            raise OpusCertificateError("The gateway certificate is not known")
+        return self._pin
+
+    async def _async_auth_headers(self) -> dict[str, str]:
+        """Return the headers that authenticate a request, logging in if needed."""
+        if self._credentials is None:
+            return self._headers
+        if self._token is None:
+            async with self._login_lock:
+                if self._token is None:
+                    self._token = await self._async_login(self._credentials)
+        return {"Authorization": f"Bearer {self._token}"}
+
+    async def _async_login(self, credentials: Mapping[str, str]) -> str:
+        """Request a token. The credentials never appear in an error text."""
+        tls = self._tls
+        try:
+            async with self._session.post(
+                f"{self._base_url}{_LOGIN_PATH}",
+                json=credentials,
+                allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(
+                    total=REQUEST_TIMEOUT, connect=CONNECT_TIMEOUT
+                ),
+                ssl=tls,
+            ) as response:
+                if response.status in (401, 403):
+                    raise OpusAuthError(f"login rejected (status {response.status})")
+                text = await _read_bounded_text(response)
+                status = response.status
+        except TimeoutError as err:
+            raise OpusTimeoutError("login timed out") from err
+        except aiohttp.ServerFingerprintMismatch as err:
+            raise OpusCertificateError("The gateway certificate changed") from err
+        except aiohttp.ClientError as err:
+            raise OpusConnectionError(f"login failed: {err}") from err
+        if not 200 <= status < 300:
+            raise _http_error(text, status)
+        try:
+            document = as_object(parse_json(text)) if text.strip() else None
+        except ValueError as err:
+            raise OpusResponseError(
+                "The gateway login returned no token", status
+            ) from err
+        token = None if document is None else document.get(_LOGIN_TOKEN_KEY)
+        if not isinstance(token, str) or not token.strip():
+            raise OpusResponseError("The gateway login returned no token", status)
+        return token.strip()
+
+    def _check_auth(self, response: aiohttp.ClientResponse) -> None:
+        """Map 401/403. A token the gateway rejects is dropped, not retried."""
+        if self._credentials is not None and response.status == 401:
+            self._token = None
+            raise OpusTokenExpiredError("The access token was rejected (status 401)")
+        _raise_for_auth(response)
 
     @staticmethod
     def device_path(device_id: str, *parts: str) -> str:
@@ -394,21 +511,26 @@ class OpusGatewayClient:
         body: Mapping[str, object] | None,
         timeout: float,
     ) -> JsonObject:
+        headers = await self._async_auth_headers()
+        tls = self._tls
         try:
             async with self._session.request(
                 method,
                 f"{self._base_url}{path}",
-                headers=self._headers,
+                headers=headers,
                 json=body,
                 # The gateway never redirects. Following one could send the
                 # Authorization header to another host.
                 allow_redirects=False,
                 timeout=aiohttp.ClientTimeout(total=timeout, connect=CONNECT_TIMEOUT),
+                ssl=tls,
             ) as response:
-                _raise_for_auth(response)
+                self._check_auth(response)
                 text = await _read_bounded_text(response)
         except TimeoutError as err:
             raise OpusTimeoutError(f"{method} {path} timed out") from err
+        except aiohttp.ServerFingerprintMismatch as err:
+            raise OpusCertificateError("The gateway certificate changed") from err
         except aiohttp.ClientError as err:
             raise OpusConnectionError(f"{method} {path} failed: {err}") from err
         # Transport success (2xx) and gateway success (document status 200 or
@@ -485,10 +607,12 @@ class OpusGatewayClient:
             "OPUS event stream requested with %s framing",
             "line" if line_framing else "plain",
         )
+        headers = await self._async_auth_headers()
+        tls = self._tls
         try:
             async with self._session.get(
                 url,
-                headers=self._headers,
+                headers=headers,
                 allow_redirects=False,
                 timeout=aiohttp.ClientTimeout(
                     total=None,
@@ -496,8 +620,9 @@ class OpusGatewayClient:
                     sock_connect=CONNECT_TIMEOUT,
                     sock_read=STREAM_IDLE_TIMEOUT,
                 ),
+                ssl=tls,
             ) as response:
-                _raise_for_auth(response)
+                self._check_auth(response)
                 if (
                     line_framing
                     and response.status != 200
@@ -524,6 +649,8 @@ class OpusGatewayClient:
                 splitter.finish()
         except TimeoutError as err:
             raise OpusTimeoutError("The event stream went silent") from err
+        except aiohttp.ServerFingerprintMismatch as err:
+            raise OpusCertificateError("The gateway certificate changed") from err
         except aiohttp.ClientError as err:
             raise OpusConnectionError(f"The event stream failed: {err}") from err
         except ValueError as err:
@@ -546,3 +673,76 @@ async def _read_bounded_text(response: aiohttp.ClientResponse) -> str:
 def _raise_for_auth(response: aiohttp.ClientResponse) -> None:
     if response.status in (401, 403):
         raise OpusAuthError(f"status {response.status}")
+
+
+def _pinned_fingerprint(fingerprint: str | None) -> aiohttp.Fingerprint | None:
+    """Return the pin for a SHA-256 fingerprint in hexadecimal text, if valid."""
+    if not isinstance(fingerprint, str):
+        return None
+    try:
+        digest = bytes.fromhex(fingerprint.replace(":", "").strip())
+        return aiohttp.Fingerprint(digest)
+    except ValueError:
+        # Not hexadecimal or not a SHA-256 length: treated as no pin at all.
+        return None
+
+
+def _tls_probe_context() -> ssl.SSLContext:
+    """Return a context that reads a certificate without checking it."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+async def async_read_certificate_fingerprint(host: str, port: int) -> str:
+    """Return the SHA-256 fingerprint of the certificate a gateway presents.
+
+    Nothing is sent: the TLS handshake is made and closed again. The result is
+    only as trustworthy as the first contact with the gateway; later contacts
+    are pinned to it.
+    """
+    literal = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    try:
+        async with asyncio.timeout(CONNECT_TIMEOUT):
+            _, writer = await asyncio.open_connection(
+                literal, port, ssl=_tls_probe_context(), server_hostname=""
+            )
+    except (OSError, ssl.SSLError, TimeoutError) as err:
+        raise OpusConnectionError(f"TLS handshake with {host} failed") from err
+    try:
+        ssl_object = writer.get_extra_info("ssl_object")
+        certificate = ssl_object.getpeercert(binary_form=True) if ssl_object else None
+    finally:
+        writer.close()
+    if not certificate:
+        raise OpusResponseError("The gateway presented no certificate")
+    return hashlib.sha256(certificate).hexdigest()
+
+
+async def async_probe_webui_2026(
+    session: aiohttp.ClientSession, host: str, port: int
+) -> bool:
+    """Return whether a WebUI 2026 gateway answers at ``host``:``port``.
+
+    ``GET /auth/setup-status`` needs no login and carries no credentials. The
+    certificate is not checked here (it is not known yet); a successful answer
+    only tells the generation apart from other devices.
+    """
+    url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    try:
+        async with session.get(
+            f"https://{url_host}:{port}{_SETUP_STATUS_PATH}",
+            allow_redirects=False,
+            ssl=False,
+            timeout=aiohttp.ClientTimeout(
+                total=REQUEST_TIMEOUT, connect=CONNECT_TIMEOUT
+            ),
+        ) as response:
+            if response.status != 200:
+                return False
+            text = await _read_bounded_text(response)
+        return as_object(parse_json(text)) is not None
+    except TimeoutError, aiohttp.ClientError, OpusApiError, ValueError:
+        return False

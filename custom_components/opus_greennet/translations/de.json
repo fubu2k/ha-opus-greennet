@@ -13,9 +13,9 @@
         },
         "data_description": {
           "host": "IP-Adresse oder Hostname des OPUS-Gateways in deinem Netzwerk.",
-          "port": "Port der REST-API des Gateways (standardmäßig 8080).",
-          "username": "API-Benutzer des Gateways (standardmäßig admin).",
-          "password": "API-Passwort. Standardmäßig ist das die EURID des Gateways in Großbuchstaben, wie sie auf dem Gateway aufgedruckt ist."
+          "port": "Port der REST-API des Gateways: 8080 bei Gateways vor WebUI 2026. Ein Gateway mit WebUI 2026 wird automatisch erkannt und nutzt Port 443 (HTTPS).",
+          "username": "API-Benutzer des Gateways (standardmäßig admin). Bei einem Gateway mit WebUI 2026 gib einen Benutzer seiner Weboberfläche an (Rolle admin oder installateur).",
+          "password": "API-Passwort. Bei Gateways vor WebUI 2026 ist das standardmäßig die EURID des Gateways in Großbuchstaben, wie sie auf dem Gateway aufgedruckt ist. Bei einem Gateway mit WebUI 2026 gib das Passwort dieses Benutzers an; Home Assistant legt keine Benutzer am Gateway an."
         }
       },
       "reauth_confirm": {
@@ -29,9 +29,9 @@
         },
         "data_description": {
           "host": "IP-Adresse oder Hostname des OPUS-Gateways in deinem Netzwerk.",
-          "port": "Port der REST-API des Gateways (standardmäßig 8080).",
-          "username": "API-Benutzer des Gateways (standardmäßig admin).",
-          "password": "API-Passwort. Standardmäßig ist das die EURID des Gateways in Großbuchstaben, wie sie auf dem Gateway aufgedruckt ist."
+          "port": "Port der REST-API des Gateways: 8080 bei Gateways vor WebUI 2026. Ein Gateway mit WebUI 2026 wird automatisch erkannt und nutzt Port 443 (HTTPS).",
+          "username": "API-Benutzer des Gateways (standardmäßig admin). Bei einem Gateway mit WebUI 2026 gib einen Benutzer seiner Weboberfläche an (Rolle admin oder installateur).",
+          "password": "API-Passwort. Bei Gateways vor WebUI 2026 ist das standardmäßig die EURID des Gateways in Großbuchstaben, wie sie auf dem Gateway aufgedruckt ist. Bei einem Gateway mit WebUI 2026 gib das Passwort dieses Benutzers an; Home Assistant legt keine Benutzer am Gateway an."
         }
       },
       "reconfigure": {
@@ -45,10 +45,14 @@
         },
         "data_description": {
           "host": "IP-Adresse oder Hostname des OPUS-Gateways in deinem Netzwerk.",
-          "port": "Port der REST-API des Gateways (standardmäßig 8080).",
-          "username": "API-Benutzer des Gateways (standardmäßig admin).",
-          "password": "API-Passwort. Standardmäßig ist das die EURID des Gateways in Großbuchstaben, wie sie auf dem Gateway aufgedruckt ist."
+          "port": "Port der REST-API des Gateways: 8080 bei Gateways vor WebUI 2026. Ein Gateway mit WebUI 2026 wird automatisch erkannt und nutzt Port 443 (HTTPS).",
+          "username": "API-Benutzer des Gateways (standardmäßig admin). Bei einem Gateway mit WebUI 2026 gib einen Benutzer seiner Weboberfläche an (Rolle admin oder installateur).",
+          "password": "API-Passwort. Bei Gateways vor WebUI 2026 ist das standardmäßig die EURID des Gateways in Großbuchstaben, wie sie auf dem Gateway aufgedruckt ist. Bei einem Gateway mit WebUI 2026 gib das Passwort dieses Benutzers an; Home Assistant legt keine Benutzer am Gateway an."
         }
+      },
+      "certificate": {
+        "title": "Gateway-Zertifikat bestätigen",
+        "description": "Das Gateway {eag_id} zeigt ein anderes Zertifikat als das bei der ersten Verbindung gemerkte. Das passiert nach einem Werksreset oder Gerätetausch, aber auch, wenn ein anderes Gerät unter dieser Adresse antwortet. Es wurde nichts an das Gerät gesendet. Fingerabdruck (SHA-256): {fingerprint}. Fahre nur fort, wenn du die Änderung erwartest."
       }
     },
     "error": {
@@ -443,6 +447,9 @@
     },
     "parameter_read_back_failed": {
       "message": "Das Gateway hat den neuen Wert für {device_id} angenommen, das Zurücklesen ist aber fehlgeschlagen ({reason}). Der Wert kann gespeichert sein; Home Assistant behält den bisherigen. Lies vor einem neuen Versuch die Gerätekonfiguration aus."
+    },
+    "webui_2026_login_required": {
+      "message": "Das OPUS-Gateway verlangt jetzt die Anmeldung der neuen Gateway-Generation (WebUI 2026). Gib Benutzer und Passwort seiner Weboberfläche ein, um fortzufahren; alle Geräte und Entitäten bleiben erhalten."
     }
   },
   "services": {

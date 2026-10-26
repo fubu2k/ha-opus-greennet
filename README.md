@@ -81,7 +81,7 @@ Details per device type: [docs/devices.md](docs/devices.md).
 | | Requirement |
 |---|---|
 | Home Assistant | 2026.10.1 or newer |
-| Gateway | Both OPUS gateways: the black OPUS greenNet gateway (reports itself as `OPUS-GW`) and the OPUS IQ-DOT (`OPUS-IQ-DOT`), with the REST API on port 8080. Tested with firmware 1.21.30 to 1.21.34 |
+| Gateway | Both OPUS gateways: the black OPUS greenNet gateway (reports itself as `OPUS-GW`) and the OPUS IQ-DOT (`OPUS-IQ-DOT`). Before WebUI 2026: REST API on port 8080 (tested with firmware 1.21.30 to 1.21.34). With WebUI 2026: the same REST API over HTTPS on port 443 with a user login (see [Gateways with WebUI 2026](#gateways-with-webui-2026); not yet tested on such a gateway) |
 | Network | Home Assistant and the gateway in the same local network. Discovery uses mDNS; without it (for example Docker without host networking) enter the address once |
 | Devices | Paired with the gateway in the OPUS app |
 
@@ -126,16 +126,42 @@ you only enter the password. To add it by hand, use
 | Field | Description |
 |-------|-------------|
 | **Host** | IP address or host name of the gateway. It must be in the local network (see below) |
-| **Port** | Port of the REST API, `8080` by default |
+| **Port** | Port of the REST API, `8080` by default. A gateway with WebUI 2026 is recognised automatically and uses `443` |
 | **Username** | API user, `admin` by default |
 | **Password** | API password, by default the gateway's EURID in capital letters (printed on the gateway; fictional example: `A1B2C3D4`) |
+
+### Gateways with WebUI 2026
+
+Gateways with the software of the new generation (WebUI 2026) no longer answer
+on ports 8080 and 8099. Their REST API (same paths) is reachable only over HTTPS
+on port 443, with the user and password of the gateway's web interface (role
+`admin` or `installateur`); the EURID is no longer the password.
+
+- **Set the user up in the gateway's web interface first.** Home Assistant never
+  creates users on the gateway.
+- Add the gateway as before. If nothing answers on the old port, Home Assistant
+  looks for a WebUI 2026 gateway on port 443 (`/auth/setup-status`, no login).
+  Enter the web interface user and password.
+- The gateway's self-signed certificate is remembered at the first connection
+  and checked on every later one. If it changes (factory reset, replaced
+  device), the entry asks you to confirm the new certificate; nothing is sent to
+  it before.
+- The access token is requested by Home Assistant and kept in memory only; the
+  password is stored in the entry like before. A rejected token is requested
+  again with the next request; the request that met the rejection is not
+  repeated.
+- An existing entry whose gateway was updated asks to sign in again at the next
+  start of the integration. Devices and entities are kept.
+- The login endpoint (`POST /auth/login`) and the bearer token header are
+  **assumptions** taken from the usual pattern; they have not been verified on
+  a gateway with WebUI 2026 and are collected in one place in `api.py`.
 
 The gateway's EURID becomes the stable identifier of the entry, its devices and
 entities. If the gateway gets a new IP address, discovery updates the entry
 automatically. To change the credentials, use **Reconfigure** on the entry.
 
-**Local addresses only:** the gateway speaks unencrypted HTTP, so Home Assistant
-sends its credentials only to private addresses (`10/8`, `172.16/12`,
+**Local addresses only:** gateways before WebUI 2026 speak unencrypted HTTP, so
+Home Assistant sends its credentials only to private addresses (`10/8`, `172.16/12`,
 `192.168/16`), link-local (`169.254/16`, `fe80::/10`), unique local
 (`fc00::/7`), loopback, carrier-grade NAT (`100.64/10`, used by VPN meshes) and
 the networks Home Assistant itself is attached to (so a global IPv6 address on
@@ -168,9 +194,9 @@ diagnostics** on the integration entry). More in
   follows from the device's report or a status check.
 - Cover positions during movement are estimated from the configured travel
   time.
-- The gateway API is plain HTTP with basic authentication (the gateway has no
+- The gateway API before WebUI 2026 is plain HTTP with basic authentication (no
   TLS). Keep the gateway in a trusted network; new or changed addresses must be
-  local.
+  local, for both generations.
 - Devices cannot be added to or removed from the gateway yet, and some device
   settings (the function of rocker A and B, the routing time, the repeater
   mode) are not offered yet (see [Roadmap](#roadmap)).

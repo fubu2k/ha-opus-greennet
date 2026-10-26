@@ -13,8 +13,8 @@ custom_components/opus_greennet/
 ├── __init__.py           # Integration setup and action registration
 ├── manifest.json         # Integration metadata and version
 ├── config_flow.py        # Setup, discovery, re-authentication and reconfiguration
-├── discovery.py          # mDNS search and gateway identification by EURID
-├── api.py                # REST client: requests, error mapping, event stream splitting
+├── discovery.py          # mDNS search, gateway identification by EURID, detection of WebUI 2026 gateways
+├── api.py                # REST client: requests, error mapping, event stream splitting, gateway generations (HTTP/basic, HTTPS/token)
 ├── protocol.py           # Pure helpers that read gateway documents
 ├── coordinator.py        # Event stream, health check, device state and commands
 ├── const.py              # Constants and EEP mappings

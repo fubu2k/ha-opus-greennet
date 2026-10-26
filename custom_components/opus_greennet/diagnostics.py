@@ -27,6 +27,7 @@ TO_REDACT = {
     "apikey",
     "authorization",
     "baseid",
+    "certificatefingerprint",
     "deviceid",
     "eagid",
     "eurid",

@@ -14,6 +14,17 @@ CONF_EAG_ID: Final = "eag_id"
 DEFAULT_PORT: Final = 8080
 DEFAULT_USERNAME: Final = "admin"
 
+# Gateway generations. Gateways with firmware before WebUI 2026 serve the REST
+# API over plain HTTP (port 8080) with basic authentication; the entry data
+# carries no generation for them, and a missing key always means this one.
+# Gateways with WebUI 2026 serve the same paths only over HTTPS (port 443) with
+# a user login and a token, and a self-signed certificate that is remembered.
+CONF_GENERATION: Final = "generation"
+CONF_CERTIFICATE_FINGERPRINT: Final = "certificate_fingerprint"
+GENERATION_LEGACY: Final = "legacy"
+GENERATION_WEBUI_2026: Final = "webui2026"
+WEBUI_2026_PORT: Final = 443
+
 # EEP (EnOcean Equipment Profile) to entity type mappings
 # Format: EEP -> (entity_type, description)
 #
