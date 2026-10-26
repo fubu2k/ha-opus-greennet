@@ -180,6 +180,33 @@ async def test_the_https_port_is_never_asked_over_plain_http(hass):
     assert call.args[1]["generation"] == "webui2026"
 
 
+async def test_a_tls_service_at_another_port_never_gets_the_credentials_in_clear(hass):
+    """A gateway of the new generation on a port of the user's choice."""
+    endpoint = GatewayEndpoint(8443, FINGERPRINT)
+    with _detect(endpoint) as detect, _read(EAG_ID) as read:
+        result = await _user(hass, {**USER_INPUT, "port": 8443})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"]["generation"] == "webui2026"
+    assert result["data"]["port"] == 8443
+    # Only the read over HTTPS was made: no plain-HTTP request carried the
+    # user name and password. The port was asked once, without credentials.
+    (call,) = read.await_args_list
+    assert call.args[1]["generation"] == "webui2026"
+    assert detect.await_count == 1
+
+
+async def test_another_port_without_tls_is_still_asked_as_an_earlier_gateway(hass):
+    with _detect(None), _read(EAG_ID) as read:
+        result = await _user(hass, {**USER_INPUT, "port": 9090})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"]["port"] == 9090
+    assert "generation" not in result["data"]
+    (call,) = read.await_args_list
+    assert "generation" not in call.args[1]
+
+
 async def test_nothing_found_at_either_port_cannot_connect(hass):
     with _detect(None), _read(OpusConnectionError("refused")):
         result = await _user(hass, USER_INPUT)

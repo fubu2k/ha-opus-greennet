@@ -38,6 +38,7 @@ from .const import (
     WEBUI_2026_PORT,
 )
 from .discovery import (
+    GatewayEndpoint,
     async_detect_webui_2026,
     async_local_networks,
     async_read_gateway_id,
@@ -170,6 +171,13 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
             and known.get(CONF_GENERATION) == GENERATION_WEBUI_2026
             and known.get(CONF_PORT) == port
         )
+        endpoint: GatewayEndpoint | None = None
+        if not webui_port and port != DEFAULT_PORT:
+            # Another port than the two known ones may serve either generation.
+            # Ask it without credentials first, so that a TLS service there never
+            # receives them in clear text.
+            endpoint = await async_detect_webui_2026(self.hass, host, port)
+            webui_port = endpoint is not None
         if not webui_port:
             try:
                 return await async_read_gateway_id(self.hass, user_input)
@@ -189,6 +197,7 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
             user_input,
             errors,
             None if known is None else known.get(CONF_CERTIFICATE_FINGERPRINT),
+            endpoint,
         )
 
     async def _async_validate_webui_2026(
@@ -196,6 +205,7 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         user_input: Mapping[str, Any],
         errors: dict[str, str],
         known_fingerprint: str | None,
+        endpoint: GatewayEndpoint | None = None,
     ) -> str | None:
         """Read the EAG identifier of a WebUI 2026 gateway (HTTPS, user login).
 
@@ -203,9 +213,10 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         than the remembered certificate is not used before the user confirmed
         it: no credentials are sent to it.
         """
-        endpoint = await async_detect_webui_2026(
-            self.hass, user_input[CONF_HOST].strip(), user_input[CONF_PORT]
-        )
+        if endpoint is None:
+            endpoint = await async_detect_webui_2026(
+                self.hass, user_input[CONF_HOST].strip(), user_input[CONF_PORT]
+            )
         if endpoint is None:
             errors["base"] = "cannot_connect"
             return None

@@ -284,6 +284,12 @@ had registered. **[HW][Test]**
   Entries stored with a public address still set up and log a warning. The
   check happens when the address is entered; a name that later resolves
   elsewhere is not re-checked **[Code][Test]**.
+- The config flow never sends credentials in clear text to a TLS service. The
+  ports 443 and the port of a configured WebUI 2026 gateway are not tried over
+  plain HTTP, and any other port except the default 8080 is first asked
+  without credentials (`GET /auth/setup-status`, certificate handshake); only
+  when no WebUI 2026 gateway answers there is the plain-HTTP read made
+  **[Code][Test]**.
 
 ## 10. Services (public, unchanged)
 
