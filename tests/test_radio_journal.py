@@ -360,6 +360,7 @@ async def test_the_journal_drops_the_oldest_entries(connected_coordinator) -> No
 async def test_the_debug_log_names_request_outcome_and_gateway_text(
     radio, connected_coordinator, caplog: pytest.LogCaptureFixture
 ) -> None:
+    connected_coordinator.devices["DEV1"] = _blind()
     radio.response = NO_RESPONSE
     caplog.set_level(logging.DEBUG, logger=MODULE)
 
@@ -368,6 +369,8 @@ async def test_the_debug_log_names_request_outcome_and_gateway_text(
             "DEV1", "verticalMovementTime", 25.0
         )
 
+    # The write really went out; otherwise there is nothing to log.
+    assert [method for method, _, _ in radio.sent] == ["PUT"]
     line = next(
         record.getMessage()
         for record in caplog.records
