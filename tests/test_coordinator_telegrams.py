@@ -7,6 +7,7 @@ through the fake gateway's event stream.
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -822,11 +823,11 @@ async def test_homekit_command_is_applied_then_verified(
 
 def test_outbound_status_query_changes_nothing(coord, dispatch, call_later) -> None:
     device = _device(coord, "D2-01-02")
-    before = device.channels[0].is_on
+    before = copy.deepcopy(device.channels)
     coord._handle_telegram(
         _telegram([{"key": "query", "value": "status"}], direction="to")
     )
-    assert device.channels[0].is_on is before
+    assert device.channels == before
     assert device.last_update_source != "telegram/to"
     dispatch.assert_not_called()
     call_later.assert_not_called()
