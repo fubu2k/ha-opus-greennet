@@ -83,6 +83,11 @@ state, last update source and the latest command error. Addresses,
 credentials, identifiers and the gateway's HomeKit setup code (also as QR
 payload) are redacted. Attach it when you report a problem.
 
+The same facts are visible in Home Assistant without a download: the gateway
+device shows its serial number, and its diagnostic sensors show EURID,
+firmware, app and API version, hostname, IPv4 and IPv6 address (the download
+itself keeps them redacted).
+
 Useful fields:
 
 - `first_device_list_seconds` (gateway): time from opening the event stream to

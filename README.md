@@ -65,6 +65,16 @@ The gateway's own device shows its **Uptime** as a diagnostic sensor in days,
 hours, minutes and seconds (for example `1 d 2 h 3 min 4 s`, plus the seconds as
 attribute `uptime_seconds`). It is read by the health probe once a minute and
 updated after each reading; it is not extrapolated in between.
+
+The gateway's device information shows its **serial number** (as reported by
+`/system/info`, not the EURID). Further diagnostic sensors, enabled by default,
+show the **EURID**, **firmware version**, **app version**, **API version**,
+**hostname**, **IPv4 address** and **IPv6 address**. Versions are read at
+startup and every 30 minutes; host name and addresses are looked up from the
+configured host at the same times, and stay *unknown* where they do not
+resolve. The EURID is the default gateway password, so it is also visible in
+the entity history.
+
 Details per device type: [docs/devices.md](docs/devices.md).
 
 ## Compatibility
