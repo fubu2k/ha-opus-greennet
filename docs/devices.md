@@ -119,8 +119,8 @@ tested on hardware**, so try a single switch first. The ranges are those of the
 parameter catalog read from one D2-01-01 and one D2-01-11; other switch types
 get no such entities.
 
-**Device information.** The device page shows the product ID (*model ID*) and
-the software version from the gateway's device list. The device ID is the
+**Device information.** The device page shows the product ID (*model ID*), the
+software version, the hardware version from the gateway's device list. The device ID is the
 identifier of the device, not a serial number, and is no longer shown as one.
 
 **Routing and repeater mode.** The gateway stores the routing as *off* or a time

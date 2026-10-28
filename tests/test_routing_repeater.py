@@ -349,9 +349,11 @@ def test_device_information_has_product_id_and_software_version_no_serial() -> N
             "friendlyId": "Bad",
             "productId": "004000000005",
             "softwareRevision": "0.1.0.0",
+            "hardwareRevision": "0.24.17.20",
         }
     )
     info = _info(device)
+    assert info["hw_version"] == "0.24.17.20"
     assert info["model_id"] == "004000000005"
     assert info["sw_version"] == "0.1.0.0"
     # The device ID is the identifier, not a serial number.
@@ -362,14 +364,21 @@ def test_device_information_without_the_new_fields() -> None:
     info = _info(_switch())
     assert info["model_id"] is None
     assert info["sw_version"] is None
+    assert info["hw_version"] is None
 
 
 def test_a_list_without_product_data_keeps_the_known_values() -> None:
     device = EnOceanDevice.from_device_object(
-        {"deviceId": "D", "productId": "1", "softwareRevision": "2"}
+        {
+            "deviceId": "D",
+            "productId": "1",
+            "softwareRevision": "2",
+            "hardwareRevision": "5",
+        }
     )
     device.apply_listed_metadata(EnOceanDevice.from_device_object({"deviceId": "D"}))
     assert (device.product_id, device.software_revision) == ("1", "2")
+    assert device.hardware_revision == "5"
     device.apply_listed_metadata(
         EnOceanDevice.from_device_object(
             {"deviceId": "D", "productId": "3", "softwareRevision": "4"}
