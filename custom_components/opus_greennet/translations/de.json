@@ -287,6 +287,21 @@
           "channels_all": "Kanal 1 + 2",
           "inactive": "Inaktiv"
         }
+      },
+      "repeater_setting": {
+        "name": "Repeater-Modus (gespeichert)",
+        "state": {
+          "off": "Aus",
+          "level_1": "Stufe 1",
+          "level_2": "Stufe 2"
+        }
+      },
+      "routing_setting": {
+        "name": "Routing (gespeichert)",
+        "state": {
+          "off": "Aus",
+          "on": "Ein"
+        }
       }
     },
     "switch": {
@@ -386,6 +401,21 @@
           "channel2": "Kanal 2",
           "channels_all": "Kanal 1 + 2",
           "inactive": "Inaktiv"
+        }
+      },
+      "repeater": {
+        "name": "Repeater-Modus",
+        "state": {
+          "off": "Aus",
+          "level_1": "Stufe 1",
+          "level_2": "Stufe 2"
+        }
+      },
+      "routing": {
+        "name": "Routing",
+        "state": {
+          "off": "Aus",
+          "on": "Ein"
         }
       }
     }
