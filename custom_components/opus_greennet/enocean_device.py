@@ -742,8 +742,8 @@ class EnOceanDevice:
     @classmethod
     def routing_reading(cls, value: object) -> str | None:
         """Return a reported routing time as ``off`` or ``on``, None if unusable."""
-        if value == ROUTING_OFF:
-            return ROUTING_OFF
+        if value in (ROUTING_OFF, ROUTING_ON):
+            return str(value)
         number = cls._parse_number(value, minimum=0)
         if number is None or number <= 0:
             return None
