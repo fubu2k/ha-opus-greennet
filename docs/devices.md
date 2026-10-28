@@ -135,6 +135,10 @@ tested on hardware**, so try a single switch first. The ranges are those of the
 parameter catalog read from one D2-01-01 and one D2-01-11; other switch types
 get no such entities.
 
+**Device information.** The device page shows the product ID (*model ID*) and
+the software version from the gateway's device list. The device ID is the
+identifier of the device, not a serial number, and is no longer shown as one.
+
 **Routing and repeater mode.** The gateway stores the routing as *off* or a time
 in seconds (0.3 to 2.55); only *off* has been seen. The integration shows it
 as *off* or *on* (any time counts as on). Writing *on* sends the smallest time,
