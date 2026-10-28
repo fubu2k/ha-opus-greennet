@@ -291,9 +291,9 @@
       "repeater_setting": {
         "name": "Repeater mode (stored)",
         "state": {
-          "off": "Off",
-          "level_1": "Level 1",
-          "level_2": "Level 2"
+          "off": "Off (default)",
+          "level_1": "Level 1 (single hop / 1-hop)",
+          "level_2": "Level 2 (double hop / 2-hop)"
         }
       },
       "routing_setting": {
@@ -310,6 +310,9 @@
           "sufficient": "Sufficient",
           "poor": "Poor"
         }
+      },
+      "device_id": {
+        "name": "Device ID"
       }
     },
     "switch": {
@@ -414,9 +417,9 @@
       "repeater": {
         "name": "Repeater mode",
         "state": {
-          "off": "Off",
-          "level_1": "Level 1",
-          "level_2": "Level 2"
+          "off": "Off (default)",
+          "level_1": "Level 1 (single hop / 1-hop)",
+          "level_2": "Level 2 (double hop / 2-hop)"
         }
       },
       "routing": {

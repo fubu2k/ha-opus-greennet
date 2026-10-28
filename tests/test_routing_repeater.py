@@ -280,16 +280,28 @@ def test_switch_setting_sensors_show_whole_numbers(key: str) -> None:
 
 
 @pytest.mark.parametrize("key", ["timer", "timer_long"])
-def test_the_timer_durations_are_shown_in_minutes(key: str) -> None:
-    assert _sensor(key).suggested_unit_of_measurement == UnitOfTime.MINUTES
+def test_the_timer_durations_show_whole_seconds(key: str) -> None:
+    sensor = _sensor(key)
+    assert sensor.suggested_display_precision == 0
+    assert sensor.suggested_unit_of_measurement is None
 
 
-def test_the_warning_signal_is_shown_in_whole_milliseconds() -> None:
+def test_the_warning_signal_shows_one_decimal_in_seconds() -> None:
     sensor = _sensor("switch_off_warning_signal")
     assert sensor.device_class is SensorDeviceClass.DURATION
     assert sensor.native_unit_of_measurement == UnitOfTime.SECONDS
-    assert sensor.suggested_unit_of_measurement == UnitOfTime.MILLISECONDS
-    assert sensor.suggested_display_precision == 0
+    # No suggested unit: it would scale the precision of existing entities.
+    assert sensor.suggested_unit_of_measurement is None
+    assert sensor.suggested_display_precision == 1
+
+
+def test_whole_values_are_not_floats() -> None:
+    sensor = _sensor("timer")
+    sensor._device.get_or_create_channel().timer = 300.0
+    assert sensor.native_value == 300
+    assert isinstance(sensor.native_value, int)
+    sensor._device.channels[0].timer = 90.5
+    assert sensor.native_value == 90.5
 
 
 def test_blind_setting_sensors_keep_their_decimals() -> None:
@@ -356,8 +368,8 @@ def test_device_information_has_product_id_and_software_version_no_serial() -> N
     assert info["hw_version"] == "0.24.17.20"
     assert info["model_id"] == "004000000005"
     assert info["sw_version"] == "0.1.0.0"
-    # The device ID is the identifier, not a serial number.
-    assert info["serial_number"] is None
+    # The device ID is also shown as the serial number.
+    assert info["serial_number"] == "019D5EC7"
 
 
 def test_device_information_without_the_new_fields() -> None:
@@ -385,3 +397,18 @@ def test_a_list_without_product_data_keeps_the_known_values() -> None:
         )
     )
     assert (device.product_id, device.software_revision) == ("3", "4")
+
+
+def test_the_device_id_is_a_diagnostic_sensor() -> None:
+    from unittest.mock import MagicMock
+
+    from homeassistant.const import EntityCategory
+
+    from custom_components.opus_greennet.sensor import OpusGreenNetDeviceIdSensor
+
+    device = EnOceanDevice("019D6415", "Switch", [{"eep": "D2-01-01"}])
+    sensor = OpusGreenNetDeviceIdSensor(MagicMock(), "AABB0011", "gw", device)
+    assert sensor.native_value == "019D6415"
+    assert sensor.unique_id == "AABB0011_019D6415_device_id"
+    assert sensor.entity_category is EntityCategory.DIAGNOSTIC
+    assert sensor.entity_registry_enabled_default is True
