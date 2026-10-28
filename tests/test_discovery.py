@@ -26,6 +26,7 @@ from tests.fake_gateway import FakeGateway, device_object
 from tests.ha_helpers import setup_bridge
 
 DISCOVERY = "custom_components.opus_greennet.discovery"
+CONFIG_FLOW = "custom_components.opus_greennet.config_flow"
 
 
 async def _legacy_entry(hass: HomeAssistant, eag_id: str) -> config_entries.ConfigEntry:
@@ -255,12 +256,37 @@ async def test_discovery_updates_a_changed_address(
     with patch.object(gateway, "host", "localhost"):
         entry = await setup_bridge(hass, gateway)
     assert entry.data["host"] == "localhost"
-    result = await _discover(hass, "127.0.0.1")
+    # The configured name no longer leads to the announced address.
+    with patch(
+        f"{CONFIG_FLOW}.async_resolve_host",
+        AsyncMock(return_value=[ip_address("192.0.2.9")]),
+    ):
+        result = await _discover(hass, "127.0.0.1")
     assert result["reason"] == "already_configured"
     await hass.async_block_till_done()
     await gateway.wait_for_stream()
     assert entry.data["host"] == "127.0.0.1"
     assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_discovery_keeps_a_host_name_that_leads_to_the_announced_address(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    with patch.object(gateway, "host", "localhost"):
+        entry = await setup_bridge(hass, gateway)
+    requests = len(gateway.requests)
+    with patch(
+        f"{CONFIG_FLOW}.async_resolve_host",
+        AsyncMock(return_value=[ip_address("127.0.0.1")]),
+    ):
+        result = await _discover(hass, "127.0.0.1")
+    assert result["reason"] == "already_configured"
+    await hass.async_block_till_done()
+    # The chosen name stays, nothing is asked of the announced address and the
+    # entry is not reloaded.
+    assert entry.data["host"] == "localhost"
+    assert entry.state is ConfigEntryState.LOADED
+    assert len(gateway.requests) == requests
 
 
 async def test_discovery_of_the_known_address_changes_nothing(
