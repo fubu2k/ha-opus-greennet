@@ -169,7 +169,8 @@ This action only reads. Link tables are changed with the OPUS app.
 - **Safety and presence.** Water leak sensors, smoke alarms and presence
   detectors become binary sensors for notifications. During a gateway outage
   they show *unavailable*, so a lost gateway does not look like "no alarm".
-- **Diagnosing a radio installation.** Signal strength (disabled by default),
+- **Diagnosing a radio installation.** Signal strength (disabled by default) and
+  signal quality,
   battery level and the redacted diagnostics download show devices with weak signal
   or low battery. See
   [Troubleshooting](troubleshooting.md).

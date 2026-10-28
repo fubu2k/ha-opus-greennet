@@ -302,6 +302,14 @@
           "off": "Off",
           "on": "On"
         }
+      },
+      "signal_quality": {
+        "name": "Signal quality",
+        "state": {
+          "good": "Good",
+          "sufficient": "Sufficient",
+          "poor": "Poor"
+        }
       }
     },
     "switch": {

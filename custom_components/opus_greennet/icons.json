@@ -31,6 +31,14 @@
           "requested": "mdi:lock-clock"
         }
       },
+      "signal_quality": {
+        "default": "mdi:wifi-strength-off-outline",
+        "state": {
+          "good": "mdi:wifi-strength-4",
+          "sufficient": "mdi:wifi-strength-2",
+          "poor": "mdi:wifi-strength-alert-outline"
+        }
+      },
       "gateway_uptime": {
         "default": "mdi:timer-outline"
       },

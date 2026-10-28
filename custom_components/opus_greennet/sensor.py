@@ -29,7 +29,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from . import OpusGreenNetConfigEntry
-from .const import CONF_EAG_ID, DEFAULT_CHANNEL, DOMAIN
+from .const import (
+    CONF_EAG_ID,
+    DEFAULT_CHANNEL,
+    DOMAIN,
+    SIGNAL_GOOD_DBM,
+    SIGNAL_POOR_DBM,
+)
 from .coordinator import (
     SIGNAL_AVAILABILITY_UPDATE,
     SIGNAL_DEVICE_DISCOVERED,
@@ -279,6 +285,12 @@ async def async_setup_entry(
             )
         )
 
+        entities.append(
+            OpusGreenNetSignalQualitySensor(
+                coordinator, eag_id, gateway_device_id, device
+            )
+        )
+
         # Time of the last telegram or listed update (all devices, diagnostic).
         entities.append(
             OpusGreenNetLastSeenSensor(
@@ -525,6 +537,41 @@ class OpusGreenNetSignalStrengthSensor(OpusGreenNetBaseSensor):
         if self._device.dbm is not None:
             return self._device.dbm
         return None
+
+
+class OpusGreenNetSignalQualitySensor(OpusGreenNetBaseSensor):
+    """Radio link quality of a device, rated from its signal strength."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_options = ["good", "sufficient", "poor"]
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+    ) -> None:
+        """Initialize the signal quality sensor."""
+        super().__init__(
+            coordinator,
+            eag_id,
+            gateway_device_id,
+            device,
+            "signal_quality",
+            "signal_quality",
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return good, sufficient or poor, or None without a signal strength."""
+        dbm = self._device.dbm
+        if dbm is None:
+            return None
+        if dbm > SIGNAL_GOOD_DBM:
+            return "good"
+        return "sufficient" if dbm >= SIGNAL_POOR_DBM else "poor"
 
 
 def parse_last_seen(value: str) -> datetime | None:
