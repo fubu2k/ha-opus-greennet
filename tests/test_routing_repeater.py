@@ -46,7 +46,7 @@ def _document(**values: object) -> dict:
         ("1.5", "on"),
         (0, None),
         (-1, None),
-        ("on", None),
+        ("on", "on"),
         (None, None),
         (True, None),
     ],
