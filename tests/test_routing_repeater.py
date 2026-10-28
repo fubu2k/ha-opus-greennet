@@ -274,12 +274,14 @@ def _sensor(translation_key: str) -> OpusGreenNetSettingSensor:
     )
 
 
-@pytest.mark.parametrize(
-    "key",
-    ["timer", "timer_long", "switch_off_warning", "illumination_threshold"],
-)
+@pytest.mark.parametrize("key", ["switch_off_warning", "illumination_threshold"])
 def test_switch_setting_sensors_show_whole_numbers(key: str) -> None:
     assert _sensor(key).suggested_display_precision == 0
+
+
+@pytest.mark.parametrize("key", ["timer", "timer_long"])
+def test_the_timer_durations_are_shown_in_minutes(key: str) -> None:
+    assert _sensor(key).suggested_unit_of_measurement == UnitOfTime.MINUTES
 
 
 def test_the_warning_signal_is_shown_in_whole_milliseconds() -> None:

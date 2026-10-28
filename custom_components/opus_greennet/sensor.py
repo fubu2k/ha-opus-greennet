@@ -72,6 +72,19 @@ MEASUREMENT_READINGS: Final[dict[str, Callable[[EnOceanChannel], float | None]]]
 # illuminance as whole lux. Display only: the reported state and history are
 # unchanged, and a user-chosen display precision in the entity settings takes
 # precedence.
+# Display of the stored settings: suggested unit and decimals. Long times are
+# shown in minutes (no decimals set: 90 s shows as 1.5 min, 300 s as 5 min),
+# the warning signal in whole milliseconds (it is stored in 1 ms steps).
+SETTING_DISPLAY: Final[dict[str, tuple[str | None, int | None]]] = {
+    "timer": (UnitOfTime.MINUTES, None),
+    "timer_long": (UnitOfTime.MINUTES, None),
+    "switch_off_warning": (None, 0),
+    "switch_off_warning_signal": (UnitOfTime.MILLISECONDS, 0),
+    "illumination_threshold": (None, 0),
+    "pir_off_time": (None, 0),
+    "recom_ready_time": (UnitOfTime.MINUTES, None),
+    "alive_cycle": (None, 0),
+}
 MEASUREMENT_DISPLAY_PRECISION: Final[dict[str, int]] = {
     "battery_level": 0,
     "illuminance": 0,
@@ -612,11 +625,10 @@ class OpusGreenNetSettingSensor(OpusGreenNetBaseSensor):
         self._device_time = device_time
         self._attr_native_unit_of_measurement = device_time.unit
         self._attr_device_class = SensorDeviceClass(device_time.device_class.value)
-        if device_time.entity_type == "switch":
-            # Whole numbers; the 0.5 s warning signal is shown as 500 ms.
-            self._attr_suggested_display_precision = 0
-            if device_time.translation_key == "switch_off_warning_signal":
-                self._attr_suggested_unit_of_measurement = UnitOfTime.MILLISECONDS
+        if (display := SETTING_DISPLAY.get(device_time.translation_key)) is not None:
+            unit, precision = display
+            self._attr_suggested_unit_of_measurement = unit
+            self._attr_suggested_display_precision = precision
 
     @property
     def native_value(self) -> float | None:

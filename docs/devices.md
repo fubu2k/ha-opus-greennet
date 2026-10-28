@@ -25,7 +25,7 @@ The settings stored on actuators, as far as the gateway's parameter catalog
 |--------|-----------------|-----------------|-------------|
 | Blinds (D2-05-02) | Vertical movement time, Rotation time, Maximum holding time | – | Function of rocker A and B, routing time |
 | Dimmers (D2-01-03) | Ramping time, Short-press time, Long-press time | Repeater mode | – |
-| Switches (D2-01-01) | Timer duration, Timer duration (long press), Switch-off warning, Switch-off warning signal, Illumination threshold | Operation mode, LED colour, External input function, Routing, Repeater mode | Function of rocker A and B |
+| Switches (D2-01-01) | Timer duration, Timer duration (long press), Switch-off warning, Switch-off warning signal, Illumination threshold | Operation mode, LED colour, External input function, ViNET Router, Repeater mode | Function of rocker A and B |
 | 2-channel switches (D2-01-11) | as D2-01-01 | as D2-01-01, plus LED channel | as D2-01-01 |
 
 Which of these settings were written on real hardware, and which only read, is
@@ -126,21 +126,23 @@ as *off* or *on* (any time counts as on). Writing *on* sends the smallest time,
 the state a device already shows sends nothing. The repeater mode is not a
 ReCom parameter but the device resource `/devices/{id}/repeaterState` (`off`,
 `level_1`, `level_2`); it is written and read back there. *Read settings*
-reads both. The device list carries the repeater mode too, so it is shown after a restart without a radio request. Dimmers (D2-01-03) report it as well and get the same entities (the dimmer catalog has no routing); writing it on a dimmer is untested. Each has a diagnostic sensor (*Routing (stored)*, *Repeater mode
+reads both. The device list carries the repeater mode too, so it is shown after a restart without a radio request. Dimmers (D2-01-03) report it as well and get the same entities (the dimmer catalog has no routing); writing it on a dimmer is untested. Each has a diagnostic sensor (*ViNET Router (stored)*, *Repeater mode
 (stored)*) and a select in the configuration category (disabled by default).
 Writing the repeater mode was tested on one D2-01-01 switch (level 1 and back
 to off) through the gateway interface, not through these entities.
 
 **Display.** The stored switch values (timer durations, switch-off warning,
-illumination threshold) are shown as whole numbers, the warning signal in
-milliseconds.
+illumination threshold) are shown without decimals, the two timer durations
+and the ReCom readiness cycle of presence detectors in minutes, the warning
+signal in milliseconds. A unit is suggested for new entities only; change it
+in the entity settings of an existing one.
 
 **Switch selects.** D2-01-01 and D2-01-11 switches also get select entities for
 the settings that have a fixed set of values: *Operation mode* (bottom on,
 timer, toggle, top on; the timer durations above only act in *timer*), *LED
 colour* (all, green, off, red), *LED channel* (2-channel switches only: which
 channel the LED shows) and *External input function* (channel 1 and inactive,
-for a 2-channel switch also channel 2 and channels 1 + 2), *Routing* (off or on)
+for a 2-channel switch also channel 2 and channels 1 + 2), *ViNET Router* (off or on)
 and *Repeater mode* (off, level 1, level 2). The same rules apply
 as for the numbers: configuration entities, **disabled by default**, one set
 per device, values from the device configuration, a new value is written with

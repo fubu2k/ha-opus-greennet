@@ -297,7 +297,7 @@
         }
       },
       "routing_setting": {
-        "name": "Routing (stored)",
+        "name": "ViNET Router (stored)",
         "state": {
           "off": "Off",
           "on": "On"
@@ -412,7 +412,7 @@
         }
       },
       "routing": {
-        "name": "Routing",
+        "name": "ViNET Router",
         "state": {
           "off": "Off",
           "on": "On"
