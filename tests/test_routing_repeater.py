@@ -323,8 +323,56 @@ def test_a_device_list_without_the_repeater_mode_keeps_the_known_one() -> None:
 
 
 def test_the_repeater_mode_is_offered_for_dimmers_too() -> None:
-    from custom_components.opus_greennet.select import REPEATER
+    from custom_components.opus_greennet.select import DEVICE_SELECTS
 
+    (REPEATER,) = (s for s in DEVICE_SELECTS if s.parameter == "repeaterState")
     dimmer = EnOceanDevice("DIM", "Dimmer", [{"eep": "D2-01-03"}])
     assert REPEATER.values_for(dimmer) == ("off", "level_1", "level_2")
     assert protocol.supports_repeater_state(dimmer)
+
+
+# ── device information ─────────────────────────────────────────────────────
+
+
+def _info(device: EnOceanDevice):
+    from unittest.mock import MagicMock
+
+    from custom_components.opus_greennet.entity import OpusGreenNetEntity
+
+    return OpusGreenNetEntity(MagicMock(), "AABB0011", "gateway", device).device_info
+
+
+def test_device_information_has_product_id_and_software_version_no_serial() -> None:
+    device = EnOceanDevice.from_device_object(
+        {
+            "deviceId": "019D5EC7",
+            "friendlyId": "Bad",
+            "productId": "004000000005",
+            "softwareRevision": "0.1.0.0",
+        }
+    )
+    info = _info(device)
+    assert info["model_id"] == "004000000005"
+    assert info["sw_version"] == "0.1.0.0"
+    # The device ID is the identifier, not a serial number.
+    assert info["serial_number"] is None
+
+
+def test_device_information_without_the_new_fields() -> None:
+    info = _info(_switch())
+    assert info["model_id"] is None
+    assert info["sw_version"] is None
+
+
+def test_a_list_without_product_data_keeps_the_known_values() -> None:
+    device = EnOceanDevice.from_device_object(
+        {"deviceId": "D", "productId": "1", "softwareRevision": "2"}
+    )
+    device.apply_listed_metadata(EnOceanDevice.from_device_object({"deviceId": "D"}))
+    assert (device.product_id, device.software_revision) == ("1", "2")
+    device.apply_listed_metadata(
+        EnOceanDevice.from_device_object(
+            {"deviceId": "D", "productId": "3", "softwareRevision": "4"}
+        )
+    )
+    assert (device.product_id, device.software_revision) == ("3", "4")
