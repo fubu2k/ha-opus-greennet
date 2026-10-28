@@ -25,7 +25,7 @@ The settings stored on actuators, as far as the gateway's parameter catalog
 |--------|-----------------|-----------------|-------------|
 | Blinds (D2-05-02) | Vertical movement time, Rotation time, Maximum holding time | – | Function of rocker A and B, routing time |
 | Dimmers (D2-01-03) | Ramping time, Short-press time, Long-press time | – | – |
-| Switches (D2-01-01) | Timer duration, Timer duration (long press), Switch-off warning, Switch-off warning signal, Illumination threshold | Operation mode, LED colour, External input function | Function of rocker A and B, routing time |
+| Switches (D2-01-01) | Timer duration, Timer duration (long press), Switch-off warning, Switch-off warning signal, Illumination threshold | Operation mode, LED colour, External input function, Routing, Repeater mode | Function of rocker A and B |
 | 2-channel switches (D2-01-11) | as D2-01-01 | as D2-01-01, plus LED channel | as D2-01-01 |
 
 Which of these settings were written on real hardware, and which only read, is
@@ -57,7 +57,7 @@ read-back after a write, not yet as a button press.
 
 Every actuator whose device list contains a link table also has the diagnostic
 sensor *Wall switch links* (see [Sensor values](#sensor-values)). The
-functions of rocker A and B and the routing time are left out until a text
+functions of rocker A and B are left out until a text
 write has been tested on hardware; a test in the repository fails when a
 catalog parameter has neither an entity nor an entry in that list of omissions.
 
@@ -119,12 +119,29 @@ tested on hardware**, so try a single switch first. The ranges are those of the
 parameter catalog read from one D2-01-01 and one D2-01-11; other switch types
 get no such entities.
 
+**Routing and repeater mode.** The gateway stores the routing as *off* or a time
+in seconds (0.3 to 2.55); only *off* has been seen. The integration shows it
+as *off* or *on* (any time counts as on). Writing *on* sends the smallest time,
+0.3 s, which is an **assumption** until a device that routes was read; writing
+the state a device already shows sends nothing. The repeater mode is not a
+ReCom parameter but the device resource `/devices/{id}/repeaterState` (`off`,
+`level_1`, `level_2`); it is written and read back there. *Read settings*
+reads both. Each has a diagnostic sensor (*Routing (stored)*, *Repeater mode
+(stored)*) and a select in the configuration category (disabled by default).
+Writing the repeater mode was tested on one D2-01-01 switch (level 1 and back
+to off) through the gateway interface, not through these entities.
+
+**Display.** The stored switch values (timer durations, switch-off warning,
+illumination threshold) are shown as whole numbers, the warning signal in
+milliseconds.
+
 **Switch selects.** D2-01-01 and D2-01-11 switches also get select entities for
 the settings that have a fixed set of values: *Operation mode* (bottom on,
 timer, toggle, top on; the timer durations above only act in *timer*), *LED
 colour* (all, green, off, red), *LED channel* (2-channel switches only: which
 channel the LED shows) and *External input function* (channel 1 and inactive,
-for a 2-channel switch also channel 2 and channels 1 + 2). The same rules apply
+for a 2-channel switch also channel 2 and channels 1 + 2), *Routing* (off or on)
+and *Repeater mode* (off, level 1, level 2). The same rules apply
 as for the numbers: configuration entities, **disabled by default**, one set
 per device, values from the device configuration, a new value is written with
 the ReCom configuration request (`{"key": ..., "value": "<value>"}`) and

@@ -153,7 +153,6 @@ def test_configuration_functions_tolerate_malformed_parameters(
         [{"key": "ledColor", "defaultValue": "off"}],
         [{"key": "ledChannel", "defaultValue": "channel1"}],
         [{"key": "functionExternalInput", "defaultValue": "channel1"}],
-        [{"key": "routingTime", "value": "off"}],
         [{"key": "functionRockerA", "value": 0}],
     ],
 )

@@ -70,8 +70,10 @@ from .const import (
     KEY_POSITION,
     KEY_QUERY,
     KEY_RAMPING_MODE,
+    KEY_REPEATER_STATE,
     KEY_REPOSITIONING,
     KEY_ROTATION_TIME,
+    KEY_ROUTING_TIME,
     KEY_STOP,
     KEY_UNLOCK,
     KEY_VERTICAL_MOVEMENT_TIME,
@@ -80,6 +82,9 @@ from .const import (
     RAMPING_MODE_SWITCH,
     REPOSITIONING_FIRST_DOWN,
     REPOSITIONING_FIRST_UP,
+    ROUTING_OFF,
+    ROUTING_ON,
+    ROUTING_ON_SECONDS,
     SETTING_CACHE_GUARD_SECONDS,
     UNLOCK_ALLOWED,
     UNLOCK_NOT_ALLOWED,
@@ -2333,8 +2338,17 @@ class OpusGreenNetCoordinator:
             return
         self._settings_reading.add(device_id)
         started = self._setting_writes.get(device_id, 0)
+        repeater: JsonObject | None = None
         try:
             document = await self.async_get_device_configuration(device_id)
+            if protocol.supports_repeater_state(device):
+                # A second, separate read; a failure only leaves the mode as known.
+                try:
+                    repeater = await self.async_get_repeater_state(device_id)
+                except HomeAssistantError as err:
+                    _LOGGER.debug(
+                        "Repeater mode of device %s not read: %s", device_id, err
+                    )
         finally:
             self._settings_reading.discard(device_id)
         if self._setting_writes.get(device_id, 0) != started:
@@ -2346,6 +2360,10 @@ class OpusGreenNetCoordinator:
         if self.devices.get(device_id) is not device:
             return
         functions = protocol.configuration_state_functions(document)
+        if repeater is not None and (
+            function := protocol.repeater_state_function(repeater)
+        ):
+            functions.append(function)
         if not functions:
             return
         device.update_from_telegram({"functions": functions})
@@ -2505,6 +2523,12 @@ class OpusGreenNetCoordinator:
         device = self.get_device(device_id)
         if device is None:
             raise request_error("device_not_found", device_id)
+        if key == KEY_REPEATER_STATE:
+            await self._async_set_repeater_state(device, option)
+            return
+        if key == KEY_ROUTING_TIME:
+            await self._async_set_routing(device, option)
+            return
         stored = protocol.configuration_option(
             await self._async_write_and_read_back(device_id, key, option), key
         )
@@ -2513,6 +2537,91 @@ class OpusGreenNetCoordinator:
         previous = device.setting_reading(key)
         device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
         self._guard_confirmed_setting(device_id, key, previous, stored)
+        self._dispatch_state(device)
+
+    async def _async_set_routing(self, device: EnOceanDevice, option: str) -> None:
+        """Switch the routing of a device off or on (read back like any setting).
+
+        "off" is written as the text the catalog lists, "on" as the smallest
+        routing time. Nothing is written when the device already shows the
+        wanted state; the read-back accepts "off" or any positive time.
+        """
+        device_id = device.device_id
+        if device.setting_reading(KEY_ROUTING_TIME) == option:
+            return
+        value: float | str = ROUTING_ON_SECONDS if option == ROUTING_ON else ROUTING_OFF
+        stored = protocol.configuration_routing(
+            await self._async_write_and_read_back(device_id, KEY_ROUTING_TIME, value)
+        )
+        if stored != option:
+            raise request_error("parameter_not_confirmed", device_id, KEY_ROUTING_TIME)
+        previous = device.setting_reading(KEY_ROUTING_TIME)
+        device.update_from_telegram(
+            {"functions": [{"key": KEY_ROUTING_TIME, "value": stored}]}
+        )
+        self._guard_confirmed_setting(device_id, KEY_ROUTING_TIME, previous, stored)
+        self._dispatch_state(device)
+
+    async def async_get_repeater_state(self, device_id: str) -> JsonObject:
+        """Read the repeater mode of a device (``GET .../repeaterState``)."""
+        path = OpusGatewayClient.device_path(device_id, "repeaterState")
+        return await self._async_radio_request(
+            device_id,
+            lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
+            priority=PRIORITY_QUERY,
+            kind="repeater_state_read",
+        )
+
+    async def _async_set_repeater_state(
+        self, device: EnOceanDevice, option: str
+    ) -> None:
+        """Write the repeater mode and adopt it only when the read-back equals it.
+
+        Same contract as the ReCom settings: the acknowledgement means the
+        gateway accepted the request, neither step is repeated, and a rejected
+        step is reported with its own message.
+        """
+        device_id = device.device_id
+        path = OpusGatewayClient.device_path(device_id, "repeaterState")
+        body = {KEY_REPEATER_STATE: option}
+        self._note_setting_write(device_id)
+        try:
+            try:
+                await self._async_radio_request(
+                    device_id,
+                    lambda: self.client.async_put(path, body, timeout=RECOM_TIMEOUT),
+                    priority=PRIORITY_QUERY,
+                    kind="repeater_state_write",
+                    values={KEY_REPEATER_STATE: option},
+                )
+            except HomeAssistantError as err:
+                if err.translation_key != "request_rejected":
+                    raise
+                raise request_error(
+                    "parameter_write_failed",
+                    device_id,
+                    _step_reason(KEY_REPEATER_STATE, err),
+                ) from err
+            try:
+                document = await self.async_get_repeater_state(device_id)
+            except HomeAssistantError as err:
+                if err.translation_key != "request_rejected":
+                    raise
+                raise request_error(
+                    "parameter_read_back_failed",
+                    device_id,
+                    _step_reason(KEY_REPEATER_STATE, err),
+                ) from err
+        finally:
+            self._note_setting_write(device_id)
+        function = protocol.repeater_state_function(document)
+        if function is None or function["value"] != option:
+            raise request_error(
+                "parameter_not_confirmed", device_id, KEY_REPEATER_STATE
+            )
+        previous = device.setting_reading(KEY_REPEATER_STATE)
+        device.update_from_telegram({"functions": [function]})
+        self._guard_confirmed_setting(device_id, KEY_REPEATER_STATE, previous, option)
         self._dispatch_state(device)
 
     async def async_get_device_parameters(self, device_id: str) -> JsonObject:
