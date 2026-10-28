@@ -1008,6 +1008,7 @@ class OpusGreenNetCoordinator:
             physical_device=protocol.metadata_text(data.get("physicalDevice")),
             product_id=protocol.metadata_text(data.get("productId")),
             software_revision=protocol.metadata_text(data.get("softwareRevision")),
+            hardware_revision=protocol.metadata_text(data.get("hardwareRevision")),
             first_seen=protocol.metadata_text(data.get("firstSeen")),
             last_seen=protocol.metadata_text(data.get("lastSeen")),
             dbm=EnOceanDevice._parse_integer(data.get("dbm")),

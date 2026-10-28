@@ -239,6 +239,7 @@ async def async_get_config_entry_diagnostics(
                 "manufacturer": device.manufacturer,
                 "product_id": device.product_id,
                 "software_revision": device.software_revision,
+                "hardware_revision": device.hardware_revision,
                 "last_seen": device.last_seen,
                 "last_update_source": device.last_update_source,
                 "dbm": device.dbm,

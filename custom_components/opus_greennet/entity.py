@@ -318,6 +318,7 @@ class OpusGreenNetEntity(Entity):
             serial_number=None,
             model_id=self._device.product_id or None,
             sw_version=self._device.software_revision or None,
+            hw_version=self._device.hardware_revision or None,
             via_device_id=self._gateway_device_id,
         )
 
