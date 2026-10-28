@@ -136,10 +136,9 @@ parameter catalog read from one D2-01-01 and one D2-01-11; other switch types
 get no such entities.
 
 **Device information.** The device page shows the product ID (*model ID*), the
-software version, the hardware version from the gateway's device list. The device ID is the
-identifier of the device, not a serial number, and is no longer shown as one;
-every device has the diagnostic sensor **Device ID** instead (the device page
-has no free field for it).
+software version, the hardware version from the gateway's device list. The
+device ID is shown as the *serial number* and, in addition, as the diagnostic
+sensor **Device ID** of every device.
 
 **Routing and repeater mode.** The gateway stores the routing as *off* or a time
 in seconds (0.3 to 2.55); only *off* has been seen. The integration shows it

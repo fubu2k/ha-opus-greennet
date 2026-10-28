@@ -368,8 +368,8 @@ def test_device_information_has_product_id_and_software_version_no_serial() -> N
     assert info["hw_version"] == "0.24.17.20"
     assert info["model_id"] == "004000000005"
     assert info["sw_version"] == "0.1.0.0"
-    # The device ID is the identifier, not a serial number.
-    assert info["serial_number"] is None
+    # The device ID is also shown as the serial number.
+    assert info["serial_number"] == "019D5EC7"
 
 
 def test_device_information_without_the_new_fields() -> None:
