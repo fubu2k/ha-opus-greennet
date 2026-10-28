@@ -43,6 +43,7 @@ from .discovery import (
     async_resolve_host,
     default_connection,
     is_local_address,
+    parse_host_literal,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,6 +51,18 @@ _LOGGER = logging.getLogger(__name__)
 PASSWORD_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
 _HOSTNAME_LABEL = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
+
+
+async def _async_name_leads_to(
+    configured: object, address: ipaddress.IPv4Address | ipaddress.IPv6Address
+) -> bool:
+    """Return whether the configured host name resolves to ``address``.
+
+    An IP address, a missing host or a name that does not resolve is no match.
+    """
+    if not isinstance(configured, str) or parse_host_literal(configured) is not None:
+        return False
+    return address in await async_resolve_host(configured)
 
 
 def _is_host(host: str) -> bool:
@@ -275,6 +288,13 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
         host = discovery_info.host
         for entry in self._async_current_entries(include_ignore=False):
             if entry.data.get(CONF_HOST) == host:
+                return self.async_abort(reason="already_configured")
+            # A host name the user chose stays: it already leads to this
+            # address. Only a name that leads elsewhere (or nowhere) is
+            # replaced by the announced address below.
+            if await _async_name_leads_to(
+                entry.data.get(CONF_HOST), discovery_info.ip_address
+            ):
                 return self.async_abort(reason="already_configured")
         for entry in self._async_current_entries(include_ignore=False):
             if await self._async_adopt_address(entry.entry_id, host):
