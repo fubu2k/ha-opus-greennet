@@ -299,3 +299,30 @@ def test_blind_setting_sensors_keep_their_decimals() -> None:
     blind = EnOceanDevice("DEV1", "Blind", [{"eep": "D2-05-02"}])
     sensor = OpusGreenNetSettingSensor(MagicMock(), "AABB0011", "gateway", blind, time)
     assert sensor.suggested_display_precision is None
+
+
+# ── repeater mode in the device list ───────────────────────────────────────
+
+
+def test_the_device_list_carries_the_repeater_mode() -> None:
+    """Shown after a restart without pressing Read settings (no radio request)."""
+    device = EnOceanDevice("DEV1", "Dimmer", [{"eep": "D2-01-03"}])
+    data = {"deviceId": "DEV1", "repeaterState": "level_1", "states": []}
+    device.update_from_telegram({"functions": protocol.device_state_functions(data)})
+    assert device.channels[0].repeater == "level_1"
+
+
+def test_a_device_list_without_the_repeater_mode_keeps_the_known_one() -> None:
+    device = _switch()
+    device.get_or_create_channel().repeater = "level_2"
+    data = {"deviceId": "DEV1", "states": [{"key": "switch", "value": "on"}]}
+    device.update_from_telegram({"functions": protocol.device_state_functions(data)})
+    assert device.channels[0].repeater == "level_2"
+
+
+def test_the_repeater_mode_is_offered_for_dimmers_too() -> None:
+    from custom_components.opus_greennet.select import REPEATER
+
+    dimmer = EnOceanDevice("DIM", "Dimmer", [{"eep": "D2-01-03"}])
+    assert REPEATER.values_for(dimmer) == ("off", "level_1", "level_2")
+    assert protocol.supports_repeater_state(dimmer)

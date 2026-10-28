@@ -34,8 +34,8 @@ from .const import (
     KEY_VERTICAL_MOVEMENT_TIME,
     KNOWN_STATE_KEYS,
     LOCKING_MODES,
+    REPEATER_EEPS,
     RWM_EEP,
-    SWITCH_EEPS,
 )
 from .enocean_device import DeviceProfile, EnOceanDevice, LinkedDevice, LinkTables
 from .wire import WireFunction, WireMapping, as_object, object_items
@@ -265,7 +265,7 @@ def configuration_parameter(document: WireMapping, key: str) -> float | None:
 
 def supports_repeater_state(device: EnOceanDevice) -> bool:
     """Return whether the device is known to have the repeater mode resource."""
-    return any(eep in SWITCH_EEPS for eep in device.eep_names)
+    return any(eep in REPEATER_EEPS for eep in device.eep_names)
 
 
 def routing_state(value: object) -> str | None:
@@ -437,6 +437,9 @@ def device_state_functions(data: WireMapping) -> list[WireFunction]:
             and function.get("key") in ("alarm", "smokeAlarm", "batteryLow")
             and "value" in function
         )
+    # The repeater mode is a device field of the device list (cache, no radio).
+    if (repeater := repeater_state_function(data)) is not None:
+        state_functions.append(repeater)
     if "batteryLevel" in data:
         state_functions.append({"key": "batteryLevel", "value": data["batteryLevel"]})
     # The answer the gateway stores for a sleeping device's next request
