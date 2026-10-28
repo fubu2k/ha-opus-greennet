@@ -430,3 +430,58 @@ async def test_stream_replacement_leaves_exactly_one_stream_reader(
     ]
     assert len(stream_tasks) == 1
     assert coordinator.available
+
+
+async def test_nightly_restart_sequence_ends_with_one_reader_and_the_new_state(
+    hass: HomeAssistant, gateway: FakeGateway
+) -> None:
+    """Failed probe, return of the gateway, then the shorter uptime.
+
+    The reader that replaced itself after the failed probe reconnects on its
+    own; the first successful probe then sees the falling uptime and replaces
+    the stream once more. Afterwards exactly one reader is left, it applies the
+    state the gateway has after its restart, and the gateway stays available.
+    """
+    gateway.devices = [_switch("off")]
+    entry = await setup_bridge(hass, gateway)
+    coordinator = _coordinator(entry)
+    entity_id = await wait_for_entity(hass, "switch", f"AABB0011_{SWITCH}")
+    await gateway.wait_for_stream()
+    assert coordinator.gateway_uptime == "3600"
+
+    # The gateway goes down: the probe fails and the stream is replaced.
+    streams = len(gateway.requests_to("GET", "/devices/stream"))
+    gateway.status["/system/uptime"] = 500
+    await _probe(coordinator)
+    assert not coordinator.available
+    assert coordinator.gateway_uptime == "3600"  # a failed probe keeps the value
+    await wait_until(
+        lambda: len(gateway.requests_to("GET", "/devices/stream")) > streams
+    )
+    await wait_until(lambda: coordinator.available)
+
+    # It is back with a shorter uptime and another state.
+    del gateway.status["/system/uptime"]
+    gateway.uptime = 20
+    gateway.devices = [_switch("on")]
+    streams = len(gateway.requests_to("GET", "/devices/stream"))
+    await _probe(coordinator)
+    await wait_until(
+        lambda: len(gateway.requests_to("GET", "/devices/stream")) > streams
+    )
+    await wait_until(lambda: coordinator._stream_connected)  # noqa: SLF001
+    await wait_until(lambda: hass.states.get(entity_id).state == "on")
+    assert coordinator.gateway_uptime == "20"
+    assert coordinator.available
+
+    # Only the newest reader is left and it applies telegrams.
+    await gateway.push(telegram(SWITCH, [{"key": "switch", "value": "off"}]))
+    await wait_until(lambda: gateway.stream_count == 1)
+    await wait_until(lambda: hass.states.get(entity_id).state == "off")
+    stream_tasks = [
+        task
+        for task in coordinator._tasks  # noqa: SLF001
+        if task.get_name().endswith(" stream")
+    ]
+    assert len(stream_tasks) == 1
+    assert coordinator.available
