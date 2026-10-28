@@ -147,7 +147,10 @@ Useful fields:
   been stored. Nothing is repeated automatically. Requests that were not sent
   (gateway offline, device unknown, queued check dropped) have no entry.
 - `last_vertical_movement_time` (covers): the last run duration the gateway
-  reports.
+  reports. It is not a measurement of the travel: on 24 D2-05-02 blinds in one
+  installation (firmware 1.21.30) it equalled the stored vertical movement time
+  plus about 5 s on 20 of them, and a partial run did not change it. Two blinds
+  reported 0 and one an older value.
 - `position_origin` (covers, per channel): `device list`, `reported`,
   `estimated` or `assumed` (the travel estimate ended without a report).
 - The profile source of every D2-01 device (gateway profile or EEP table).
