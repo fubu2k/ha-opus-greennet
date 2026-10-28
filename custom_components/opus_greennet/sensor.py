@@ -79,18 +79,20 @@ MEASUREMENT_READINGS: Final[dict[str, Callable[[EnOceanChannel], float | None]]]
 # illuminance as whole lux. Display only: the reported state and history are
 # unchanged, and a user-chosen display precision in the entity settings takes
 # precedence.
-# Display of the stored settings: suggested unit and decimals. Long times are
-# shown in minutes (no decimals set: 90 s shows as 1.5 min, 300 s as 5 min),
-# the warning signal in whole milliseconds (it is stored in 1 ms steps).
-SETTING_DISPLAY: Final[dict[str, tuple[str | None, int | None]]] = {
-    "timer": (UnitOfTime.MINUTES, None),
-    "timer_long": (UnitOfTime.MINUTES, None),
-    "switch_off_warning": (None, 0),
-    "switch_off_warning_signal": (UnitOfTime.MILLISECONDS, 0),
-    "illumination_threshold": (None, 0),
-    "pir_off_time": (None, 0),
-    "recom_ready_time": (UnitOfTime.MINUTES, None),
-    "alive_cycle": (None, 0),
+# Decimals shown for the stored settings. They stay in their native unit: a
+# suggested unit would scale the precision of an entity that already has
+# another unit (HA adds digits), which showed "0,500 s". A user can still pick
+# minutes in the entity settings. The warning signal has 1 ms steps but is
+# used with values like 0.5 s, so it shows one decimal.
+SETTING_DISPLAY_PRECISION: Final[dict[str, int]] = {
+    "timer": 0,
+    "timer_long": 0,
+    "switch_off_warning": 0,
+    "switch_off_warning_signal": 1,
+    "illumination_threshold": 0,
+    "pir_off_time": 0,
+    "recom_ready_time": 0,
+    "alive_cycle": 0,
 }
 MEASUREMENT_DISPLAY_PRECISION: Final[dict[str, int]] = {
     "battery_level": 0,
@@ -299,6 +301,11 @@ async def async_setup_entry(
                 gateway_device_id=gateway_device_id,
                 device=device,
             )
+        )
+
+        # The device ID (EURID) as text, for every device (diagnostic).
+        entities.append(
+            OpusGreenNetDeviceIdSensor(coordinator, eag_id, gateway_device_id, device)
         )
 
         # The settings stored on the device, read only (diagnostic). The number
@@ -591,6 +598,33 @@ def parse_last_seen(value: str) -> datetime | None:
     return parsed if parsed.tzinfo is not None else None
 
 
+class OpusGreenNetDeviceIdSensor(OpusGreenNetBaseSensor):
+    """The device ID (EURID) of a device.
+
+    The device page has no field for it: its "serial number" line would name it
+    wrongly, so it is a diagnostic sensor.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+    ) -> None:
+        """Initialize the device ID sensor."""
+        super().__init__(
+            coordinator, eag_id, gateway_device_id, device, "device_id", "device_id"
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return the device ID."""
+        return self._device.device_id
+
+
 class OpusGreenNetLastSeenSensor(OpusGreenNetBaseSensor):
     """When the gateway last heard from the device."""
 
@@ -677,10 +711,9 @@ class OpusGreenNetSettingSensor(OpusGreenNetBaseSensor):
         self._device_time = device_time
         self._attr_native_unit_of_measurement = device_time.unit
         self._attr_device_class = SensorDeviceClass(device_time.device_class.value)
-        if (display := SETTING_DISPLAY.get(device_time.translation_key)) is not None:
-            unit, precision = display
-            self._attr_suggested_unit_of_measurement = unit
-            self._attr_suggested_display_precision = precision
+        self._attr_suggested_display_precision = SETTING_DISPLAY_PRECISION.get(
+            device_time.translation_key
+        )
 
     @property
     def native_value(self) -> float | None:
@@ -689,6 +722,9 @@ class OpusGreenNetSettingSensor(OpusGreenNetBaseSensor):
         if channel is None:
             return None
         value: float | None = getattr(channel, self._device_time.attribute)
+        if isinstance(value, float) and value.is_integer():
+            # 300.0 would be shown with a decimal; a whole number is not.
+            return int(value)
         return value
 
 

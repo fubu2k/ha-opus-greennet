@@ -310,6 +310,9 @@
           "sufficient": "Sufficient",
           "poor": "Poor"
         }
+      },
+      "device_id": {
+        "name": "Device ID"
       }
     },
     "switch": {

@@ -310,6 +310,9 @@
           "sufficient": "Ausreichend",
           "poor": "Schlecht"
         }
+      },
+      "device_id": {
+        "name": "Geräte-ID"
       }
     },
     "switch": {

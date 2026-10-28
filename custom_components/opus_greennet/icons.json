@@ -31,6 +31,9 @@
           "requested": "mdi:lock-clock"
         }
       },
+      "device_id": {
+        "default": "mdi:identifier"
+      },
       "signal_quality": {
         "default": "mdi:wifi-strength-off-outline",
         "state": {
