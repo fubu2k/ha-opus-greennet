@@ -464,7 +464,7 @@ def test_keeps_single_channel_registry_entity() -> None:
         (async_setup_switches, "D2-01-11", 2),
         (async_setup_covers, "D2-05-00", 1),
         (async_setup_climate, "D1-4B-06", 1),
-        (async_setup_sensors, "D1-4B-07", 4),
+        (async_setup_sensors, "D1-4B-07", 5),
         (async_setup_binary_sensors, "D1-4B-05", 5),
         (async_setup_binary_sensors, "F6-05-01", 1),
         (async_setup_events, "F6-02-01", 1),
