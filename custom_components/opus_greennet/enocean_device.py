@@ -255,6 +255,7 @@ class EnOceanDevice:
     # Gateway device list: product number and software version of the device.
     product_id: str = ""
     software_revision: str = ""
+    hardware_revision: str = ""
     first_seen: str = ""
     last_seen: str = ""
     last_update_source: str = ""
@@ -282,6 +283,7 @@ class EnOceanDevice:
         "physical_device",
         "product_id",
         "software_revision",
+        "hardware_revision",
         "first_seen",
         "last_seen",
         "dbm",
@@ -309,6 +311,7 @@ class EnOceanDevice:
         # A list that omits them keeps the known values.
         self.product_id = listed.product_id or self.product_id
         self.software_revision = listed.software_revision or self.software_revision
+        self.hardware_revision = listed.hardware_revision or self.hardware_revision
         self.first_seen = listed.first_seen
         if listed.last_seen and not keep_signal:
             self.last_seen = listed.last_seen
@@ -1159,6 +1162,7 @@ class EnOceanDevice:
             physical_device=text("physicalDevice"),
             product_id=text("productId"),
             software_revision=text("softwareRevision"),
+            hardware_revision=text("hardwareRevision"),
             first_seen=text("firstSeen"),
             last_seen=text("lastSeen"),
             dbm=dbm,
