@@ -68,7 +68,7 @@ async def _created(eep: str) -> list:
     ("eep", "numbers", "choices"),
     [
         ("D2-05-02", 3, 0),
-        ("D2-01-03", 3, 0),
+        ("D2-01-03", 3, 1),
         ("D2-01-01", 5, 5),
         ("D2-01-11", 5, 6),
         ("A5-07-03", 3, 0),
@@ -100,7 +100,7 @@ async def test_the_sensors_follow_the_number_and_select_entities() -> None:
         } | {
             f"{EAG_ID}_DEV1_{select.translation_key}_setting"
             for select in DEVICE_SELECTS
-            if device.entity_type == "switch" and select.values_for(device)
+            if select.values_for(device)
         }
         assert {e.unique_id for e in await _created(eep)} == expected
 

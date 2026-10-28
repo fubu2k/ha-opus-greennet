@@ -243,7 +243,13 @@ KEY_ROUTING_TIME: Final = "routingTime"
 KEY_REPEATER_STATE: Final = "repeaterState"
 ROUTING_ON_SECONDS: Final = 0.3
 # D2-01 switches (catalog read from a D2-01-01 and a D2-01-11).
+# Radio link quality by signal strength (dBm): above GOOD is good, down to
+# POOR (inclusive) sufficient, below it poor (a repeater is recommended).
+SIGNAL_GOOD_DBM: Final = -75
+SIGNAL_POOR_DBM: Final = -85
 SWITCH_EEPS: Final = ("D2-01-01", "D2-01-11")
+# Devices that report the repeater mode (D2-01-03 read from a dimmer, not written).
+REPEATER_EEPS: Final = (*SWITCH_EEPS, "D2-01-03")
 ROUTING_OFF: Final = "off"
 ROUTING_ON: Final = "on"
 DEVICE_OPTIONS: Final = {

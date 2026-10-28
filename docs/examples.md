@@ -167,7 +167,7 @@ This action only reads. Link tables are changed with the OPUS app.
 - **Safety and presence.** Water leak sensors, smoke alarms and presence
   detectors become binary sensors for notifications, with unknown values never
   taken for "no alarm".
-- **Diagnosing a radio installation.** Signal strength (disabled by default),
+- **Diagnosing a radio installation.** Signal strength and signal quality,
   battery level and the redacted diagnostics download show devices with weak signal
   or low battery. See
   [Troubleshooting](troubleshooting.md).

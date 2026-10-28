@@ -274,12 +274,14 @@ def _sensor(translation_key: str) -> OpusGreenNetSettingSensor:
     )
 
 
-@pytest.mark.parametrize(
-    "key",
-    ["timer", "timer_long", "switch_off_warning", "illumination_threshold"],
-)
+@pytest.mark.parametrize("key", ["switch_off_warning", "illumination_threshold"])
 def test_switch_setting_sensors_show_whole_numbers(key: str) -> None:
     assert _sensor(key).suggested_display_precision == 0
+
+
+@pytest.mark.parametrize("key", ["timer", "timer_long"])
+def test_the_timer_durations_are_shown_in_minutes(key: str) -> None:
+    assert _sensor(key).suggested_unit_of_measurement == UnitOfTime.MINUTES
 
 
 def test_the_warning_signal_is_shown_in_whole_milliseconds() -> None:
@@ -299,3 +301,78 @@ def test_blind_setting_sensors_keep_their_decimals() -> None:
     blind = EnOceanDevice("DEV1", "Blind", [{"eep": "D2-05-02"}])
     sensor = OpusGreenNetSettingSensor(MagicMock(), "AABB0011", "gateway", blind, time)
     assert sensor.suggested_display_precision is None
+
+
+# ── repeater mode in the device list ───────────────────────────────────────
+
+
+def test_the_device_list_carries_the_repeater_mode() -> None:
+    """Shown after a restart without pressing Read settings (no radio request)."""
+    device = EnOceanDevice("DEV1", "Dimmer", [{"eep": "D2-01-03"}])
+    data = {"deviceId": "DEV1", "repeaterState": "level_1", "states": []}
+    device.update_from_telegram({"functions": protocol.device_state_functions(data)})
+    assert device.channels[0].repeater == "level_1"
+
+
+def test_a_device_list_without_the_repeater_mode_keeps_the_known_one() -> None:
+    device = _switch()
+    device.get_or_create_channel().repeater = "level_2"
+    data = {"deviceId": "DEV1", "states": [{"key": "switch", "value": "on"}]}
+    device.update_from_telegram({"functions": protocol.device_state_functions(data)})
+    assert device.channels[0].repeater == "level_2"
+
+
+def test_the_repeater_mode_is_offered_for_dimmers_too() -> None:
+    from custom_components.opus_greennet.select import DEVICE_SELECTS
+
+    (REPEATER,) = (s for s in DEVICE_SELECTS if s.parameter == "repeaterState")
+    dimmer = EnOceanDevice("DIM", "Dimmer", [{"eep": "D2-01-03"}])
+    assert REPEATER.values_for(dimmer) == ("off", "level_1", "level_2")
+    assert protocol.supports_repeater_state(dimmer)
+
+
+# ── device information ─────────────────────────────────────────────────────
+
+
+def _info(device: EnOceanDevice):
+    from unittest.mock import MagicMock
+
+    from custom_components.opus_greennet.entity import OpusGreenNetEntity
+
+    return OpusGreenNetEntity(MagicMock(), "AABB0011", "gateway", device).device_info
+
+
+def test_device_information_has_product_id_and_software_version_no_serial() -> None:
+    device = EnOceanDevice.from_device_object(
+        {
+            "deviceId": "019D5EC7",
+            "friendlyId": "Bad",
+            "productId": "004000000005",
+            "softwareRevision": "0.1.0.0",
+        }
+    )
+    info = _info(device)
+    assert info["model_id"] == "004000000005"
+    assert info["sw_version"] == "0.1.0.0"
+    # The device ID is the identifier, not a serial number.
+    assert info["serial_number"] is None
+
+
+def test_device_information_without_the_new_fields() -> None:
+    info = _info(_switch())
+    assert info["model_id"] is None
+    assert info["sw_version"] is None
+
+
+def test_a_list_without_product_data_keeps_the_known_values() -> None:
+    device = EnOceanDevice.from_device_object(
+        {"deviceId": "D", "productId": "1", "softwareRevision": "2"}
+    )
+    device.apply_listed_metadata(EnOceanDevice.from_device_object({"deviceId": "D"}))
+    assert (device.product_id, device.software_revision) == ("1", "2")
+    device.apply_listed_metadata(
+        EnOceanDevice.from_device_object(
+            {"deviceId": "D", "productId": "3", "softwareRevision": "4"}
+        )
+    )
+    assert (device.product_id, device.software_revision) == ("3", "4")

@@ -28,7 +28,13 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import OpusGreenNetConfigEntry
-from .const import CONF_EAG_ID, DEFAULT_CHANNEL, DOMAIN
+from .const import (
+    CONF_EAG_ID,
+    DEFAULT_CHANNEL,
+    DOMAIN,
+    SIGNAL_GOOD_DBM,
+    SIGNAL_POOR_DBM,
+)
 from .coordinator import (
     SIGNAL_AVAILABILITY_UPDATE,
     SIGNAL_DEVICE_DISCOVERED,
@@ -72,6 +78,19 @@ MEASUREMENT_READINGS: Final[dict[str, Callable[[EnOceanChannel], float | None]]]
 # illuminance as whole lux. Display only: the reported state and history are
 # unchanged, and a user-chosen display precision in the entity settings takes
 # precedence.
+# Display of the stored settings: suggested unit and decimals. Long times are
+# shown in minutes (no decimals set: 90 s shows as 1.5 min, 300 s as 5 min),
+# the warning signal in whole milliseconds (it is stored in 1 ms steps).
+SETTING_DISPLAY: Final[dict[str, tuple[str | None, int | None]]] = {
+    "timer": (UnitOfTime.MINUTES, None),
+    "timer_long": (UnitOfTime.MINUTES, None),
+    "switch_off_warning": (None, 0),
+    "switch_off_warning_signal": (UnitOfTime.MILLISECONDS, 0),
+    "illumination_threshold": (None, 0),
+    "pir_off_time": (None, 0),
+    "recom_ready_time": (UnitOfTime.MINUTES, None),
+    "alive_cycle": (None, 0),
+}
 MEASUREMENT_DISPLAY_PRECISION: Final[dict[str, int]] = {
     "battery_level": 0,
     "illuminance": 0,
@@ -265,6 +284,12 @@ async def async_setup_entry(
             )
         )
 
+        entities.append(
+            OpusGreenNetSignalQualitySensor(
+                coordinator, eag_id, gateway_device_id, device
+            )
+        )
+
         # Time of the last telegram or listed update (all devices, diagnostic).
         entities.append(
             OpusGreenNetLastSeenSensor(
@@ -284,14 +309,13 @@ async def async_setup_entry(
             for device_time in (*DEVICE_TIMES, *PRESENCE_SETTINGS)
             if device_time.applies_to(device)
         )
-        if device.entity_type == "switch":
-            entities.extend(
-                OpusGreenNetSettingChoiceSensor(
-                    coordinator, eag_id, gateway_device_id, device, select, values
-                )
-                for select in DEVICE_SELECTS
-                if (values := select.values_for(device)) is not None
+        entities.extend(
+            OpusGreenNetSettingChoiceSensor(
+                coordinator, eag_id, gateway_device_id, device, select, values
             )
+            for select in DEVICE_SELECTS
+            if (values := select.values_for(device)) is not None
+        )
 
         # Wall switches linked to an actuator (diagnostic). Only devices whose
         # gateway listed a link table get one; the others have no such table.
@@ -513,6 +537,41 @@ class OpusGreenNetSignalStrengthSensor(OpusGreenNetBaseSensor):
         return None
 
 
+class OpusGreenNetSignalQualitySensor(OpusGreenNetBaseSensor):
+    """Radio link quality of a device, rated from its signal strength."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_options = ["good", "sufficient", "poor"]
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+    ) -> None:
+        """Initialize the signal quality sensor."""
+        super().__init__(
+            coordinator,
+            eag_id,
+            gateway_device_id,
+            device,
+            "signal_quality",
+            "signal_quality",
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return good, sufficient or poor, or None without a signal strength."""
+        dbm = self._device.dbm
+        if dbm is None:
+            return None
+        if dbm > SIGNAL_GOOD_DBM:
+            return "good"
+        return "sufficient" if dbm >= SIGNAL_POOR_DBM else "poor"
+
+
 def parse_last_seen(value: str) -> datetime | None:
     """Return the gateway's last-seen time, or None when it is not usable.
 
@@ -613,11 +672,10 @@ class OpusGreenNetSettingSensor(OpusGreenNetBaseSensor):
         self._device_time = device_time
         self._attr_native_unit_of_measurement = device_time.unit
         self._attr_device_class = SensorDeviceClass(device_time.device_class.value)
-        if device_time.entity_type == "switch":
-            # Whole numbers; the 0.5 s warning signal is shown as 500 ms.
-            self._attr_suggested_display_precision = 0
-            if device_time.translation_key == "switch_off_warning_signal":
-                self._attr_suggested_unit_of_measurement = UnitOfTime.MILLISECONDS
+        if (display := SETTING_DISPLAY.get(device_time.translation_key)) is not None:
+            unit, precision = display
+            self._attr_suggested_unit_of_measurement = unit
+            self._attr_suggested_display_precision = precision
 
     @property
     def native_value(self) -> float | None:

@@ -24,8 +24,8 @@ The settings stored on actuators, as far as the gateway's parameter catalog
 | Device | Number entities | Select entities | Not offered |
 |--------|-----------------|-----------------|-------------|
 | Blinds (D2-05-02) | Vertical movement time, Rotation time, Maximum holding time | – | Function of rocker A and B, routing time |
-| Dimmers (D2-01-03) | Ramping time, Short-press time, Long-press time | – | – |
-| Switches (D2-01-01) | Timer duration, Timer duration (long press), Switch-off warning, Switch-off warning signal, Illumination threshold | Operation mode, LED colour, External input function, Routing, Repeater mode | Function of rocker A and B |
+| Dimmers (D2-01-03) | Ramping time, Short-press time, Long-press time | Repeater mode | – |
+| Switches (D2-01-01) | Timer duration, Timer duration (long press), Switch-off warning, Switch-off warning signal, Illumination threshold | Operation mode, LED colour, External input function, ViNET Router, Repeater mode | Function of rocker A and B |
 | 2-channel switches (D2-01-11) | as D2-01-01 | as D2-01-01, plus LED channel | as D2-01-01 |
 
 Which of these settings were written on real hardware, and which only read, is
@@ -119,6 +119,10 @@ tested on hardware**, so try a single switch first. The ranges are those of the
 parameter catalog read from one D2-01-01 and one D2-01-11; other switch types
 get no such entities.
 
+**Device information.** The device page shows the product ID (*model ID*) and
+the software version from the gateway's device list. The device ID is the
+identifier of the device, not a serial number, and is no longer shown as one.
+
 **Routing and repeater mode.** The gateway stores the routing as *off* or a time
 in seconds (0.3 to 2.55); only *off* has been seen. The integration shows it
 as *off* or *on* (any time counts as on). Writing *on* sends the smallest time,
@@ -126,21 +130,23 @@ as *off* or *on* (any time counts as on). Writing *on* sends the smallest time,
 the state a device already shows sends nothing. The repeater mode is not a
 ReCom parameter but the device resource `/devices/{id}/repeaterState` (`off`,
 `level_1`, `level_2`); it is written and read back there. *Read settings*
-reads both. Each has a diagnostic sensor (*Routing (stored)*, *Repeater mode
+reads both. The device list carries the repeater mode too, so it is shown after a restart without a radio request. Dimmers (D2-01-03) report it as well and get the same entities (the dimmer catalog has no routing); writing it on a dimmer is untested. Each has a diagnostic sensor (*ViNET Router (stored)*, *Repeater mode
 (stored)*) and a select in the configuration category (disabled by default).
 Writing the repeater mode was tested on one D2-01-01 switch (level 1 and back
 to off) through the gateway interface, not through these entities.
 
 **Display.** The stored switch values (timer durations, switch-off warning,
-illumination threshold) are shown as whole numbers, the warning signal in
-milliseconds.
+illumination threshold) are shown without decimals, the two timer durations
+and the ReCom readiness cycle of presence detectors in minutes, the warning
+signal in milliseconds. A unit is suggested for new entities only; change it
+in the entity settings of an existing one.
 
 **Switch selects.** D2-01-01 and D2-01-11 switches also get select entities for
 the settings that have a fixed set of values: *Operation mode* (bottom on,
 timer, toggle, top on; the timer durations above only act in *timer*), *LED
 colour* (all, green, off, red), *LED channel* (2-channel switches only: which
 channel the LED shows) and *External input function* (channel 1 and inactive,
-for a 2-channel switch also channel 2 and channels 1 + 2), *Routing* (off or on)
+for a 2-channel switch also channel 2 and channels 1 + 2), *ViNET Router* (off or on)
 and *Repeater mode* (off, level 1, level 2). The same rules apply
 as for the numbers: configuration entities, **disabled by default**, one set
 per device, values from the device configuration, a new value is written with
@@ -303,6 +309,11 @@ battery percentage is invented when the gateway publishes none.
   refreshed every 30 minutes; the signal strength sensor is enabled by
   default for new installations (an entity that was disabled before stays
   disabled until you enable it).
+- Every device also has a diagnostic **Signal quality** sensor rated from the
+  signal strength: *Good* above -75 dBm, *Sufficient* from -75 to -85 dBm,
+  *Poor* below -85 dBm (a repeater, usually level 1 halfway, is recommended).
+  The icon follows the rating; colours are not offered by the integration
+  (a dashboard card can colour the value by these limits).
 - Every device also has a diagnostic **Last seen** sensor (enabled by
   default for new installations; an entity that was disabled before stays
   disabled until you enable it): the time of its newest report, from the telegram timestamp or the
