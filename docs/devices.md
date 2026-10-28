@@ -121,7 +121,9 @@ get no such entities.
 
 **Device information.** The device page shows the product ID (*model ID*), the
 software version, the hardware version from the gateway's device list. The device ID is the
-identifier of the device, not a serial number, and is no longer shown as one.
+identifier of the device, not a serial number, and is no longer shown as one;
+every device has the diagnostic sensor **Device ID** instead (the device page
+has no free field for it).
 
 **Routing and repeater mode.** The gateway stores the routing as *off* or a time
 in seconds (0.3 to 2.55); only *off* has been seen. The integration shows it
@@ -136,10 +138,9 @@ Writing the repeater mode was tested on one D2-01-01 switch (level 1 and back
 to off) through the gateway interface, not through these entities.
 
 **Display.** The stored switch values (timer durations, switch-off warning,
-illumination threshold) are shown without decimals, the two timer durations
-and the ReCom readiness cycle of presence detectors in minutes, the warning
-signal in milliseconds. A unit is suggested for new entities only; change it
-in the entity settings of an existing one.
+illumination threshold) are shown without decimals, the warning signal with
+one decimal (0.5 s). The units stay seconds; minutes can be chosen in the
+entity settings of an entity.
 
 **Switch selects.** D2-01-01 and D2-01-11 switches also get select entities for
 the settings that have a fixed set of values: *Operation mode* (bottom on,
