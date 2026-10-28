@@ -31,8 +31,17 @@ EAG_ID = "AABB0011"
 CONFIG_PATH = "/devices/DEV1/configuration"
 FIXTURES = Path(__file__).parent / "fixtures"
 
-OPERATION_MODE, LED_COLOR, LED_CHANNEL, EXTERNAL_INPUT = DEVICE_SELECTS
-KEYS = ("operationMode", "ledColor", "ledChannel", "functionExternalInput")
+OPERATION_MODE, LED_COLOR, LED_CHANNEL, EXTERNAL_INPUT, ROUTING, REPEATER = (
+    DEVICE_SELECTS
+)
+KEYS = (
+    "operationMode",
+    "ledColor",
+    "ledChannel",
+    "functionExternalInput",
+    "routingTime",
+    "repeaterState",
+)
 
 
 def _switch(eep: str = "D2-01-01", device_id: str = "DEV1") -> EnOceanDevice:
@@ -87,10 +96,26 @@ async def _setup(hass: HomeAssistant, devices: dict) -> list:
 @pytest.mark.parametrize(
     ("eep", "keys"),
     [
-        ("D2-01-01", ["operation_mode", "led_color", "function_external_input"]),
+        (
+            "D2-01-01",
+            [
+                "operation_mode",
+                "led_color",
+                "function_external_input",
+                "routing",
+                "repeater",
+            ],
+        ),
         (
             "D2-01-11",
-            ["operation_mode", "led_color", "led_channel", "function_external_input"],
+            [
+                "operation_mode",
+                "led_color",
+                "led_channel",
+                "function_external_input",
+                "routing",
+                "repeater",
+            ],
         ),
     ],
 )

@@ -18,7 +18,7 @@ import pytest
 from custom_components.opus_greennet import protocol
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
 from custom_components.opus_greennet.number import DEVICE_TIMES
-from custom_components.opus_greennet.select import DEVICE_SELECTS
+from custom_components.opus_greennet.select import CATALOG_SELECTS, EXTRA_SELECTS
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TYPES = ("d2_05_02", "d2_01_01", "d2_01_11", "d2_01_03")
@@ -189,7 +189,6 @@ EEPS = {
 _SWITCH_DEFERRED = {
     "functionRockerA": "raw value 0 is outside the options; needs a text write test",
     "functionRockerB": "raw value 0 is outside the options; needs a text write test",
-    "routingTime": "a number or the word off; no entity yet",
 }
 DEFERRED = {
     "d2_05_02": {
@@ -213,8 +212,9 @@ def _entity_parameters(name: str) -> set[str]:
     numbers = {time.parameter for time in DEVICE_TIMES if time.applies_to(device)}
     selects = {
         select.parameter
-        for select in DEVICE_SELECTS
+        for select in (*CATALOG_SELECTS, *EXTRA_SELECTS)
         if select.values_for(device) is not None
+        and select.parameter != "repeaterState"  # a device resource, no parameter
     }
     return numbers | selects
 
@@ -254,7 +254,7 @@ def test_number_entities_follow_the_catalog_ranges(name: str) -> None:
 def test_select_entities_offer_the_catalog_values(name: str) -> None:
     device = _device(name)
     catalog = _catalog(name)
-    for select in DEVICE_SELECTS:
+    for select in CATALOG_SELECTS:
         values = select.values_for(device)
         if values is None:
             continue

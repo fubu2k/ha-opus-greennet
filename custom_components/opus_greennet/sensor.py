@@ -618,6 +618,11 @@ class OpusGreenNetSettingSensor(OpusGreenNetBaseSensor):
         self._device_time = device_time
         self._attr_native_unit_of_measurement = device_time.unit
         self._attr_device_class = SensorDeviceClass(device_time.device_class.value)
+        if device_time.entity_type == "switch":
+            # Whole numbers; the 0.5 s warning signal is shown as 500 ms.
+            self._attr_suggested_display_precision = 0
+            if device_time.translation_key == "switch_off_warning_signal":
+                self._attr_suggested_unit_of_measurement = UnitOfTime.MILLISECONDS
 
     @property
     def native_value(self) -> float | None:

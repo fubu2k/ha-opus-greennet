@@ -234,11 +234,25 @@ KEY_OPERATION_MODE: Final = "operationMode"
 KEY_LED_COLOR: Final = "ledColor"
 KEY_LED_CHANNEL: Final = "ledChannel"
 KEY_FUNCTION_EXTERNAL_INPUT: Final = "functionExternalInput"
+# Routing (configuration parameter) is "off" or a time in seconds; only "off"
+# was seen on devices. It is shown as off/on: any time is "on". "on" is written
+# as the smallest time of the catalog (0.3 s), an assumption until a device
+# that routes was read. The repeater mode is no ReCom parameter but the device
+# resource /repeaterState (off, level_1, level_2).
+KEY_ROUTING_TIME: Final = "routingTime"
+KEY_REPEATER_STATE: Final = "repeaterState"
+ROUTING_ON_SECONDS: Final = 0.3
+# D2-01 switches (catalog read from a D2-01-01 and a D2-01-11).
+SWITCH_EEPS: Final = ("D2-01-01", "D2-01-11")
+ROUTING_OFF: Final = "off"
+ROUTING_ON: Final = "on"
 DEVICE_OPTIONS: Final = {
     KEY_OPERATION_MODE: "operation_mode",
     KEY_LED_COLOR: "led_color",
     KEY_LED_CHANNEL: "led_channel",
     KEY_FUNCTION_EXTERNAL_INPUT: "function_external_input",
+    KEY_ROUTING_TIME: "routing",
+    KEY_REPEATER_STATE: "repeater",
 }
 DEVICE_SETTING_KEYS: Final = frozenset(DEVICE_SETTINGS) | frozenset(DEVICE_OPTIONS)
 # How long a confirmed setting is protected against the gateway's cached copy of
