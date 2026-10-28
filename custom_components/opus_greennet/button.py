@@ -36,11 +36,7 @@ def has_settings(device: EnOceanDevice) -> bool:
     """Return whether the device has settings offered as number or select."""
     return any(
         time.applies_to(device) for time in (*DEVICE_TIMES, *PRESENCE_SETTINGS)
-    ) or any(
-        select.values_for(device) is not None
-        for select in DEVICE_SELECTS
-        if device.entity_type == "switch"
-    )
+    ) or any(select.values_for(device) is not None for select in DEVICE_SELECTS)
 
 
 async def async_setup_entry(

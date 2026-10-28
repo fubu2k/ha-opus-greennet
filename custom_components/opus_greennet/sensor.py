@@ -285,14 +285,13 @@ async def async_setup_entry(
             for device_time in (*DEVICE_TIMES, *PRESENCE_SETTINGS)
             if device_time.applies_to(device)
         )
-        if device.entity_type == "switch":
-            entities.extend(
-                OpusGreenNetSettingChoiceSensor(
-                    coordinator, eag_id, gateway_device_id, device, select, values
-                )
-                for select in DEVICE_SELECTS
-                if (values := select.values_for(device)) is not None
+        entities.extend(
+            OpusGreenNetSettingChoiceSensor(
+                coordinator, eag_id, gateway_device_id, device, select, values
             )
+            for select in DEVICE_SELECTS
+            if (values := select.values_for(device)) is not None
+        )
 
         # Wall switches linked to an actuator (diagnostic). Only devices whose
         # gateway listed a link table get one; the others have no such table.

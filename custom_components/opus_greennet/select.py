@@ -22,6 +22,7 @@ from .const import (
     KEY_OPERATION_MODE,
     KEY_REPEATER_STATE,
     KEY_ROUTING_TIME,
+    REPEATER_EEPS,
     ROUTING_OFF,
     ROUTING_ON,
     SWITCH_EEPS,
@@ -98,7 +99,7 @@ EXTRA_SELECTS: tuple[DeviceSelect, ...] = (
         "repeater",
         KEY_REPEATER_STATE,
         "repeater",
-        dict.fromkeys(SWITCH_EEPS, REPEATER_STATES),
+        dict.fromkeys(REPEATER_EEPS, REPEATER_STATES),
     ),
 )
 DEVICE_SELECTS = CATALOG_SELECTS + EXTRA_SELECTS
@@ -121,8 +122,6 @@ async def async_setup_entry(
 
     @callback
     def async_add_selects(device: EnOceanDevice) -> None:
-        if device.entity_type != "switch":
-            return
         async_add_entities(
             [
                 OpusGreenNetDeviceSelect(
