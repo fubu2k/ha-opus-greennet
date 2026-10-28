@@ -309,6 +309,11 @@ battery percentage is invented when the gateway publishes none.
   refreshed every 30 minutes; the signal strength sensor is enabled by
   default for new installations (an entity that was disabled before stays
   disabled until you enable it).
+- Every device also has a diagnostic **Signal quality** sensor rated from the
+  signal strength: *Good* above -75 dBm, *Sufficient* from -75 to -85 dBm,
+  *Poor* below -85 dBm (a repeater, usually level 1 halfway, is recommended).
+  The icon follows the rating; colours are not offered by the integration
+  (a dashboard card can colour the value by these limits).
 - Every device also has a diagnostic **Last seen** sensor (enabled by
   default for new installations; an entity that was disabled before stays
   disabled until you enable it): the time of its newest report, from the telegram timestamp or the
