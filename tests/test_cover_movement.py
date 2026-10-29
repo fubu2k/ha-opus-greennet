@@ -302,7 +302,7 @@ async def test_retarget_cancels_old_queries_before_ack(motion, radio, timers):
     assert all(cancel.called for _, _, cancel in old)
     radio.respond()
     await task
-    assert [delay for delay, _, _ in timers[-2:]] == [25, 35]
+    assert [delay for delay, _, _ in timers[-2:]] == [27, 37]
 
 
 async def test_queued_target_starts_only_when_sent(motion, radio, timers):
@@ -355,7 +355,7 @@ async def test_feedback_and_native_commands_are_channel_scoped(motion, timers):
     )
     assert other.movement == "opening"
     assert other.position == 100
-    assert [delay for delay, _, _ in timers[-3:]] == [45, 55, 65]
+    assert [delay for delay, _, _ in timers[-3:]] == [47, 57, 67]
     receive_feedback(
         coord,
         [
