@@ -2,6 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+Support for gateways with **WebUI 2026**, settings you can **read on request**, **routing and repeater mode** as entities, and much more detail for diagnosing the radio network: a radio journal, gateway versions and address, a signal quality rating. Built on @fubu2k's work, rebased onto v1.1.0. The version number and release header are left to the maintainer.
+
+### Requirement
+- **Home Assistant 2026.10.1 or newer**, as before. CI now uses 2026.10.4 as the fixed reference.
+
+### Before you update
+- **Nothing is written to your devices by this update.** The new entities that change a setting (*ViNET Router*, *Repeater mode*) are disabled by default, like the other settings entities.
+- **New read-only entities are enabled by default** and appear after the update: the stored settings sensors (named *… (stored)*), the *Read settings* button, *Signal quality*, *Device ID* and, on the gateway device, EURID, firmware, app and API version, hostname, IPv4 and IPv6 address. Disable the ones you do not want in the entity settings.
+- **The gateway's EURID sensor is enabled by default.** The EURID is the default gateway password, so it is also visible in the entity history. Disable the sensor if that matters to you. The diagnostics download keeps the EURID redacted.
+- **Tested on hardware:** reading the settings after a write, the repeater mode of one D2-01-01 switch (level 1 and back to off, through the gateway interface, not through these entities), and the stored values of a presence detector from the device list. **Not tested:** a gateway with WebUI 2026 (login endpoint and token header are assumptions), pressing *Read settings* on a presence detector, writing the repeater mode on a dimmer, and writing *ViNET Router* *on* (the smallest routing time is an assumption).
+
+### Added
+- **Gateways with WebUI 2026.** These gateways answer the REST API only over HTTPS (port 443) with a user login. They are recognised automatically (port 8080 first, then `/auth/setup-status` without a login). The config flow asks for the web interface user and password, remembers the gateway's self-signed certificate and asks you to confirm it when it changes. The access token is kept in memory only; a rejected token is requested again with the next request, and the request that met the rejection is not repeated.
+  - An existing entry whose gateway is updated asks to sign in again. Devices and entities are kept, and entries of earlier gateways are not changed (no migration).
+  - A gateway that stays unreachable for three health probes in a row is asked, at most every ten minutes and without credentials or radio requests, whether a WebUI 2026 gateway answers at its address. A gateway that only restarts is left alone.
+  - Credentials are never sent in clear text to a TLS service on another port.
+- **Read settings** button (diagnostic, enabled by default) for every device with settings: reads the stored configuration once over the radio and shows what the device reports. It is never repeated and never pressed by the integration itself, a press while the device is read is ignored, and an answer that overlaps a write is dropped because the write is newer.
+- **Stored settings as read-only sensors** (diagnostic, enabled by default, named *… (stored)*) for every setting of blinds, D2-01 dimmers and switches. The values are visible on the device page without enabling the number and select entities that change them.
+- **Presence detectors (A5-07-03):** alive cycle, PIR off time and ReCom readiness cycle as read-only diagnostic sensors, taken from the gateway's cached device list and the *Read settings* button.
+- **ViNET Router (off / on)** and **Repeater mode (off / level 1 / level 2)** as a stored sensor and a select each (select disabled by default) for D2-01-01 and D2-01-11 switches, the repeater mode also for D2-01-03 dimmers, where the mode was only read so far and writing it is untested. Writes are read back and never repeated. The repeater mode is read from the device list too, so it is shown after a restart without a radio request. The modes are labelled *Off (default)*, *Level 1 (single hop / 1-hop)* and *Level 2 (double hop / 2-hop)*.
+- **Signal quality** diagnostic sensor for every device, rated from the signal strength: *Good* above -75 dBm, *Sufficient* from -75 to -85 dBm, *Poor* below -85 dBm (a repeater, usually level 1 halfway, is then recommended). The icon follows the rating.
+- **Device information:** product ID, software version and hardware version from the gateway's device list, and a diagnostic **Device ID** sensor. The device ID is shown as the serial number of a device.
+- **Gateway information:** the gateway device shows its own serial number (`/system/info`, not the EURID). **The serial number of the gateway device changes** from the EURID to `systemInfo.serialNumber`, and is empty if the gateway reports none. New diagnostic sensors show firmware version, app version and API version; EURID, hostname, IPv4 address and IPv6 address exist too but are disabled by default. Versions are read at startup and every 30 minutes together with the device list refresh (a plain gateway read without radio traffic), and written to the log at startup and when one changes. Host name and addresses are resolved at the same times and stay *unknown* where they do not resolve.
+- **Radio journal** in the diagnostics download (block `radio_journal` of every device): the last 300 radio requests (state commands, status queries, configuration writes and read-backs, parameter and link table reads) with kind, priority, keys and values sent, outcome, HTTP and gateway status, shortened gateway text, duration and queue wait, and a `feedback` entry when a device reports what a command was waiting for. It is kept in memory only. With debug logging every request also writes one line. Nothing is repeated, and no second state store is added.
+- **Diagnostics download:** a `versions` block of the gateway (firmware, app and API version, receive counter, mean signal strength, read time) and a `connection` block (resolved host name and IP). The certificate fingerprint of a WebUI 2026 gateway is redacted, also in free text.
+
+### Changed
+- **A confirmed setting is no longer held for 26 hours.** A device list that arrives after a confirmed write is ignored only where it repeats the value from before the write. The written value or any other value is applied and ends the protection at once, so a change made elsewhere shows up. The protection also ends after 26 hours, when the device is removed, and when *Read settings* reports the setting. This replaces the rule of v1.1.0 (#100).
+- **A rejected write and a rejected read-back are told apart.** A rejected write says the device probably did not get the value; a rejected read-back says the gateway accepted the value and it may be stored. In both cases Home Assistant keeps the previous value and nothing is repeated.
+- **Stored switch values** (timer durations, switch-off warning, illumination threshold) are shown without decimals, the switch-off warning signal with one decimal. The unit stays seconds; minutes can be chosen in the entity settings.
+- **The fixed Home Assistant reference** for CI moves from 2026.10.3 to 2026.10.4. Between the two only the header size limit of the shared client session changed; the integration is unchanged.
+- **Documentation:** the troubleshooting page explains the two write errors; the radio journal, WebUI 2026 and the new entities are documented.
+
+### Known limitations
+- A gateway with WebUI 2026 has not been tested: the login endpoint (`POST /auth/login`) and the bearer token header follow the usual pattern and are collected in one place in `api.py`.
+- The *Read settings* button of a battery detector is answered only while the detector is ready (the readiness cycle); outside it the gateway reports *no response from device* after up to 45 seconds. Press it once and wait.
+- Routing was only seen as *off*. Writing *on* sends the smallest routing time (0.3 s), which is unverified.
+
+### Unchanged
+- Existing entities, entity IDs and unique IDs. Signal strength and Last seen stay disabled by default.
+
 ## [1.1.1] - 2026-10-30
 
 Bug fixes from @fubu2k, based on the v1.1.0 beta reports.
@@ -16,6 +59,7 @@ Bug fixes from @fubu2k, based on the v1.1.0 beta reports.
 
 ### Unchanged
 - Entities, entity IDs and settings. No radio traffic is added.
+
 
 ## [1.1.0] - 2026-10-29
 
