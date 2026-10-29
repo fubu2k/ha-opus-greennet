@@ -27,7 +27,7 @@ work stops.
 
 | ID | Exclusion | Frozen current values (base `3e52fce`) |
 |----|-----------|----------------------------------------|
-| A1 | No more frequent status polling: no new pollers, shorter intervals or additional reconciliation slots | `GATEWAY_HEALTH_INTERVAL = 60 s`, `RECONNECT_RESYNC_DEBOUNCE_SECONDS = 60`, `OUTBOUND_STATE_RECONCILIATION_DELAYS = (5, 20)`, `COVER_RECONCILIATION_DELAYS = (10.0, 20.0)` after movement end, `COVER_MOVEMENT_GRACE_SECONDS = 5.0` |
+| A1 | No more frequent status polling: no new pollers, shorter intervals or additional reconciliation slots | `GATEWAY_HEALTH_INTERVAL = 60 s`, `RECONNECT_RESYNC_DEBOUNCE_SECONDS = 60`, `OUTBOUND_STATE_RECONCILIATION_DELAYS = (5, 20)`, `COVER_RECONCILIATION_DELAYS = (10.0, 20.0)` after movement end, `COVER_MOVEMENT_GRACE_SECONDS = 5.0` (`COVER_END_STOP_GRACE_SECONDS = 7.0` at the end stops) |
 | A2 | No change to uptime, health or availability semantics; bridge uptime is never used to confirm device state | `available = not _unloaded and _gateway_available and _bridge_connected is not False and mqtt.is_connected()`; a command timeout does not change availability |
 | A3 | No topic quarantine, drain phase, topic lock or additional cool-down after a timeout | `REQUEST_TIMEOUT = 10 s`, `SUBSCRIPTION_TIMEOUT = 30 s`, `SETUP_REQUEST_TIMEOUT = 30 s`, `SETUP_SUBSCRIPTION_TIMEOUT = 180 s`, `MIN_SEND_INTERVAL = 0.0` |
 | A4 | No new replay/freshness hardening (timestamp/sequence evaluation, replay generations, prioritising live over retained data); existing logic is neither removed nor restructured | see "Existing retain/freshness logic" in `protocol-contract.md` §6 |

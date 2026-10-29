@@ -59,6 +59,7 @@ from .api import (
     response_status,
 )
 from .const import (
+    COVER_END_STOP_GRACE_SECONDS,
     COVER_MOVEMENT_GRACE_SECONDS,
     COVER_RECONCILIATION_DELAYS,
     DEFAULT_PARAMETER_DECIMALS,
@@ -304,8 +305,14 @@ class CoverMovement:
     elapsed: bool = False
 
     @property
+    def grace(self) -> float:
+        if self.target in (0, 100):
+            return COVER_END_STOP_GRACE_SECONDS
+        return COVER_MOVEMENT_GRACE_SECONDS
+
+    @property
     def ends_at(self) -> float:
-        return self.started_at + self.travel + COVER_MOVEMENT_GRACE_SECONDS
+        return self.started_at + self.travel + self.grace
 
 
 # A run without a matching end report is dropped after this many seconds.
@@ -1419,9 +1426,7 @@ class OpusGreenNetCoordinator:
         def finished(_now: datetime) -> None:
             self._finish_cover_movement(device.device_id, channel_id, movement)
 
-        movement.cancel = async_call_later(
-            self.hass, travel + COVER_MOVEMENT_GRACE_SECONDS, finished
-        )
+        movement.cancel = async_call_later(self.hass, travel + movement.grace, finished)
         self._dispatch_state(device)
         return movement
 
