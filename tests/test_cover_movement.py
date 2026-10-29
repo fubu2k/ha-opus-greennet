@@ -75,7 +75,7 @@ async def test_repeated_target_keeps_reported_position_and_original_deadline(mot
     assert channel.position == 100
     assert entity.state == "opening"
     assert coord._cover_movements["DEV1", 0] is original
-    assert original.ends_at == 130
+    assert original.ends_at == 132
 
 
 @pytest.mark.parametrize(

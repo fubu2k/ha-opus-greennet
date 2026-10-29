@@ -195,8 +195,8 @@ show `opening` / `closing` while travelling instead of jumping to the target:
 - The estimate uses the distance from the last known position (a full travel
   when the start is unknown) plus five seconds of grace, or seven seconds when
   the target is fully open or closed (a run into the end stop is reported
-  about 1.4 s later). It is an estimate, not a movement sensor; a wrong configured time or a stalled motor makes it
-  inaccurate.
+  about 1.4 s later). It is an estimate, not a movement sensor; a wrong
+  configured time or a stalled motor makes it inaccurate.
 - A new target replaces the estimate. A numeric position report, Stop or a
   rejected command ends it immediately.
 - Status checks run 10 and 20 seconds after the estimate ends. Example: for a
