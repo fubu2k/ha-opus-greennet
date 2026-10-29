@@ -151,6 +151,10 @@ Useful fields:
   installation (firmware 1.21.30) it equalled the stored vertical movement time
   plus about 5 s on 20 of them, and a partial run did not change it. Two blinds
   reported 0 and one an older value.
+- Calibration tip (vertical movement time): the stored time should equal the real
+  moving time, ideally measured from the start of the movement. A value that is too
+  large lengthens the blind's own run, the travel estimate and the last run time,
+  and may delay reactions to a wall switch.
 - `position_origin` (covers, per channel): `device list`, `reported`,
   `estimated` or `assumed` (the travel estimate ended without a report).
 - The profile source of every D2-01 device (gateway profile or EEP table).
