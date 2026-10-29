@@ -683,7 +683,7 @@ async def test_cover_travel_estimate_suppresses_target_assignment(
     # One write from the coordinator's estimate dispatch, none from the entity.
     entity.async_write_ha_state.assert_called_once()
     assert dispatched.signals == [STATE_SIGNAL]
-    assert [delay for delay, _, _ in timers] == [25.0, 35.0, 45.0]
+    assert [delay for delay, _, _ in timers] == [27.0, 37.0, 47.0]
 
 
 @pytest.mark.parametrize(
