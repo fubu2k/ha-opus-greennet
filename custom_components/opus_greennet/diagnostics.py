@@ -222,7 +222,7 @@ async def async_get_config_entry_diagnostics(
     configured_host = entry.data.get(CONF_HOST)
     # Resolved when the download is made (bounded, never raises): no polling.
     hostname, ipv4, ipv6 = (
-        await async_gateway_address(configured_host)
+        await async_gateway_address(hass, configured_host)
         if isinstance(configured_host, str) and configured_host.strip()
         else (None, None, None)
     )

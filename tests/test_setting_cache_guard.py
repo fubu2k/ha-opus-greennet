@@ -56,7 +56,9 @@ def blind(connected_coordinator):
 
 async def _write_holding_time(coord, radio, value: float = 29) -> None:
     radio.response = _document(maxHoldingTime=float(value))
-    await coord.async_set_device_parameter("DEV1", "maxHoldingTime", value)
+    await coord.async_set_device_parameter(
+        "DEV1", "maxHoldingTime", value, step=1, minimum=0
+    )
 
 
 async def test_a_cached_list_does_not_undo_a_confirmed_write(
@@ -187,7 +189,9 @@ async def test_an_unconfirmed_write_sets_no_protection(
     radio.response = _document(maxHoldingTime=12.0)
 
     with pytest.raises(HomeAssistantError):
-        await coord.async_set_device_parameter("DEV1", "maxHoldingTime", 29)
+        await coord.async_set_device_parameter(
+            "DEV1", "maxHoldingTime", 29, step=1, minimum=0
+        )
 
     assert coord._setting_guards == {}
     _refresh(coord, maxHoldingTime=15.0)
@@ -215,7 +219,9 @@ async def test_no_rotation_counts_as_zero(radio, connected_coordinator) -> None:
     device.get_or_create_channel().rotation_time = 0
     radio.response = _document(rotationTime=0.4)
 
-    await coord.async_set_device_parameter("DEV1", "rotationTime", 0.4)
+    await coord.async_set_device_parameter(
+        "DEV1", "rotationTime", 0.4, step=0.01, minimum=0
+    )
     _refresh(coord, rotationTime="noRotation")
 
     assert device.channels[0].rotation_time == 0.4

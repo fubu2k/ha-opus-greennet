@@ -107,7 +107,9 @@ async def test_a_read_ends_the_protection_of_the_settings_it_reports(
     """What the device reports is the truth: the protection of that setting ends."""
     coord = connected_coordinator
     radio.response = _document(maxHoldingTime=29.0)
-    await coord.async_set_device_parameter("DEV1", "maxHoldingTime", 29)
+    await coord.async_set_device_parameter(
+        "DEV1", "maxHoldingTime", 29, step=1, minimum=0
+    )
     coord._guard_confirmed_setting("DEV1", "verticalMovementTime", 25.51, 30.0)
     assert set(coord._setting_guards["DEV1"]) == {
         "maxHoldingTime",
@@ -205,7 +207,9 @@ async def test_every_write_marks_the_device(
     radio.response = _document(maxHoldingTime=29.0)
     before = coord._setting_writes.get("DEV1", 0)
 
-    await coord.async_set_device_parameter("DEV1", "maxHoldingTime", 29)
+    await coord.async_set_device_parameter(
+        "DEV1", "maxHoldingTime", 29, step=1, minimum=0
+    )
 
     assert coord._setting_writes["DEV1"] >= before + 2
 
@@ -217,7 +221,9 @@ async def test_a_failed_write_marks_the_device_too(
     radio.response = OpusTimeoutError("PUT timed out")
 
     with pytest.raises(HomeAssistantError):
-        await coord.async_set_device_parameter("DEV1", "maxHoldingTime", 29)
+        await coord.async_set_device_parameter(
+            "DEV1", "maxHoldingTime", 29, step=1, minimum=0
+        )
 
     assert coord._setting_writes["DEV1"] >= 2
 

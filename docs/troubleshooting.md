@@ -74,8 +74,9 @@ loads; a host name is checked when you enter it.
   Home Assistant keeps the previous value, nothing is repeated automatically,
   and the device configuration should be read before trying again: press the
   device's **Read settings** button (diagnostic) or use the
-  `opus_greennet.get_device_configuration` action. A timeout or an unreachable
-  gateway keeps its own message.
+  `opus_greennet.get_device_configuration` action. A timeout of the write or an
+  unreachable gateway keeps its own message; a read-back that fails in any other
+  way is reported as not confirmed.
 
 ## Diagnostics
 

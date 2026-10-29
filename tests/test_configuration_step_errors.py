@@ -3,8 +3,9 @@
 Writing a setting takes two requests: the write, then the read-back that shows
 whether the device took the value. A gateway rejection means different things
 for the two (the device probably did not get the value, or the write was
-accepted and the value may be stored), so each has its own message. Other
-failures keep theirs, and neither request is repeated.
+accepted and the value may be stored), so each has its own message. A write
+that fails otherwise keeps its message, a read-back that fails otherwise is
+reported as not confirmed, and neither request is repeated.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ def _device(kind: str) -> EnOceanDevice:
 async def _write(coordinator, kind: str) -> None:
     if kind == "parameter":
         await coordinator.async_set_device_parameter(
-            "DEV1", "verticalMovementTime", 25.42
+            "DEV1", "verticalMovementTime", 25.42, step=0.01, minimum=0
         )
     else:
         await coordinator.async_set_device_option("DEV1", "ledColor", "green")
@@ -118,7 +119,7 @@ async def test_a_timeout_of_the_write_keeps_its_own_message(
 
 
 @pytest.mark.parametrize("kind", KINDS)
-async def test_a_timeout_of_the_read_back_keeps_its_own_message(
+async def test_a_timeout_of_the_read_back_is_not_confirmed(
     radio, connected_coordinator, kind
 ) -> None:
     coord = connected_coordinator
@@ -133,7 +134,7 @@ async def test_a_timeout_of_the_read_back_keeps_its_own_message(
     with pytest.raises(HomeAssistantError) as error:
         await task
 
-    assert error.value.translation_key == "request_timeout"
+    assert error.value.translation_key == "parameter_not_confirmed"
     assert _methods(radio) == ["PUT", "GET"]
 
 

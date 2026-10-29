@@ -180,6 +180,10 @@ async def test_an_unresolvable_name_stays_empty(outcome) -> None:
         assert await async_reverse_lookup(ipaddress.ip_address("192.0.2.10")) is None
 
 
+# The resolver is patched in these tests; the session is not used.
+HASS = MagicMock()
+
+
 def _ips(*texts: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     return [ipaddress.ip_address(text) for text in texts]
 
@@ -192,7 +196,7 @@ async def test_a_configured_address_gets_its_reverse_name_and_other_family() -> 
             AsyncMock(return_value=_ips("192.0.2.10", "fe80::1")),
         ),
     ):
-        assert await async_gateway_address(" 192.0.2.10 ") == (
+        assert await async_gateway_address(HASS, " 192.0.2.10 ") == (
             "gw.home",
             "192.0.2.10",
             "fe80::1",
@@ -201,14 +205,18 @@ async def test_a_configured_address_gets_its_reverse_name_and_other_family() -> 
 
 async def test_a_configured_address_without_a_name_has_only_its_family() -> None:
     with patch(f"{DISCOVERY}.async_reverse_lookup", AsyncMock(return_value=None)):
-        assert await async_gateway_address("192.0.2.10") == (None, "192.0.2.10", None)
-        assert await async_gateway_address("[fe80::1]") == (None, None, "fe80::1")
+        assert await async_gateway_address(HASS, "192.0.2.10") == (
+            None,
+            "192.0.2.10",
+            None,
+        )
+        assert await async_gateway_address(HASS, "[fe80::1]") == (None, None, "fe80::1")
 
 
 async def test_a_configured_name_resolves_to_both_families() -> None:
     addresses = _ips("fe80::2", "192.0.2.10", "192.0.2.11")
     with patch(f"{DISCOVERY}.async_resolve_host", AsyncMock(return_value=addresses)):
-        assert await async_gateway_address("gw.home") == (
+        assert await async_gateway_address(HASS, "gw.home") == (
             "gw.home",
             "192.0.2.10",
             "fe80::2",
@@ -219,17 +227,21 @@ async def test_a_configured_name_without_ipv6_leaves_it_empty() -> None:
     with patch(
         f"{DISCOVERY}.async_resolve_host", AsyncMock(return_value=_ips("192.0.2.10"))
     ):
-        assert await async_gateway_address("gw.home") == ("gw.home", "192.0.2.10", None)
+        assert await async_gateway_address(HASS, "gw.home") == (
+            "gw.home",
+            "192.0.2.10",
+            None,
+        )
 
 
 async def test_a_configured_name_that_does_not_resolve_has_no_address() -> None:
     with patch(f"{DISCOVERY}.async_resolve_host", AsyncMock(return_value=[])):
-        assert await async_gateway_address("gw.home") == ("gw.home", None, None)
+        assert await async_gateway_address(HASS, "gw.home") == ("gw.home", None, None)
 
 
 async def test_a_blank_host_resolves_nothing() -> None:
     with patch(f"{DISCOVERY}.async_resolve_host", AsyncMock()) as resolve:
-        assert await async_gateway_address("  ") == (None, None, None)
+        assert await async_gateway_address(HASS, "  ") == (None, None, None)
     resolve.assert_not_called()
 
 
@@ -314,4 +326,4 @@ async def test_download_resolves_the_configured_host_once(
         AsyncMock(return_value=(None, None, None)),
     ) as resolve:
         await async_get_config_entry_diagnostics(hass, entry)
-    resolve.assert_awaited_once_with(entry.data["host"])
+    resolve.assert_awaited_once_with(hass, entry.data["host"])

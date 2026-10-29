@@ -132,7 +132,7 @@ async def test_the_address_is_resolved_and_changes_are_signalled() -> None:
         # An unchanged result tells nobody.
         await coordinator._async_refresh_gateway_address()  # noqa: SLF001
         send.assert_called_once()
-    lookup.assert_awaited_with("gw.home")
+    lookup.assert_awaited_with(coordinator.hass, "gw.home")
 
 
 async def test_a_lookup_that_ends_after_unload_changes_nothing() -> None:

@@ -900,7 +900,7 @@ class OpusGreenNetCoordinator:
         A local name lookup, no gateway request. Whatever does not resolve is
         None; the sensors are told only when the result changed.
         """
-        address = await async_gateway_address(self.client.host)
+        address = await async_gateway_address(self.hass, self.client.host)
         if self._unloaded or address == self.gateway_address:
             return
         self.gateway_address = address

@@ -111,7 +111,9 @@ async def test_a_configuration_write_and_its_read_back_are_recorded(
     coord.devices["DEV1"] = _blind()
     radio.response = _document(verticalMovementTime=25.42)
 
-    await coord.async_set_device_parameter("DEV1", "verticalMovementTime", 25.42)
+    await coord.async_set_device_parameter(
+        "DEV1", "verticalMovementTime", 25.42, step=0.01, minimum=0
+    )
 
     write, read = coord.radio_journal()
     assert (write["request"], write["outcome"], write["priority"]) == (
@@ -140,7 +142,9 @@ async def test_a_504_on_the_write_is_recorded_and_not_read_back(
     radio.response = NO_RESPONSE
 
     with pytest.raises(HomeAssistantError):
-        await coord.async_set_device_parameter("DEV1", "verticalMovementTime", 25.0)
+        await coord.async_set_device_parameter(
+            "DEV1", "verticalMovementTime", 25.0, step=0.01, minimum=0
+        )
 
     (entry,) = coord.radio_journal()
     assert entry["request"] == "configuration_write"
@@ -161,7 +165,9 @@ async def test_a_504_on_the_read_back_is_told_apart_from_the_write(
     radio.auto_respond = False
 
     task = asyncio.create_task(
-        coord.async_set_device_parameter("DEV1", "verticalMovementTime", 25.42)
+        coord.async_set_device_parameter(
+            "DEV1", "verticalMovementTime", 25.42, step=0.01, minimum=0
+        )
     )
     await radio.wait_sent(1)
     radio.respond(OK)
@@ -366,7 +372,7 @@ async def test_the_debug_log_names_request_outcome_and_gateway_text(
 
     with pytest.raises(HomeAssistantError):
         await connected_coordinator.async_set_device_parameter(
-            "DEV1", "verticalMovementTime", 25.0
+            "DEV1", "verticalMovementTime", 25.0, step=0.01, minimum=0
         )
 
     # The write really went out; otherwise there is nothing to log.

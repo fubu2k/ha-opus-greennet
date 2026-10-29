@@ -175,7 +175,7 @@ async def async_reverse_lookup(address: IPAddress) -> str | None:
 
 
 async def async_gateway_address(
-    host: str,
+    hass: HomeAssistant, host: str
 ) -> tuple[str | None, str | None, str | None]:
     """Return ``(hostname, ipv4, ipv6)`` of the configured gateway host.
 
@@ -191,7 +191,7 @@ async def async_gateway_address(
     else:
         name = host.strip() or None
     if name is not None:
-        found += await async_resolve_host(name)
+        found += await async_resolve_host(hass, name)
     ipv4 = next((str(a) for a in found if a.version == 4), None)
     ipv6 = next((str(a) for a in found if a.version == 6), None)
     return name, ipv4, ipv6
