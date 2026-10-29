@@ -417,7 +417,7 @@ async def test_short_travel_waits_for_ack_before_assuming_target(
     task = asyncio.create_task(coord.async_set_cover_position("DEV1", 0))
     await radio.wait_sent(1)
     assert timers[0][0] == 7.25
-    clock[0] += 6
+    clock[0] += 8
     timers[0][1](None)
     assert channel.position == 1
     assert channel.movement == "opening"
