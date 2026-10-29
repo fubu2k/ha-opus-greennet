@@ -110,8 +110,8 @@ async def test_end_stop_runs_wait_longer_than_partial_runs(
     await coord.async_set_cover_position("DEV1", target)
     travel = abs(50 - target) / 100 * 25
     movement = coord._cover_movements["DEV1", 0]
-    assert movement.ends_at == 100 + travel + grace
-    assert timers[0][0] == travel + grace
+    assert movement.ends_at == pytest.approx(100 + travel + grace)
+    assert timers[0][0] == pytest.approx(travel + grace)
 
 
 async def test_retarget_uses_elapsed_estimate_and_cancels_old_timer(motion, timers):
