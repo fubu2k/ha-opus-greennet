@@ -120,6 +120,165 @@ entities:
     attribute: full_travel
 ```
 
+### Measure the real travel time of a blind
+
+The stored *Vertical movement time* should equal the time the blind really needs (see the
+calibration tip in [Troubleshooting](troubleshooting.md)). The sensors cannot show it, so
+measure it with a stopwatch built in Home Assistant: the script below starts a full run, you
+tap a STOP button as soon as the blind has physically stopped, and the elapsed time is written
+to a text helper and the logbook. A new start replaces a waiting measurement; after 90 s
+without a tap the script stops the blind and logs a timeout. Your reaction time is part of the
+result, so repeat the measurement and use the typical value. Enter it in the blind's
+*Vertical movement time* number (it accepts decimals).
+
+This example comes from a user who measured 24 blinds this way (anonymised: entity IDs and room
+names are generic). Adjust the names to your installation.
+
+Helpers (create them in the UI or in YAML):
+
+```yaml
+input_button:
+  blind_measure_stop:
+    name: Blind measurement stop
+
+input_text:
+  blind_measure_result:
+    name: Blind measurement result
+    max: 255
+```
+
+Script:
+
+```yaml
+script:
+  blind_measure_travel_time:
+    alias: Measure blind travel time (tap)
+    mode: restart
+    fields:
+      cover:
+        name: Blind
+        required: true
+        selector:
+          entity:
+            domain: cover
+      direction:
+        name: Direction
+        required: true
+        selector:
+          select:
+            options: [open, close]
+    sequence:
+      - if:
+          - condition: template
+            value_template: "{{ direction == 'open' }}"
+        then:
+          - action: cover.open_cover
+            target:
+              entity_id: "{{ cover }}"
+        else:
+          - action: cover.close_cover
+            target:
+              entity_id: "{{ cover }}"
+      - variables:
+          t_start: "{{ now().timestamp() }}"
+      - wait_for_trigger:
+          - trigger: state
+            entity_id: input_button.blind_measure_stop
+        timeout:
+          seconds: 90
+        continue_on_timeout: true
+      - if:
+          - condition: template
+            value_template: "{{ not wait.completed }}"
+        then:
+          - action: cover.stop_cover
+            target:
+              entity_id: "{{ cover }}"
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.blind_measure_result
+            data:
+              value: "{{ cover }} {{ direction }}: timeout (no stop tapped)"
+          - stop: Timeout
+      - variables:
+          duration: "{{ (now().timestamp() - t_start) | round(1) }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.blind_measure_result
+        data:
+          value: "{{ cover }} {{ direction }}: {{ duration }} s"
+      - action: logbook.log
+        data:
+          name: Blind measurement
+          entity_id: "{{ cover }}"
+          message: "{{ cover }} {{ direction }}: {{ duration }} s"
+```
+
+Dashboard (one blind shown; repeat the blind section for every blind). Start the blind at the
+opposite end, tap OPEN or CLOSE, then tap STOP when it has stopped:
+
+```yaml
+title: Measurement
+views:
+  - title: Measurement
+    path: measurement
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Last result
+            icon: mdi:timer-outline
+          - type: tile
+            entity: input_text.blind_measure_result
+            name: Result
+            grid_options: {columns: 12, rows: 1}
+          - type: markdown
+            content: >-
+              Start the blind at the opposite end: tap **OPEN** or **CLOSE**,
+              then tap **STOP** as soon as the blind has stopped. After 90 s
+              without a tap the measurement is aborted.
+            grid_options: {columns: 12}
+      - type: grid
+        cards:
+          - type: heading
+            heading: Blind A
+            icon: mdi:blinds
+          - type: tile
+            entity: cover.blind_a
+            name: OPEN (full travel)
+            icon: mdi:arrow-up-bold
+            color: blue
+            vertical: false
+            tap_action:
+              action: perform-action
+              perform_action: script.blind_measure_travel_time
+              data: {cover: cover.blind_a, direction: open}
+            grid_options: {columns: 6, rows: 1}
+          - type: tile
+            entity: cover.blind_a
+            name: CLOSE (full travel)
+            icon: mdi:arrow-down-bold
+            color: blue
+            vertical: false
+            tap_action:
+              action: perform-action
+              perform_action: script.blind_measure_travel_time
+              data: {cover: cover.blind_a, direction: close}
+            grid_options: {columns: 6, rows: 1}
+          - type: tile
+            entity: input_button.blind_measure_stop
+            name: STOP - tap as soon as the blind has stopped
+            icon: mdi:stop-circle
+            color: red
+            tap_action:
+              action: perform-action
+              perform_action: input_button.press
+              target: {entity_id: input_button.blind_measure_stop}
+            grid_options: {columns: 12, rows: 2}
+```
+
 ### Read the configuration stored on a device
 
 The read actions return their data as the action response (Admin only; see
