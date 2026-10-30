@@ -66,13 +66,14 @@ disabled by default because they change with every telegram; enable them where
 you need them.
 
 The gateway's device information shows its **serial number** (as reported by
-`/system/info`, not the EURID). Further diagnostic sensors, enabled by default,
-show the **EURID**, **firmware version**, **app version**, **API version**,
-**hostname**, **IPv4 address** and **IPv6 address**. Versions are read at
+`/system/info`, not the EURID). Further diagnostic sensors show the
+**firmware version**, **app version** and **API version**. The **EURID**,
+**hostname**, **IPv4 address** and **IPv6 address** sensors exist too but are
+disabled by default; enable them where you need them. Versions are read at
 startup and every 30 minutes; host name and addresses are looked up from the
 configured host at the same times, and stay *unknown* where they do not
-resolve. The EURID is the default gateway password, so it is also visible in
-the entity history.
+resolve. The EURID is the default gateway password, so enabling its sensor
+makes it visible in the entity history.
 
 Details per device type: [docs/devices.md](docs/devices.md).
 

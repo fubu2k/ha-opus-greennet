@@ -138,7 +138,7 @@ get no such entities.
 **Device information.** The device page shows the product ID (*model ID*), the
 software version, the hardware version from the gateway's device list. The
 device ID is shown as the *serial number* and, in addition, as the diagnostic
-sensor **Device ID** of every device.
+sensor **Device ID** of every device (disabled by default).
 
 **Routing and repeater mode.** The gateway stores the routing as *off* or a time
 in seconds (0.3 to 2.55); only *off* has been seen. The integration shows it

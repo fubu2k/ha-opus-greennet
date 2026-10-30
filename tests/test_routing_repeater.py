@@ -399,7 +399,7 @@ def test_a_list_without_product_data_keeps_the_known_values() -> None:
     assert (device.product_id, device.software_revision) == ("3", "4")
 
 
-def test_the_device_id_is_a_diagnostic_sensor() -> None:
+def test_the_device_id_is_a_diagnostic_sensor_disabled_by_default() -> None:
     from unittest.mock import MagicMock
 
     from homeassistant.const import EntityCategory
@@ -411,4 +411,4 @@ def test_the_device_id_is_a_diagnostic_sensor() -> None:
     assert sensor.native_value == "019D6415"
     assert sensor.unique_id == "AABB0011_019D6415_device_id"
     assert sensor.entity_category is EntityCategory.DIAGNOSTIC
-    assert sensor.entity_registry_enabled_default is True
+    assert sensor.entity_registry_enabled_default is False

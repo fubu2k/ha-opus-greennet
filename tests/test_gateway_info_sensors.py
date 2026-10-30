@@ -27,6 +27,7 @@ from custom_components.opus_greennet.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 from custom_components.opus_greennet.sensor import (
+    GATEWAY_INFO_DISABLED_BY_DEFAULT,
     GATEWAY_INFO_READINGS,
     OpusGreenNetGatewayInfoSensor,
 )
@@ -74,8 +75,24 @@ def test_each_sensor_shows_its_reading(key: str, value: str) -> None:
     assert sensor.translation_key == key
     assert sensor.device_info == {"identifiers": {(DOMAIN, EAG_ID)}}
     assert sensor.entity_category is EntityCategory.DIAGNOSTIC
-    assert sensor.entity_registry_enabled_default is True
+    assert sensor.entity_registry_enabled_default is (
+        key not in GATEWAY_INFO_DISABLED_BY_DEFAULT
+    )
     assert sensor.should_poll is False
+
+
+def test_eurid_hostname_and_addresses_are_disabled_by_default() -> None:
+    # The EURID is the gateway's default password; the others repeat what the
+    # entry already shows. The versions stay enabled.
+    assert GATEWAY_INFO_DISABLED_BY_DEFAULT == {
+        "gateway_eurid",
+        "gateway_hostname",
+        "gateway_ipv4_address",
+        "gateway_ipv6_address",
+    }
+    for key in GATEWAY_INFO_READINGS:
+        enabled = _sensor(_coordinator(), key).entity_registry_enabled_default
+        assert enabled is (key.endswith("_version"))
 
 
 def test_all_readings_have_a_sensor() -> None:
@@ -205,6 +222,10 @@ async def test_the_gateway_device_shows_the_sensors_with_their_values(
             assert registered is not None
             assert registered.device_id == entry.runtime_data.gateway_device_id
             assert registered.entity_category is EntityCategory.DIAGNOSTIC
+            if key in GATEWAY_INFO_DISABLED_BY_DEFAULT:
+                assert registered.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+                assert hass.states.get(entity_id) is None
+                continue
             assert registered.disabled_by is None
             # The address is resolved in the background after setup.
             await wait_until(
@@ -226,7 +247,14 @@ async def test_a_restart_looks_up_host_name_and_addresses_at_once(
     hass: HomeAssistant, gateway: FakeGateway
 ) -> None:
     lookup = AsyncMock(return_value=("old.home", "192.0.2.10", None))
-    with patch(f"{COORDINATOR}.async_gateway_address", lookup):
+    with (
+        patch(f"{COORDINATOR}.async_gateway_address", lookup),
+        # The address sensors are disabled by default and have no state then.
+        patch(
+            "custom_components.opus_greennet.sensor.GATEWAY_INFO_DISABLED_BY_DEFAULT",
+            frozenset(),
+        ),
+    ):
         entry = await setup_bridge(hass, gateway)
         keys = ("gateway_hostname", "gateway_ipv4_address", "gateway_ipv6_address")
         ids = {

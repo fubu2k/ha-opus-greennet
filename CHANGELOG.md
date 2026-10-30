@@ -11,8 +11,8 @@ Support for gateways with **WebUI 2026**, settings you can **read on request**, 
 
 ### Before you update
 - **Nothing is written to your devices by this update.** The new entities that change a setting (*ViNET Router*, *Repeater mode*) are disabled by default, like the other settings entities.
-- **New read-only entities are enabled by default** and appear after the update: the stored settings sensors (named *… (stored)*), the *Read settings* button, *Signal quality*, *Device ID* and, on the gateway device, EURID, firmware, app and API version, hostname, IPv4 and IPv6 address. Disable the ones you do not want in the entity settings.
-- **The gateway's EURID sensor is enabled by default.** The EURID is the default gateway password, so it is also visible in the entity history. Disable the sensor if that matters to you. The diagnostics download keeps the EURID redacted.
+- **New read-only entities are enabled by default** and appear after the update: the stored settings sensors (named *… (stored)*), the *Read settings* button, *Signal quality* and, on the gateway device, firmware, app and API version. Disable the ones you do not want in the entity settings.
+- **Disabled by default:** the sensors *Device ID*, and on the gateway device EURID, hostname, IPv4 and IPv6 address. The EURID is the default gateway password, so enabling its sensor makes it visible in the entity history. The diagnostics download keeps the EURID redacted.
 - **Tested on hardware:** reading the settings after a write, the repeater mode of one D2-01-01 switch (level 1 and back to off, through the gateway interface, not through these entities), and the stored values of a presence detector from the device list. **Not tested:** a gateway with WebUI 2026 (login endpoint and token header are assumptions), pressing *Read settings* on a presence detector, writing the repeater mode on a dimmer, and writing *ViNET Router* *on* (the smallest routing time is an assumption).
 
 ### Added

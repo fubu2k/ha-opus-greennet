@@ -601,8 +601,8 @@ def parse_last_seen(value: str) -> datetime | None:
 class OpusGreenNetDeviceIdSensor(OpusGreenNetBaseSensor):
     """The device ID (EURID) of a device.
 
-    The device page has no field for it: its "serial number" line would name it
-    wrongly, so it is a diagnostic sensor.
+    A diagnostic sensor, disabled by default: the ID is already shown as the
+    serial number on the device page.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -618,6 +618,7 @@ class OpusGreenNetDeviceIdSensor(OpusGreenNetBaseSensor):
         super().__init__(
             coordinator, eag_id, gateway_device_id, device, "device_id", "device_id"
         )
+        self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> str:
@@ -1032,6 +1033,17 @@ GATEWAY_INFO_READINGS: Final[
     "gateway_ipv6_address": lambda coordinator: coordinator.gateway_address[2],
 }
 
+# Disabled by default: the EURID is the gateway's default password, the others
+# only repeat what the entry already shows.
+GATEWAY_INFO_DISABLED_BY_DEFAULT: Final = frozenset(
+    {
+        "gateway_eurid",
+        "gateway_hostname",
+        "gateway_ipv4_address",
+        "gateway_ipv6_address",
+    }
+)
+
 
 class OpusGreenNetGatewayInfoSensor(SensorEntity):
     """One identity, version or address reading of the gateway.
@@ -1055,6 +1067,9 @@ class OpusGreenNetGatewayInfoSensor(SensorEntity):
         self._attr_translation_key = key
         self._attr_unique_id = f"{eag_id}_{key}"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, eag_id)})
+        self._attr_entity_registry_enabled_default = (
+            key not in GATEWAY_INFO_DISABLED_BY_DEFAULT
+        )
 
     @property
     def available(self) -> bool:
