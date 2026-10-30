@@ -12,10 +12,8 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.opus_greennet.api import OpusTimeoutError
-from custom_components.opus_greennet.coordinator import (
-    SETTING_HOLD_SECONDS,
-    snap_to_step,
-)
+from custom_components.opus_greennet.const import SETTING_CACHE_GUARD_SECONDS
+from custom_components.opus_greennet.coordinator import snap_to_step
 from custom_components.opus_greennet.enocean_device import EnOceanDevice
 from custom_components.opus_greennet.number import DEVICE_TIMES
 from tests.fake_gateway import FakeGateway, device_object
@@ -187,19 +185,17 @@ async def test_a_list_with_the_previous_value_does_not_undo_a_write(
     assert device.channels[0].timer == 900.0
 
 
-async def test_the_hold_on_a_written_value_expires(
+async def test_the_guard_on_a_written_value_expires(
     radio, connected_coordinator
 ) -> None:
     coord = connected_coordinator
     device = coord.devices["DEV1"] = _switch()
     device.eeps = [{"eep": "D2-01-01"}]
+    device.get_or_create_channel().timer = 300.0
     radio.response = _document(timer=600.0)
     await coord.async_set_device_parameter("DEV1", "timer", 600, **STEPS["timer"])
-    value, confirmed_at = coord._confirmed_settings[("DEV1", "timer")]  # noqa: SLF001
-    coord._confirmed_settings[("DEV1", "timer")] = (  # noqa: SLF001
-        value,
-        confirmed_at - SETTING_HOLD_SECONDS - 1,
-    )
+    guard = coord._setting_guards["DEV1"]["timer"]  # noqa: SLF001
+    guard.at -= SETTING_CACHE_GUARD_SECONDS + 1
     _list_timer(coord, 300.0)
     assert device.channels[0].timer == 300.0
 

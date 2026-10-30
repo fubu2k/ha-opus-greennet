@@ -24,8 +24,8 @@ The settings stored on actuators, as far as the gateway's parameter catalog
 | Device | Number entities | Select entities | Not offered |
 |--------|-----------------|-----------------|-------------|
 | Blinds (D2-05-02) | Vertical movement time, Rotation time, Maximum holding time | – | Function of rocker A and B, routing time |
-| Dimmers (D2-01-03) | Ramping time, Short-press time, Long-press time | – | – |
-| Switches (D2-01-01) | Timer duration, Timer duration (long press), Switch-off warning, Switch-off warning signal, Illumination threshold | Operation mode, LED colour, External input function | Function of rocker A and B, routing time |
+| Dimmers (D2-01-03) | Ramping time, Short-press time, Long-press time | Repeater mode | – |
+| Switches (D2-01-01) | Timer duration, Timer duration (long press), Switch-off warning, Switch-off warning signal, Illumination threshold | Operation mode, LED colour, External input function, ViNET Router, Repeater mode | Function of rocker A and B |
 | 2-channel switches (D2-01-11) | as D2-01-01 | as D2-01-01, plus LED channel | as D2-01-01 |
 
 How a setting is written, for every device type:
@@ -47,9 +47,33 @@ How a setting is written, for every device type:
 Which of these settings were written on real hardware, and which only read, is
 listed in the [README](../README.md#what-was-verified-on-hardware).
 
+**Stored values.** Every device that has settings also shows their current
+values as read-only diagnostic sensors, **enabled by default** and named like
+the setting plus *(stored)*, for example *Vertical movement time (stored)* or
+*LED colour (stored)*. They show the values at a glance on the device page
+without enabling anything. The number and select entities that change a
+setting stay disabled: enable the one you want to change, and the sensor keeps
+showing the stored value alongside it. The values come from the last device
+list, from the last write the device confirmed, or from the *Read settings*
+button below. A value of a select that the gateway's catalog does not list
+shows as *unknown*.
+
+**Read settings button.** Every device that has one of these settings also gets
+a diagnostic button *Read settings* (enabled by default). Pressing it reads
+the settings stored on the device once over the radio, which takes a few
+seconds, and shows what the device reports. Use it after a write whose outcome
+was unclear, or after a setting was changed with the OPUS app. Nothing is
+written, nothing is repeated, and the integration never presses it itself. A
+setting the device does not report keeps its known value. A press while the
+device is being read is ignored, and an answer that arrives after a write to
+the same device started or ended meanwhile is dropped, because the write is
+newer. The button is offered for blinds, D2-01-03 dimmers, D2-01-01/-11
+switches and A5-07-03 presence detectors, the devices that have settings; reading is verified on hardware as the
+read-back after a write, not yet as a button press.
+
 Every actuator whose device list contains a link table also has the diagnostic
 sensor *Wall switch links* (see [Sensor values](#sensor-values)). The
-functions of rocker A and B and the routing time are left out until a text
+functions of rocker A and B are left out until a text
 write has been tested on hardware; a test in the repository fails when a
 catalog parameter has neither an entity nor an entry in that list of omissions.
 
@@ -111,12 +135,35 @@ tested on hardware**, so try a single switch first. The ranges are those of the
 parameter catalog read from one D2-01-01 and one D2-01-11; other switch types
 get no such entities.
 
+**Device information.** The device page shows the product ID (*model ID*), the
+software version, the hardware version from the gateway's device list. The
+device ID is shown as the *serial number* and, in addition, as the diagnostic
+sensor **Device ID** of every device (disabled by default).
+
+**Routing and repeater mode.** The gateway stores the routing as *off* or a time
+in seconds (0.3 to 2.55); only *off* has been seen. The integration shows it
+as *off* or *on* (any time counts as on). Writing *on* sends the smallest time,
+0.3 s, which is an **assumption** until a device that routes was read; writing
+the state a device already shows sends nothing. The repeater mode is not a
+ReCom parameter but the device resource `/devices/{id}/repeaterState` (`off`,
+`level_1`, `level_2`); it is written and read back there. *Read settings*
+reads both. The device list carries the repeater mode too, so it is shown after a restart without a radio request. Dimmers (D2-01-03) report it as well and get the same entities (the dimmer catalog has no routing); writing it on a dimmer is untested. Each has a diagnostic sensor (*ViNET Router (stored)*, *Repeater mode
+(stored)*) and a select in the configuration category (disabled by default).
+Writing the repeater mode was tested on one D2-01-01 switch (level 1 and back
+to off) through the gateway interface, not through these entities.
+
+**Display.** The stored switch values (timer durations, switch-off warning,
+illumination threshold) are shown without decimals, the warning signal with
+one decimal (0.5 s). The units stay seconds; minutes can be chosen in the
+entity settings of an entity.
+
 **Switch selects.** D2-01-01 and D2-01-11 switches also get select entities for
 the settings that have a fixed set of values: *Operation mode* (bottom on,
 timer, toggle, top on; the timer durations above only act in *timer*), *LED
 colour* (all, green, off, red), *LED channel* (2-channel switches only: which
 channel the LED shows) and *External input function* (channel 1 and inactive,
-for a 2-channel switch also channel 2 and channels 1 + 2). The same rules apply
+for a 2-channel switch also channel 2 and channels 1 + 2), *ViNET Router* (off or on)
+and *Repeater mode* (off, level 1, level 2). The same rules apply
 as for the numbers: configuration entities, **disabled by default**, one set
 per device, values from the device configuration, a new value is written with
 the ReCom configuration request (`{"key": ..., "value": "<value>"}`) and
@@ -203,6 +250,22 @@ are not taken over.
 - The diagnostic *Sensor error* binary sensor is on while the detector reports
   an error code (251–255).
 - A5-07-01 has no illumination sensor, so it gets no illuminance entity.
+- A5-07-03 detectors also show three of their settings as read-only diagnostic
+  sensors, enabled by default: *Alive cycle (stored)* (minutes),
+  *PIR off time (stored)* and *ReCom readiness cycle (stored)* (seconds), in the
+  unit the gateway reports. The values come from the gateway's cached device
+  list (it reads them from the detector itself, so they can be up to about a day
+  old) and from the *Read settings* button. Nothing writes them: there is no
+  number entity, because a battery detector answers a ReCom request only while it
+  is ready (the readiness cycle, four hours on the gateway this was read from)
+  and a write has not been tried on hardware. The detector sensitivity is not
+  listed by the gateway, so it is not shown.
+- The *Read settings* button of a detector is enabled like the others, but it
+  asks the detector over the radio, which is answered only inside the readiness
+  window. Outside it the gateway reports *no response from device* after up to
+  45 seconds, and the radio queue is busy meanwhile, so press it once and wait.
+  One press reads once and is never repeated. That the detector answers such a
+  read has not been verified on hardware.
 - The OPUS motion detector (F6-02-01 + A5-04-01) reports motion as
   `buttonAI` and no motion as `buttonA0`; it also gets temperature and
   humidity sensors.
@@ -263,6 +326,11 @@ battery percentage is invented when the gateway publishes none.
   refreshed every 30 minutes; the signal strength sensor is enabled by
   default for new installations (an entity that was disabled before stays
   disabled until you enable it).
+- Every device also has a diagnostic **Signal quality** sensor rated from the
+  signal strength: *Good* above -75 dBm, *Sufficient* from -75 to -85 dBm,
+  *Poor* below -85 dBm (a repeater, usually level 1 halfway, is recommended).
+  The icon follows the rating; colours are not offered by the integration
+  (a dashboard card can colour the value by these limits).
 - Every device also has a diagnostic **Last seen** sensor (enabled by
   default for new installations; an entity that was disabled before stays
   disabled until you enable it): the time of its newest report, from the telegram timestamp or the

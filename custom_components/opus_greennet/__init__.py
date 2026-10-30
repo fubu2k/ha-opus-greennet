@@ -31,18 +31,28 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.typing import ConfigType
 
-from .api import OpusApiError, OpusAuthError, OpusGatewayClient
+from .api import (
+    GENERATION_LEGACY,
+    OpusApiError,
+    OpusAuthError,
+    OpusConnectionError,
+    OpusGatewayClient,
+)
 from .const import (
+    CONF_CERTIFICATE_FINGERPRINT,
     CONF_EAG_ID,
+    CONF_GENERATION,
     DEFAULT_PORT,
     DEFAULT_USERNAME,
     DOMAIN,
     REPOSITIONING_DIRECT,
     REPOSITIONING_FIRST_DOWN,
     REPOSITIONING_FIRST_UP,
+    WEBUI_2026_PORT,
 )
 from .coordinator import GatewayMismatchError, OpusGreenNetCoordinator
 from .discovery import (
+    async_detect_webui_2026,
     async_local_networks,
     async_locate_gateway,
     default_connection,
@@ -236,8 +246,13 @@ async def async_setup_entry(
             translation_domain=DOMAIN, translation_key="gateway_address_required"
         )
     configured = parse_host_literal(entry.data[CONF_HOST])
-    non_local = configured is not None and not is_local_address(
-        configured, await async_local_networks(hass)
+    # An entry without a generation is a gateway of the earlier generation.
+    generation = entry.data.get(CONF_GENERATION, GENERATION_LEGACY)
+    # Only that generation sends its credentials unencrypted.
+    non_local = (
+        generation == GENERATION_LEGACY
+        and configured is not None
+        and not is_local_address(configured, await async_local_networks(hass))
     )
     async_set_non_local_address_issue(hass, entry.entry_id, non_local=non_local)
     if non_local:
@@ -247,15 +262,41 @@ async def async_setup_entry(
             "The configured OPUS gateway address is not in a local network; "
             "the gateway has no TLS. Use a VPN or a private address instead"
         )
-    client = OpusGatewayClient(
-        async_get_clientsession(hass),
-        entry.data[CONF_HOST],
-        entry.data.get(CONF_PORT, DEFAULT_PORT),
-        entry.data.get(CONF_USERNAME, DEFAULT_USERNAME),
-        entry.data[CONF_PASSWORD],
-    )
+    if generation == GENERATION_LEGACY:
+        client = OpusGatewayClient(
+            async_get_clientsession(hass),
+            entry.data[CONF_HOST],
+            entry.data.get(CONF_PORT, DEFAULT_PORT),
+            entry.data.get(CONF_USERNAME, DEFAULT_USERNAME),
+            entry.data[CONF_PASSWORD],
+        )
+    else:
+        client = OpusGatewayClient(
+            async_get_clientsession(hass),
+            entry.data[CONF_HOST],
+            entry.data.get(CONF_PORT, WEBUI_2026_PORT),
+            entry.data.get(CONF_USERNAME, DEFAULT_USERNAME),
+            entry.data[CONF_PASSWORD],
+            generation=generation,
+            fingerprint=entry.data.get(CONF_CERTIFICATE_FINGERPRINT),
+        )
+
+    async def _newer_generation_answers() -> bool:
+        return (
+            await async_detect_webui_2026(
+                hass, entry.data[CONF_HOST], entry.data.get(CONF_PORT, DEFAULT_PORT)
+            )
+            is not None
+        )
+
     coordinator = OpusGreenNetCoordinator(
-        hass, client, eag_id, on_auth_failed=lambda: entry.async_start_reauth(hass)
+        hass,
+        client,
+        eag_id,
+        on_auth_failed=lambda: entry.async_start_reauth(hass),
+        generation_check=(
+            _newer_generation_answers if generation == GENERATION_LEGACY else None
+        ),
     )
 
     try:
@@ -272,6 +313,21 @@ async def async_setup_entry(
         ) from err
     except OpusApiError as err:
         await coordinator.async_unload()
+        if (
+            generation == GENERATION_LEGACY
+            and isinstance(err, OpusConnectionError)
+            and await async_detect_webui_2026(
+                hass, entry.data[CONF_HOST], entry.data.get(CONF_PORT, DEFAULT_PORT)
+            )
+            is not None
+        ):
+            # The gateway no longer answers on its old port but a WebUI 2026
+            # gateway does: it was updated. It needs a user login, which the
+            # reauthentication asks for. Nothing is changed before that.
+            raise ConfigEntryAuthFailed(
+                translation_domain=DOMAIN,
+                translation_key="webui_2026_login_required",
+            ) from err
         # The translated ConfigEntryNotReady text is deliberately generic;
         # the log keeps the precise cause.
         _LOGGER.warning(
@@ -289,6 +345,7 @@ async def async_setup_entry(
 
     try:
         version = coordinator.gateway_info.get("version")
+        serial = coordinator.gateway_info.get("serialNumber")
         device_registry = dr.async_get(hass)
         gateway_device = device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
@@ -296,7 +353,7 @@ async def async_setup_entry(
             manufacturer="OPUS",
             model="GreenNet Bridge",
             name=entry.title,
-            serial_number=eag_id,
+            serial_number=serial if isinstance(serial, str) and serial else None,
             sw_version=version if isinstance(version, str) else None,
         )
         entry.runtime_data = OpusGreenNetRuntimeData(

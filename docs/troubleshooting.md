@@ -15,8 +15,8 @@ the configuration:
 
 | Link | Symptom | Check |
 |------|---------|-------|
-| Network to the gateway | All entities unavailable; actions fail with "The OPUS gateway is unavailable" | Gateway power and address; `http://<gateway>:8080/system/uptime` must answer (with the API credentials) |
-| Gateway credentials | The entry asks for re-authentication | User and password of the gateway API |
+| Network to the gateway | All entities unavailable; actions fail with "The OPUS gateway is unavailable" | Gateway power and address; `http://<gateway>:8080/system/uptime` must answer (with the API credentials). With WebUI 2026 the address is `https://<gateway>/system/uptime` with a login token |
+| Gateway credentials | The entry asks for re-authentication | User and password of the gateway API. After a gateway update to WebUI 2026: enter the user and password of its web interface (Home Assistant notices the update by itself after the gateway stayed unreachable for a few minutes, or at the next start of the integration). A *Confirm the gateway certificate* step means the gateway presents another certificate than the remembered one |
 | EnOcean radio | Entities available, but the device does not follow | Range, power and pairing of the actuator; the debug log of the follow-up status queries |
 
 A gateway outage makes the entities unavailable and cancels queued commands;
@@ -65,6 +65,18 @@ loads; a host name is checked when you enter it.
   restarting Home Assistant. Pending requests are cancelled.
 - An action that timed out may still have been executed: check the physical
   state before repeating it.
+- Changing a setting of a device (for example the vertical movement time of a
+  blind) is a write followed by a read-back. If the gateway rejects the
+  **write** (for example `504`, no response from device), the message says
+  the new value could not be written; the device probably did not get it. If
+  it rejects the **read-back**, the message says the gateway accepted the
+  value but reading it back failed; the value may be stored. In both cases
+  Home Assistant keeps the previous value, nothing is repeated automatically,
+  and the device configuration should be read before trying again: press the
+  device's **Read settings** button (diagnostic) or use the
+  `opus_greennet.get_device_configuration` action. A timeout of the write or an
+  unreachable gateway keeps its own message; a read-back that fails in any other
+  way is reported as not confirmed.
 
 ## Diagnostics
 
@@ -74,10 +86,27 @@ state, last update source and the latest command error. Addresses,
 credentials, identifiers and the gateway's HomeKit setup code (also as QR
 payload) are redacted. Attach it when you report a problem.
 
+The same facts are visible in Home Assistant without a download: the gateway
+device shows its serial number, and its diagnostic sensors show firmware, app
+and API version. EURID, hostname, IPv4 and IPv6 address have sensors too, but
+they are disabled by default (the download itself keeps them redacted).
+
 Useful fields:
 
 - `first_device_list_seconds` (gateway): time from opening the event stream to
   its first device list at startup.
+- `versions` (gateway): `firmware`, `app` and `api` version from the gateway's
+  `/system/info` (also written to the log at startup as
+  `OPUS gateway versions: firmware=… app=… api=…`, and again when a version
+  changes). It is read at startup and then every 30 minutes together with
+  the device list refresh (a plain gateway read without radio traffic, never
+  with the health probe). `receive_counter` (received telegrams) and
+  `average_dbm` (mean signal strength) come from the same read, so they are as
+  old as `info_read_at`. A field the gateway does not report stays empty.
+- `connection` (gateway): `hostname`, `ipv4` and `ipv6` of the configured
+  gateway address (IPv6 only if the host name has one), resolved when the download is made. Both are redacted when they have
+  a value. An empty value means the name or address could not be resolved; that
+  is no error.
 - `stream` (gateway): facts about the event stream, read from the integration's
   memory (no request to the gateway):
   - `connected`: whether the stream is open now.
@@ -92,6 +121,33 @@ Useful fields:
   - `radio_queue_depth`: requests waiting for the gateway's radio queue at the
     moment of the download. Values above 0 for long are worth reporting.
   The counters start at 0 whenever the integration is reloaded.
+- `radio_journal` (in the block of every device): what the integration sent to
+  that device over the radio, from the last 300 requests of all devices
+  together, oldest first. It is kept in memory only (empty after a reload or
+  restart). Each entry has:
+  - `seq`: a counter that orders the entries across devices.
+  - `at`: when the request ended (UTC).
+  - `request`: `command` (a state command), `status_query`,
+    `configuration_write`, `configuration_read` (also the read-back after a
+    write), `parameters_read`, `link_tables_read`, or `feedback`.
+  - `priority`, `duration_ms` and `waited_ms` (time in the queue before the
+    request was sent).
+  - `values`: the keys and values that were sent. Text is shortened, nested
+    values show their type.
+  - `outcome`: `ok` (the gateway accepted the request), `deferred` (the gateway
+    stored it for a sleeping device), `rejected` (with `gateway_status`, the
+    optional `http_status` and the gateway's text in `message`), `timeout`,
+    `connection_error`, `auth_rejected`, `cancelled` (the caller gave up while
+    the request was in flight, so it may still have been sent) or `error`.
+  - A `feedback` entry is written when a device reported a field that one of
+    our commands was still waiting for (`fields`, `channel`).
+
+  `ok` only means that the gateway accepted the request; it is neither the
+  stored value nor the device's state. A configuration write has two entries:
+  the write and the read-back. If the write is `ok` and the read-back is
+  `rejected` (for example `504`, no response from device), the value may have
+  been stored. Nothing is repeated automatically. Requests that were not sent
+  (gateway offline, device unknown, queued check dropped) have no entry.
 - `last_vertical_movement_time` (covers): the last run duration the gateway
   reports. It is not a measurement of the travel: on 24 D2-05-02 blinds in one
   installation (firmware 1.21.30) it equalled the stored vertical movement time
@@ -110,6 +166,13 @@ Useful fields:
 For a one-off check use **Settings → Devices & services → Opus GreenNet Bridge
 → ⋮ → Enable debug logging**, reproduce the problem and disable it again to
 download the log.
+
+With debug logging every radio request writes one line, `OPUS radio request:
+device=… request=… outcome=… gateway_status=… duration_ms=… values=…
+message=…`, with the same content as a `radio_journal` entry, and a device
+report that confirms a command writes `OPUS device … reported […]`. The
+journal in the diagnostics download is filled without debug logging; the log
+adds the exact time order with other messages.
 
 For persistent logging add to `configuration.yaml`:
 

@@ -27,8 +27,23 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from zeroconf import IPVersion, ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo
 
-from .api import OpusApiError, OpusAuthError, OpusGatewayClient, OpusResponseError
-from .const import DEFAULT_PORT, DEFAULT_USERNAME
+from .api import (
+    GENERATION_LEGACY,
+    OpusApiError,
+    OpusAuthError,
+    OpusConnectionError,
+    OpusGatewayClient,
+    OpusResponseError,
+    async_probe_webui_2026,
+    async_read_certificate_fingerprint,
+)
+from .const import (
+    CONF_CERTIFICATE_FINGERPRINT,
+    CONF_GENERATION,
+    DEFAULT_PORT,
+    DEFAULT_USERNAME,
+    WEBUI_2026_PORT,
+)
 from .wire import as_object
 
 _LOGGER = logging.getLogger(__name__)
@@ -141,6 +156,47 @@ async def async_resolve_host(hass: HomeAssistant, host: str) -> list[IPAddress]:
         return []
 
 
+async def async_reverse_lookup(address: IPAddress) -> str | None:
+    """Return the host name of ``address``, or None when there is none.
+
+    A missing reverse entry, a timeout or an answer that is only the numeric
+    address is no error: the caller keeps the field empty.
+    """
+    try:
+        async with asyncio.timeout(RESOLVE_HOST_SECONDS):
+            name, _service = await asyncio.get_running_loop().getnameinfo(
+                (str(address), 0), socket.NI_NAMEREQD
+            )
+    except OSError, TimeoutError, ValueError:
+        return None
+    if not name or name == str(address):
+        return None
+    return name
+
+
+async def async_gateway_address(
+    hass: HomeAssistant, host: str
+) -> tuple[str | None, str | None, str | None]:
+    """Return ``(hostname, ipv4, ipv6)`` of the configured gateway host.
+
+    For diagnostics only; never raises. A configured name is the host name; a
+    configured address gets its host name from a reverse lookup. The host name
+    is then resolved for the address families the configuration did not name.
+    Whatever cannot be resolved stays None.
+    """
+    literal = parse_host_literal(host)
+    found: list[IPAddress] = [literal] if literal is not None else []
+    if literal is not None:
+        name = await async_reverse_lookup(literal)
+    else:
+        name = host.strip() or None
+    if name is not None:
+        found += await async_resolve_host(hass, name)
+    ipv4 = next((str(a) for a in found if a.version == 4), None)
+    ipv6 = next((str(a) for a in found if a.version == 6), None)
+    return name, ipv4, ipv6
+
+
 async def async_read_gateway_id(hass: HomeAssistant, data: Mapping[str, Any]) -> str:
     """Connect to the gateway and return its EAG identifier (EURID).
 
@@ -153,6 +209,8 @@ async def async_read_gateway_id(hass: HomeAssistant, data: Mapping[str, Any]) ->
         data[CONF_PORT],
         data[CONF_USERNAME],
         data[CONF_PASSWORD],
+        generation=data.get(CONF_GENERATION, GENERATION_LEGACY),
+        fingerprint=data.get(CONF_CERTIFICATE_FINGERPRINT),
     )
     document = await client.async_get("/system/info")
     info = as_object(document.get("systemInfo")) or {}
@@ -160,6 +218,35 @@ async def async_read_gateway_id(hass: HomeAssistant, data: Mapping[str, Any]) ->
     if not isinstance(eurid, str) or not EAG_ID_PATTERN.fullmatch(eurid):
         raise OpusResponseError("The gateway did not report its EURID")
     return eurid.upper()
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayEndpoint:
+    """Where a WebUI 2026 gateway answers and the certificate it presents."""
+
+    port: int
+    fingerprint: str
+
+
+async def async_detect_webui_2026(
+    hass: HomeAssistant, host: str, port: int
+) -> GatewayEndpoint | None:
+    """Return the endpoint of a WebUI 2026 gateway at ``host``, if there is one.
+
+    Called after a gateway of the earlier generation did not answer on the
+    entered port. The default port of that generation (8080) stands for "not
+    chosen", so the HTTPS port 443 is tried; any other port is tried as
+    entered. No credentials are sent.
+    """
+    tls_port = WEBUI_2026_PORT if port == DEFAULT_PORT else port
+    session = async_get_clientsession(hass)
+    if not await async_probe_webui_2026(session, host, tls_port):
+        return None
+    try:
+        fingerprint = await async_read_certificate_fingerprint(host, tls_port)
+    except OpusConnectionError, OpusResponseError:
+        return None
+    return GatewayEndpoint(tls_port, fingerprint)
 
 
 def default_connection(host: str, eag_id: str) -> dict[str, Any]:

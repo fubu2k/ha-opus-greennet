@@ -13,9 +13,9 @@
         },
         "data_description": {
           "host": "IP-Adresse oder Hostname des OPUS-Gateways in deinem Netzwerk.",
-          "port": "Port der REST-API des Gateways (standardmäßig 8080).",
-          "username": "API-Benutzer des Gateways (standardmäßig admin).",
-          "password": "API-Passwort. Standardmäßig ist das die EURID des Gateways in Großbuchstaben, wie sie auf dem Gateway aufgedruckt ist."
+          "port": "Port der REST-API des Gateways: 8080 bei Gateways vor WebUI 2026. Ein Gateway mit WebUI 2026 wird automatisch erkannt und nutzt Port 443 (HTTPS).",
+          "username": "API-Benutzer des Gateways (standardmäßig admin). Bei einem Gateway mit WebUI 2026 gib einen Benutzer seiner Weboberfläche an (Rolle admin oder installateur).",
+          "password": "API-Passwort. Bei Gateways vor WebUI 2026 ist das standardmäßig die EURID des Gateways in Großbuchstaben, wie sie auf dem Gateway aufgedruckt ist. Bei einem Gateway mit WebUI 2026 gib das Passwort dieses Benutzers an; Home Assistant legt keine Benutzer am Gateway an."
         }
       },
       "reauth_confirm": {
@@ -29,9 +29,9 @@
         },
         "data_description": {
           "host": "IP-Adresse oder Hostname des OPUS-Gateways in deinem Netzwerk.",
-          "port": "Port der REST-API des Gateways (standardmäßig 8080).",
-          "username": "API-Benutzer des Gateways (standardmäßig admin).",
-          "password": "API-Passwort. Standardmäßig ist das die EURID des Gateways in Großbuchstaben, wie sie auf dem Gateway aufgedruckt ist."
+          "port": "Port der REST-API des Gateways: 8080 bei Gateways vor WebUI 2026. Ein Gateway mit WebUI 2026 wird automatisch erkannt und nutzt Port 443 (HTTPS).",
+          "username": "API-Benutzer des Gateways (standardmäßig admin). Bei einem Gateway mit WebUI 2026 gib einen Benutzer seiner Weboberfläche an (Rolle admin oder installateur).",
+          "password": "API-Passwort. Bei Gateways vor WebUI 2026 ist das standardmäßig die EURID des Gateways in Großbuchstaben, wie sie auf dem Gateway aufgedruckt ist. Bei einem Gateway mit WebUI 2026 gib das Passwort dieses Benutzers an; Home Assistant legt keine Benutzer am Gateway an."
         }
       },
       "reconfigure": {
@@ -45,10 +45,14 @@
         },
         "data_description": {
           "host": "IP-Adresse oder Hostname des OPUS-Gateways in deinem Netzwerk.",
-          "port": "Port der REST-API des Gateways (standardmäßig 8080).",
-          "username": "API-Benutzer des Gateways (standardmäßig admin).",
-          "password": "API-Passwort. Standardmäßig ist das die EURID des Gateways in Großbuchstaben, wie sie auf dem Gateway aufgedruckt ist."
+          "port": "Port der REST-API des Gateways: 8080 bei Gateways vor WebUI 2026. Ein Gateway mit WebUI 2026 wird automatisch erkannt und nutzt Port 443 (HTTPS).",
+          "username": "API-Benutzer des Gateways (standardmäßig admin). Bei einem Gateway mit WebUI 2026 gib einen Benutzer seiner Weboberfläche an (Rolle admin oder installateur).",
+          "password": "API-Passwort. Bei Gateways vor WebUI 2026 ist das standardmäßig die EURID des Gateways in Großbuchstaben, wie sie auf dem Gateway aufgedruckt ist. Bei einem Gateway mit WebUI 2026 gib das Passwort dieses Benutzers an; Home Assistant legt keine Benutzer am Gateway an."
         }
+      },
+      "certificate": {
+        "title": "Gateway-Zertifikat bestätigen",
+        "description": "Das Gateway {eag_id} zeigt ein anderes Zertifikat als das bei der ersten Verbindung gemerkte. Das passiert nach einem Werksreset oder Gerätetausch, aber auch, wenn ein anderes Gerät unter dieser Adresse antwortet. Es wurde nichts an das Gerät gesendet. Fingerabdruck (SHA-256): {fingerprint}. Fahre nur fort, wenn du die Änderung erwartest."
       }
     },
     "error": {
@@ -186,6 +190,129 @@
       },
       "gateway_uptime": {
         "name": "Betriebszeit"
+      },
+      "gateway_eurid": {
+        "name": "EURID"
+      },
+      "gateway_firmware_version": {
+        "name": "Firmware-Version"
+      },
+      "gateway_app_version": {
+        "name": "App-Version"
+      },
+      "gateway_api_version": {
+        "name": "API-Version"
+      },
+      "gateway_hostname": {
+        "name": "Hostname"
+      },
+      "gateway_ipv4_address": {
+        "name": "IPv4-Adresse"
+      },
+      "gateway_ipv6_address": {
+        "name": "IPv6-Adresse"
+      },
+      "vertical_movement_time_setting": {
+        "name": "Fahrzeit vertikal (gespeichert)"
+      },
+      "rotation_time_setting": {
+        "name": "Rotationszeit (gespeichert)"
+      },
+      "max_holding_time_setting": {
+        "name": "Maximale Haltezeit (gespeichert)"
+      },
+      "ramping_time_setting": {
+        "name": "Rampenzeit (gespeichert)"
+      },
+      "short_press_time_setting": {
+        "name": "Zeit Kurzdruck (gespeichert)"
+      },
+      "long_press_time_setting": {
+        "name": "Zeit Langdruck (gespeichert)"
+      },
+      "timer_setting": {
+        "name": "Timerdauer (gespeichert)"
+      },
+      "timer_long_setting": {
+        "name": "Timerdauer (langer Tastendruck) (gespeichert)"
+      },
+      "switch_off_warning_setting": {
+        "name": "Ausschaltwarnung (gespeichert)"
+      },
+      "switch_off_warning_signal_setting": {
+        "name": "Dauer des Warnsignals (gespeichert)"
+      },
+      "illumination_threshold_setting": {
+        "name": "Helligkeitsschwelle (gespeichert)"
+      },
+      "alive_cycle_setting": {
+        "name": "Alive-Zyklus (gespeichert)"
+      },
+      "pir_off_time_setting": {
+        "name": "PIR-Aus-Zeit (gespeichert)"
+      },
+      "recom_ready_time_setting": {
+        "name": "ReCom-Bereitschaftszyklus (gespeichert)"
+      },
+      "operation_mode_setting": {
+        "name": "Betriebsart (gespeichert)",
+        "state": {
+          "bottom_on": "Unten EIN",
+          "timer": "Timer",
+          "toggle": "Umschalten",
+          "top_on": "Oben EIN"
+        }
+      },
+      "led_color_setting": {
+        "name": "LED-Farbe (gespeichert)",
+        "state": {
+          "all": "Alle LEDs an",
+          "green": "Grüne LED an",
+          "off": "Beide LEDs aus",
+          "red": "Rote LED an"
+        }
+      },
+      "led_channel_setting": {
+        "name": "LED-Kanal (gespeichert)",
+        "state": {
+          "channel1": "Kanal 1",
+          "channel2": "Kanal 2"
+        }
+      },
+      "function_external_input_setting": {
+        "name": "Funktion externer Eingang (gespeichert)",
+        "state": {
+          "channel1": "Kanal 1",
+          "channel2": "Kanal 2",
+          "channels_all": "Kanal 1 + 2",
+          "inactive": "Inaktiv"
+        }
+      },
+      "repeater_setting": {
+        "name": "Repeater-Modus (gespeichert)",
+        "state": {
+          "off": "Aus (Standard)",
+          "level_1": "Level 1 (Einzelsprung / 1-Hop)",
+          "level_2": "Level 2 (Zweifachsprung / 2-Hop)"
+        }
+      },
+      "routing_setting": {
+        "name": "ViNET Router (gespeichert)",
+        "state": {
+          "off": "Aus",
+          "on": "Ein"
+        }
+      },
+      "signal_quality": {
+        "name": "Signalqualität",
+        "state": {
+          "good": "Gut",
+          "sufficient": "Ausreichend",
+          "poor": "Schlecht"
+        }
+      },
+      "device_id": {
+        "name": "Geräte-ID"
       }
     },
     "switch": {
@@ -207,6 +334,9 @@
       },
       "reference_run_down": {
         "name": "Referenzfahrt über unten"
+      },
+      "read_settings": {
+        "name": "Einstellungen lesen"
       }
     },
     "event": {
@@ -283,6 +413,21 @@
           "channels_all": "Kanal 1 + 2",
           "inactive": "Inaktiv"
         }
+      },
+      "repeater": {
+        "name": "Repeater-Modus",
+        "state": {
+          "off": "Aus (Standard)",
+          "level_1": "Level 1 (Einzelsprung / 1-Hop)",
+          "level_2": "Level 2 (Zweifachsprung / 2-Hop)"
+        }
+      },
+      "routing": {
+        "name": "ViNET Router",
+        "state": {
+          "off": "Aus",
+          "on": "Ein"
+        }
       }
     }
   },
@@ -337,6 +482,15 @@
     },
     "invalid_parameter_value": {
       "message": "Der Wert ist keine gültige Zahl."
+    },
+    "parameter_write_failed": {
+      "message": "Das Gateway konnte den neuen Wert nicht auf {device_id} schreiben ({reason}). Home Assistant behält den bisherigen Wert. Das Gerät hat ihn vermutlich nicht erhalten; lies vor einem neuen Versuch die Gerätekonfiguration aus."
+    },
+    "parameter_read_back_failed": {
+      "message": "Das Gateway hat den neuen Wert für {device_id} angenommen, das Zurücklesen ist aber fehlgeschlagen ({reason}). Der Wert kann gespeichert sein; Home Assistant behält den bisherigen. Lies vor einem neuen Versuch die Gerätekonfiguration aus."
+    },
+    "webui_2026_login_required": {
+      "message": "Das OPUS-Gateway verlangt jetzt die Anmeldung der neuen Gateway-Generation (WebUI 2026). Gib Benutzer und Passwort seiner Weboberfläche ein, um fortzufahren; alle Geräte und Entitäten bleiben erhalten."
     }
   },
   "services": {

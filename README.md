@@ -51,7 +51,7 @@ Works with both OPUS gateways, the black **OPUS greenNet gateway** and the newer
 | Blinds and shutters | D2-05-00, -01, -02 | Cover with position and tilt; blockage, reference run, last run time |
 | Heating areas | D1-4B-05, -06, -07 (Valve, CosiTherm, Electro) | Climate, feed temperature, power, humidity, window open, errors, battery |
 | Temperature and humidity sensors | A5-04-01, -02, -03 | Temperature, humidity |
-| Presence detectors (SMS) | A5-07-01, A5-07-03 | Motion, illuminance (A5-07-03), supply voltage, sensor error |
+| Presence detectors (SMS) | A5-07-01, A5-07-03 | Motion, illuminance (A5-07-03), supply voltage, sensor error; A5-07-03 also shows alive cycle, PIR off time and ReCom readiness cycle as read-only diagnostic values |
 | OPUS motion detector | F6-02-01 + A5-04-01 | Motion, temperature, humidity |
 | Smoke detectors (RWM) | F6-05-02 | Smoke alarm, low battery |
 | Water sensors | F6-05-01 | Moisture |
@@ -64,6 +64,17 @@ Every device also has a diagnostic **Last seen** time, and the gateway's own
 device shows when it started (**Uptime**). Signal strength and Last seen are
 disabled by default because they change with every telegram; enable them where
 you need them.
+
+The gateway's device information shows its **serial number** (as reported by
+`/system/info`, not the EURID). Further diagnostic sensors show the
+**firmware version**, **app version** and **API version**. The **EURID**,
+**hostname**, **IPv4 address** and **IPv6 address** sensors exist too but are
+disabled by default; enable them where you need them. Versions are read at
+startup and every 30 minutes; host name and addresses are looked up from the
+configured host at the same times, and stay *unknown* where they do not
+resolve. The EURID is the default gateway password, so enabling its sensor
+makes it visible in the entity history.
+
 Details per device type: [docs/devices.md](docs/devices.md).
 
 ## Compatibility
@@ -71,7 +82,7 @@ Details per device type: [docs/devices.md](docs/devices.md).
 | | Requirement |
 |---|---|
 | Home Assistant | 2026.10.1 or newer |
-| Gateway | Both OPUS gateways: the black OPUS greenNet gateway (reports itself as `OPUS-GW`) and the OPUS IQ-DOT (`OPUS-IQ-DOT`), with the REST API on port 8080. Tested with firmware 1.21.30 to 1.21.34 |
+| Gateway | Both OPUS gateways: the black OPUS greenNet gateway (reports itself as `OPUS-GW`) and the OPUS IQ-DOT (`OPUS-IQ-DOT`). Before WebUI 2026: REST API on port 8080 (tested with firmware 1.21.30 to 1.21.34). With WebUI 2026: the same REST API over HTTPS on port 443 with a user login (see [Gateways with WebUI 2026](#gateways-with-webui-2026); not yet tested on such a gateway) |
 | Network | Home Assistant and the gateway in the same local network. Discovery uses mDNS; without it (for example Docker without host networking) enter the address once |
 | Devices | Paired with the gateway in the OPUS app |
 
@@ -116,16 +127,42 @@ you only enter the password. To add it by hand, use
 | Field | Description |
 |-------|-------------|
 | **Host** | IP address or host name of the gateway. It must be in the local network (see below) |
-| **Port** | Port of the REST API, `8080` by default |
+| **Port** | Port of the REST API, `8080` by default. A gateway with WebUI 2026 is recognised automatically and uses `443` |
 | **Username** | API user, `admin` by default |
 | **Password** | API password, by default the gateway's EURID in capital letters (printed on the gateway; fictional example: `A1B2C3D4`) |
+
+### Gateways with WebUI 2026
+
+Gateways with the software of the new generation (WebUI 2026) no longer answer
+on ports 8080 and 8099. Their REST API (same paths) is reachable only over HTTPS
+on port 443, with the user and password of the gateway's web interface (role
+`admin` or `installateur`); the EURID is no longer the password.
+
+- **Set the user up in the gateway's web interface first.** Home Assistant never
+  creates users on the gateway.
+- Add the gateway as before. Before anything is sent to the old port, Home
+  Assistant looks for a WebUI 2026 gateway on port 443 (`/auth/setup-status`,
+  no login). Enter the web interface user and password.
+- The gateway's self-signed certificate is remembered at the first connection
+  and checked on every later one. If it changes (factory reset, replaced
+  device), the entry asks you to confirm the new certificate; nothing is sent to
+  it before.
+- The access token is requested by Home Assistant and kept in memory only; the
+  password is stored in the entry like before. A rejected token is requested
+  again with the next request; the request that met the rejection is not
+  repeated.
+- An existing entry whose gateway was updated asks to sign in again at the next
+  start of the integration. Devices and entities are kept.
+- The login endpoint (`POST /auth/login`) and the bearer token header are
+  **assumptions** taken from the usual pattern; they have not been verified on
+  a gateway with WebUI 2026 and are collected in one place in `api.py`.
 
 The gateway's EURID becomes the stable identifier of the entry, its devices and
 entities. If the gateway gets a new IP address, discovery updates the entry
 automatically. To change the credentials, use **Reconfigure** on the entry.
 
-**Local addresses only:** the gateway speaks unencrypted HTTP, so Home Assistant
-sends its credentials only to private addresses (`10/8`, `172.16/12`,
+**Local addresses only:** gateways before WebUI 2026 speak unencrypted HTTP, so
+Home Assistant sends its credentials only to private addresses (`10/8`, `172.16/12`,
 `192.168/16`), link-local (`169.254/16`, `fe80::/10`), unique local
 (`fc00::/7`), loopback, carrier-grade NAT (`100.64/10`, used by VPN meshes) and
 the networks Home Assistant itself is attached to (so a global IPv6 address on
@@ -158,12 +195,11 @@ diagnostics** on the integration entry). More in
   follows from the device's report or a status check.
 - Cover positions during movement are estimated from the configured travel
   time.
-- The gateway API is plain HTTP with basic authentication (the gateway has no
+- The gateway API before WebUI 2026 is plain HTTP with basic authentication (no
   TLS). Keep the gateway in a trusted network; new or changed addresses must be
-  local.
+  local, for both generations.
 - Devices cannot be added to or removed from the gateway yet, and some device
-  settings (the function of rocker A and B, the routing time, the repeater
-  mode) are not offered yet (see [Roadmap](#roadmap)).
+  settings (the function of rocker A and B) are not offered yet (see [Roadmap](#roadmap)).
 
 All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 
@@ -172,7 +208,7 @@ All limitations: [docs/how-it-works.md](docs/how-it-works.md#known-limitations).
 | Status | Topic |
 |--------|-------|
 | ✅ Released | 1.0 with the REST API instead of MQTT |
-| 🚧 In progress | Device settings as Home Assistant entities. Available: blind times, dimmer times and switch timers as numbers, switch operation mode, LED and external input as selects, link tables read-only. Still open: function of rocker A and B, routing time, repeater mode and gateway diagnostics (see below) |
+| 🚧 In progress | Device settings as Home Assistant entities. Available: blind times, dimmer times and switch timers as numbers, switch operation mode, LED, external input, routing (off/on) and repeater mode as selects, link tables read-only. Still open: function of rocker A and B and gateway diagnostics (see below) |
 | 🔍 Investigating | Adding and removing devices from Home Assistant |
 | 💡 Idea | HTTPS if the gateway offers it |
 
@@ -190,13 +226,17 @@ is still open is offered the same way once it is safe to write:
 
 | Device | Settings |
 |--------|----------|
-| Switch actuators (D2-01-00/-01, 2-channel D2-01-11) | Function of rocker A and B (channel assignment), ViNET routing time (timer durations, switch-off warning, its signal duration and illumination threshold are available as numbers; operation mode, LED colour, LED channel and external input function as selects) |
+| Switch actuators (D2-01-00/-01, 2-channel D2-01-11) | Function of rocker A and B (channel assignment). Available: timer durations, switch-off warning, its signal duration and illumination threshold are available as numbers; operation mode, LED colour, LED channel, external input function, routing off/on and repeater mode as selects |
 | Blinds (D2-05-02) | Function of rocker A and B, ViNET routing time (vertical movement time, rotation time and maximum holding time are available as numbers) |
-| All actuators | Repeater mode. Link tables (linked wall switches and their role, e.g. central on/off or up/down) can already be read with the `get_device_link_tables` action, and a diagnostic *Wall switch links* sensor and the diagnostics download show them without a radio request; writing them is not planned |
+| All actuators | Link tables (linked wall switches and their role, e.g. central on/off or up/down) can already be read with the `get_device_link_tables` action, and a diagnostic *Wall switch links* sensor and the diagnostics download show them without a radio request; writing them is not planned |
 | Gateway | Firmware, app and API version; services such as HomeKit, Alexa, MQTT, InfluxDB, scheduler and heating zones; received telegrams and average signal strength |
 
 Settings are written over the radio, so a change can take several seconds and
-needs the actuator to answer.
+needs the actuator to answer. Every device with settings also shows the stored
+values as read-only diagnostic sensors (enabled by default, named *… (stored)*)
+and has a *Read settings* diagnostic button that reads them from the device
+once, for example after a write whose outcome was unclear. The entities that
+change a setting stay disabled until you enable them.
 
 #### What was verified on hardware
 

@@ -29,18 +29,27 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from . import OpusGreenNetConfigEntry
-from .const import CONF_EAG_ID, DEFAULT_CHANNEL, DOMAIN
+from .const import (
+    CONF_EAG_ID,
+    DEFAULT_CHANNEL,
+    DOMAIN,
+    SIGNAL_GOOD_DBM,
+    SIGNAL_POOR_DBM,
+)
 from .coordinator import (
     SIGNAL_AVAILABILITY_UPDATE,
     SIGNAL_DEVICE_DISCOVERED,
     SIGNAL_DEVICE_REMOVED,
     SIGNAL_DEVICE_STATE_UPDATE,
+    SIGNAL_GATEWAY_INFO_UPDATE,
     SIGNAL_GATEWAY_UPTIME_UPDATE,
     CoverRun,
     OpusGreenNetCoordinator,
 )
 from .enocean_device import EnOceanChannel, EnOceanDevice
 from .entity import OpusGreenNetEntity, migrate_legacy_entity_suffix
+from .number import DEVICE_TIMES, PRESENCE_SETTINGS, DeviceTime
+from .select import DEVICE_SELECTS, DeviceSelect, option_slug
 
 # Actuators hold link tables; sensors and wall switches never list one.
 LINKABLE_ENTITY_TYPES: Final = frozenset({"switch", "light", "cover"})
@@ -70,6 +79,21 @@ MEASUREMENT_READINGS: Final[dict[str, Callable[[EnOceanChannel], float | None]]]
 # illuminance as whole lux. Display only: the reported state and history are
 # unchanged, and a user-chosen display precision in the entity settings takes
 # precedence.
+# Decimals shown for the stored settings. They stay in their native unit: a
+# suggested unit would scale the precision of an entity that already has
+# another unit (HA adds digits), which showed "0,500 s". A user can still pick
+# minutes in the entity settings. The warning signal has 1 ms steps but is
+# used with values like 0.5 s, so it shows one decimal.
+SETTING_DISPLAY_PRECISION: Final[dict[str, int]] = {
+    "timer": 0,
+    "timer_long": 0,
+    "switch_off_warning": 0,
+    "switch_off_warning_signal": 1,
+    "illumination_threshold": 0,
+    "pir_off_time": 0,
+    "recom_ready_time": 0,
+    "alive_cycle": 0,
+}
 MEASUREMENT_DISPLAY_PRECISION: Final[dict[str, int]] = {
     "battery_level": 0,
     "illuminance": 0,
@@ -88,7 +112,15 @@ async def async_setup_entry(
     added_unique_ids: set[str] = set()
     # Devices waiting for their first link table: device id -> unsubscribe.
     waiting_for_links: dict[str, CALLBACK_TYPE] = {}
-    async_add_entities([OpusGreenNetGatewayUptimeSensor(coordinator, eag_id)])
+    async_add_entities(
+        [
+            OpusGreenNetGatewayUptimeSensor(coordinator, eag_id),
+            *(
+                OpusGreenNetGatewayInfoSensor(coordinator, eag_id, key)
+                for key in GATEWAY_INFO_READINGS
+            ),
+        ]
+    )
 
     @callback
     def async_add_sensors(device: EnOceanDevice) -> None:
@@ -255,6 +287,12 @@ async def async_setup_entry(
             )
         )
 
+        entities.append(
+            OpusGreenNetSignalQualitySensor(
+                coordinator, eag_id, gateway_device_id, device
+            )
+        )
+
         # Time of the last telegram or listed update (all devices, diagnostic).
         entities.append(
             OpusGreenNetLastSeenSensor(
@@ -263,6 +301,28 @@ async def async_setup_entry(
                 gateway_device_id=gateway_device_id,
                 device=device,
             )
+        )
+
+        # The device ID (EURID) as text, for every device (diagnostic).
+        entities.append(
+            OpusGreenNetDeviceIdSensor(coordinator, eag_id, gateway_device_id, device)
+        )
+
+        # The settings stored on the device, read only (diagnostic). The number
+        # and select entities that write them are disabled by default.
+        entities.extend(
+            OpusGreenNetSettingSensor(
+                coordinator, eag_id, gateway_device_id, device, device_time
+            )
+            for device_time in (*DEVICE_TIMES, *PRESENCE_SETTINGS)
+            if device_time.applies_to(device)
+        )
+        entities.extend(
+            OpusGreenNetSettingChoiceSensor(
+                coordinator, eag_id, gateway_device_id, device, select, values
+            )
+            for select in DEVICE_SELECTS
+            if (values := select.values_for(device)) is not None
         )
 
         # Wall switches linked to an actuator (diagnostic). Only devices whose
@@ -486,6 +546,41 @@ class OpusGreenNetSignalStrengthSensor(OpusGreenNetBaseSensor):
         return None
 
 
+class OpusGreenNetSignalQualitySensor(OpusGreenNetBaseSensor):
+    """Radio link quality of a device, rated from its signal strength."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_options = ["good", "sufficient", "poor"]
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+    ) -> None:
+        """Initialize the signal quality sensor."""
+        super().__init__(
+            coordinator,
+            eag_id,
+            gateway_device_id,
+            device,
+            "signal_quality",
+            "signal_quality",
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return good, sufficient or poor, or None without a signal strength."""
+        dbm = self._device.dbm
+        if dbm is None:
+            return None
+        if dbm > SIGNAL_GOOD_DBM:
+            return "good"
+        return "sufficient" if dbm >= SIGNAL_POOR_DBM else "poor"
+
+
 def parse_last_seen(value: str) -> datetime | None:
     """Return the gateway's last-seen time, or None when it is not usable.
 
@@ -501,6 +596,34 @@ def parse_last_seen(value: str) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo is not None else None
+
+
+class OpusGreenNetDeviceIdSensor(OpusGreenNetBaseSensor):
+    """The device ID (EURID) of a device.
+
+    A diagnostic sensor, disabled by default: the ID is already shown as the
+    serial number on the device page.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+    ) -> None:
+        """Initialize the device ID sensor."""
+        super().__init__(
+            coordinator, eag_id, gateway_device_id, device, "device_id", "device_id"
+        )
+        self._attr_entity_registry_enabled_default = False
+
+    @property
+    def native_value(self) -> str:
+        """Return the device ID."""
+        return self._device.device_id
 
 
 class OpusGreenNetLastSeenSensor(OpusGreenNetBaseSensor):
@@ -562,6 +685,83 @@ class OpusGreenNetWallSwitchLinksSensor(OpusGreenNetBaseSensor):
         """
         tables = self._device.link_tables
         return None if tables is None else len(tables.inbound)
+
+
+class OpusGreenNetSettingSensor(OpusGreenNetBaseSensor):
+    """A time or threshold stored on the device, shown read only.
+
+    It reads the same channel field as the number entity of the setting, which
+    stays disabled until someone wants to change the value. The value is as
+    known from the last device list, the last confirmed write or the *Read
+    settings* button.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        device_time: DeviceTime,
+    ) -> None:
+        """Initialize the setting sensor."""
+        key = f"{device_time.translation_key}_setting"
+        super().__init__(coordinator, eag_id, gateway_device_id, device, key, key)
+        self._device_time = device_time
+        self._attr_native_unit_of_measurement = device_time.unit
+        self._attr_device_class = SensorDeviceClass(device_time.device_class.value)
+        self._attr_suggested_display_precision = SETTING_DISPLAY_PRECISION.get(
+            device_time.translation_key
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the stored value, or None while it is unknown."""
+        channel = self._device.channels.get(DEFAULT_CHANNEL)
+        if channel is None:
+            return None
+        value: float | None = getattr(channel, self._device_time.attribute)
+        if isinstance(value, float) and value.is_integer():
+            # 300.0 would be shown with a decimal; a whole number is not.
+            return int(value)
+        return value
+
+
+class OpusGreenNetSettingChoiceSensor(OpusGreenNetBaseSensor):
+    """A setting with a fixed set of values stored on the switch, read only.
+
+    A value the catalog does not list is shown as unknown, like the select.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.ENUM
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+        select: DeviceSelect,
+        values: tuple[str, ...],
+    ) -> None:
+        """Initialize the setting sensor."""
+        key = f"{select.translation_key}_setting"
+        super().__init__(coordinator, eag_id, gateway_device_id, device, key, key)
+        self._select = select
+        self._slugs = {value: option_slug(value) for value in values}
+        self._attr_options = list(self._slugs.values())
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the stored option, or None while it is unknown or unlisted."""
+        channel = self._device.channels.get(DEFAULT_CHANNEL)
+        if channel is None:
+            return None
+        value: str | None = getattr(channel, self._select.attribute)
+        return None if value is None else self._slugs.get(value)
 
 
 class OpusGreenNetMeasurementSensor(OpusGreenNetBaseSensor):
@@ -807,3 +1007,90 @@ class OpusGreenNetGatewayUptimeSensor(SensorEntity):
     def _handle_uptime(self) -> None:
         if self._update_started():
             self.async_write_ha_state()
+
+
+def _info_text(coordinator: OpusGreenNetCoordinator, key: str) -> str | None:
+    """Return a text field of the gateway information, or None."""
+    value = coordinator.gateway_info.get(key)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return str(value)
+    return value if isinstance(value, str) and value.strip() else None
+
+
+# Identity, versions and network address of the gateway: key (also the
+# translation key and the end of the unique ID) -> reading.
+GATEWAY_INFO_READINGS: Final[
+    dict[str, Callable[[OpusGreenNetCoordinator], str | None]]
+] = {
+    "gateway_eurid": lambda coordinator: coordinator.eag_id,
+    "gateway_firmware_version": lambda coordinator: _info_text(coordinator, "version"),
+    "gateway_app_version": lambda coordinator: _info_text(coordinator, "appVersion"),
+    "gateway_api_version": lambda coordinator: _info_text(coordinator, "apiVersion"),
+    "gateway_hostname": lambda coordinator: coordinator.gateway_address[0],
+    "gateway_ipv4_address": lambda coordinator: coordinator.gateway_address[1],
+    "gateway_ipv6_address": lambda coordinator: coordinator.gateway_address[2],
+}
+
+# Disabled by default: the EURID is the gateway's default password, the others
+# only repeat what the entry already shows.
+GATEWAY_INFO_DISABLED_BY_DEFAULT: Final = frozenset(
+    {
+        "gateway_eurid",
+        "gateway_hostname",
+        "gateway_ipv4_address",
+        "gateway_ipv6_address",
+    }
+)
+
+
+class OpusGreenNetGatewayInfoSensor(SensorEntity):
+    """One identity, version or address reading of the gateway.
+
+    Diagnostic sensors on the gateway's own device. The gateway information is
+    read at setup and every 30 minutes, the address is resolved on the same
+    schedule; nothing is polled by the entity.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self, coordinator: OpusGreenNetCoordinator, eag_id: str, key: str
+    ) -> None:
+        """Initialize the sensor ``key`` of GATEWAY_INFO_READINGS."""
+        self._coordinator = coordinator
+        self._eag_id = eag_id
+        self._reading = GATEWAY_INFO_READINGS[key]
+        self._attr_translation_key = key
+        self._attr_unique_id = f"{eag_id}_{key}"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, eag_id)})
+        self._attr_entity_registry_enabled_default = (
+            key not in GATEWAY_INFO_DISABLED_BY_DEFAULT
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return whether the gateway is reachable."""
+        return self._coordinator.available
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the reading, or None while the gateway did not report it."""
+        return self._reading(self._coordinator)
+
+    async def async_added_to_hass(self) -> None:
+        """Show every new reading and every availability change."""
+        await super().async_added_to_hass()
+        for signal in (SIGNAL_GATEWAY_INFO_UPDATE, SIGNAL_AVAILABILITY_UPDATE):
+            self.async_on_remove(
+                async_dispatcher_connect(
+                    self.hass, f"{signal}_{self._eag_id}", self._handle_update
+                )
+            )
+
+    @callback
+    def _handle_update(self) -> None:
+        self.async_write_ha_state()

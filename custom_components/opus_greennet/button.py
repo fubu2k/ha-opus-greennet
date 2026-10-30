@@ -1,4 +1,4 @@
-"""Button platform: reference runs of D2-05 blinds (diagnostics)."""
+"""Button platform: reference runs of D2-05 blinds and reading device settings."""
 
 from __future__ import annotations
 
@@ -18,6 +18,8 @@ from .const import (
 from .coordinator import SIGNAL_DEVICE_DISCOVERED, OpusGreenNetCoordinator
 from .enocean_device import EnOceanDevice
 from .entity import OpusGreenNetEntity
+from .number import DEVICE_TIMES, PRESENCE_SETTINGS
+from .select import DEVICE_SELECTS
 
 # Commands are serialized by the coordinator.
 PARALLEL_UPDATES = 0
@@ -30,18 +32,33 @@ REFERENCE_RUNS: tuple[tuple[str, str, int], ...] = (
 )
 
 
+def has_settings(device: EnOceanDevice) -> bool:
+    """Return whether the device has settings offered as number or select."""
+    return any(
+        time.applies_to(device) for time in (*DEVICE_TIMES, *PRESENCE_SETTINGS)
+    ) or any(select.values_for(device) is not None for select in DEVICE_SELECTS)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: OpusGreenNetConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up reference run buttons for blinds that support repositioning."""
+    """Set up reference run buttons and the read settings button."""
     coordinator = entry.runtime_data.coordinator
     gateway_device_id = entry.runtime_data.gateway_device_id
     eag_id = entry.data[CONF_EAG_ID]
 
     @callback
     def async_add_buttons(device: EnOceanDevice) -> None:
+        if has_settings(device):
+            async_add_entities(
+                [
+                    OpusGreenNetReadSettingsButton(
+                        coordinator, eag_id, gateway_device_id, device
+                    )
+                ]
+            )
         if not device.supports_repositioning:
             return
         async_add_entities(
@@ -105,3 +122,37 @@ class OpusGreenNetReferenceRunButton(OpusGreenNetEntity, ButtonEntity):
             self._channel_id,
             repositioning=self._repositioning,
         )
+
+
+class OpusGreenNetReadSettingsButton(OpusGreenNetEntity, ButtonEntity):
+    """Read the settings stored on the device and show them.
+
+    One radio read per press, never repeated and never started by itself. Use
+    it to see what the device holds after a write whose outcome was unclear, or
+    after a setting was changed with another controller.
+    """
+
+    _attr_has_entity_name = True
+    # Enabled by default: it only reads, and it sits next to the other
+    # diagnostic values of the device. A battery presence detector answers a
+    # ReCom read only while it is ready, so a press there may end in "no
+    # response" (see docs/devices.md).
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "read_settings"
+
+    def __init__(
+        self,
+        coordinator: OpusGreenNetCoordinator,
+        eag_id: str,
+        gateway_device_id: str,
+        device: EnOceanDevice,
+    ) -> None:
+        """Initialize the read settings button."""
+        super().__init__(
+            coordinator, eag_id, gateway_device_id, device, DEFAULT_CHANNEL
+        )
+        self._attr_unique_id = f"{eag_id}_{device.device_id}_read_settings"
+
+    async def async_press(self) -> None:
+        """Read the settings of the device."""
+        await self._coordinator.async_reread_device_settings(self._device.device_id)

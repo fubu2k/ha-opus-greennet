@@ -214,6 +214,10 @@ async def coord() -> AsyncIterator[OpusGreenNetCoordinator]:
     )
     with (
         patch(f"{MODULE}.async_dispatcher_send"),
+        patch(
+            f"{MODULE}.async_gateway_address",
+            AsyncMock(return_value=(None, None, None)),
+        ),
         patch(f"{MODULE}.async_track_time_interval", return_value=MagicMock()),
         patch(f"{MODULE}.STREAM_BACKOFF_INITIAL", 0.01),
         patch(f"{MODULE}.STREAM_BACKOFF_MAX", 0.01),

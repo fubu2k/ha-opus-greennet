@@ -14,6 +14,26 @@ Verification legend: **[Code]** read from source, **[Test]** covered by tests,
 - Plain HTTP on port 8080, basic authentication. Vendor default user `admin`,
   password = gateway EURID in upper case. Wrong credentials: HTTP 401 with an
   empty body. **[HW][Code][Test]**
+- **Gateway generation WebUI 2026** (entry key `generation` = `webui2026`; a
+  missing key means the generation above): HTTPS on port 443, the same paths, a
+  self-signed certificate pinned by its SHA-256 fingerprint
+  (`certificate_fingerprint`), user login and token. `GET /auth/setup-status`
+  (no login) tells the generation apart. Source: vendor description of the
+  ConfigTool, **not** verified on a gateway. **[Ref][Code][Test]**
+  - **[Assumption]** The login is `POST /auth/login` with
+    `{"username", "password"}` and answers `{"token": "..."}`; the token is sent
+    as `Authorization: Bearer <token>`. Constants in `api.py`
+    (`_LOGIN_PATH`, `_LOGIN_TOKEN_KEY`).
+  - **[Assumption]** `/system/info` carries the EURID as before.
+  - Token lifetime 30 days, extended by use (vendor text); the renewal is not
+    known. The token is kept in memory only. HTTP 401 with a token: the token is
+    dropped, the request is not repeated (`OpusTokenExpiredError`, a connection
+    error); the next request logs in again. HTTP 403: `OpusAuthError`. A login
+    answered 401/403: `OpusAuthError` (re-authentication). A different
+    certificate: `OpusCertificateError` (an `OpusAuthError`), confirmed by the
+    user in the flow before credentials are sent to it.
+  - Role `installateur` may not do everything `admin` does (vendor text:
+    restart, firmware, reset); the integration uses none of it.
 - Every JSON answer carries `header.httpStatus`; `200` and `201` (SoftSmartAck)
   count as success. `201` means the gateway queued a state command until the
   sleeping device wakes up and fetches it: lights, switches and covers keep
@@ -36,7 +56,7 @@ Verification legend: **[Code]** read from source, **[Test]** covered by tests,
 
 | Method and path | Use | Notes |
 |-----------------|-----|-------|
-| `GET /system/info` | Config flow, setup | `systemInfo.eurid` = EAG identifier; also version, serial number, base ID and the HomeKit setup code (redacted in diagnostics) **[HW]** |
+| `GET /system/info` | Config flow, setup, refresh every 30 min (with the device list; versions, `receiveCounter`, `averageDbm`) | `systemInfo.eurid` = EAG identifier; also version, serial number, base ID and the HomeKit setup code (redacted in diagnostics) **[HW]** |
 | `GET /system/uptime` | Setup, health check every 60 s | `systemUptimeResponse.uptime` in seconds; a decrease means a gateway restart **[HW][Code][Test]** |
 | `GET /devices` | Setup, device list refresh every 30 min | Same device objects as the stream snapshot **[HW]** |
 | `GET /devices/stream` | Event stream | See §3 **[HW]** |
@@ -250,8 +270,9 @@ had registered. **[HW][Test]**
 - Reauthentication and reconfiguration reject an address that answers with a
   different EURID (`wrong_gateway`); setup does the same for a stored address.
   **[Code][Test]**
-- The gateway has no TLS (plain HTTP, basic authentication), so credentials are
-  sent only to the local network. `discovery.LOCAL_NETWORKS` is an allowlist
+- A gateway before WebUI 2026 has no TLS (plain HTTP, basic authentication), so
+  credentials are sent only to the local network (the same allowlist applies to
+  WebUI 2026 gateways). `discovery.LOCAL_NETWORKS` is an allowlist
   (RFC 1918, link-local, loopback, `100.64.0.0/10`, `fc00::/7`), extended by
   the networks of Home Assistant's enabled adapters (`network` integration),
   so an on-link global IPv6 address counts as local. Host names are resolved
@@ -263,6 +284,18 @@ had registered. **[HW][Test]**
   Entries stored with a public address still set up and log a warning. The
   check happens when the address is entered; a name that later resolves
   elsewhere is not re-checked **[Code][Test]**.
+- The config flow never sends credentials in clear text to a TLS service. The
+  ports 443 and the port of a configured WebUI 2026 gateway are not tried over
+  plain HTTP, and any other port except the default 8080 is first asked
+  without credentials (`GET /auth/setup-status`, certificate handshake); only
+  when no WebUI 2026 gateway answers there is the plain-HTTP read made
+  **[Code][Test]**.
+- A running entry of the earlier generation whose gateway fails three health
+  probes in a row is asked, at most every ten minutes, whether a WebUI 2026
+  gateway answers at its address (`GET /auth/setup-status`, certificate
+  handshake: no credentials, no radio request). If so, the entry asks for a
+  login (reauthentication) and its stream stops; a gateway that only restarts
+  and answers again is left alone **[Code][Test]**.
 
 ## 10. Services (public, unchanged)
 

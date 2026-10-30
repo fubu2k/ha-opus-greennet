@@ -12,6 +12,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.redact import REDACTED
 
 from custom_components.opus_greennet.diagnostics import (
+    _redact_diagnostics,
     async_get_config_entry_diagnostics,
 )
 from custom_components.opus_greennet.enocean_device import (
@@ -255,3 +256,30 @@ async def test_rest_diagnostics_redact_gateway_errors_and_report_outage(
     assert result["devices"][0]["last_command_error"] == (
         f"status 409: {REDACTED} busy, base {REDACTED} on {REDACTED}"
     )
+
+
+def test_the_certificate_fingerprint_of_a_new_generation_entry_is_redacted() -> None:
+    """The remembered certificate identifies the gateway; it is not shared."""
+    fingerprint = "ab12" * 16
+    data = {
+        "entry": {
+            "data": {
+                "host": "192.0.2.12",
+                "port": 443,
+                "generation": "webui2026",
+                "certificate_fingerprint": fingerprint,
+                "password": "s3cr3t-Passw0rd",
+            }
+        },
+        "gateway": {"error": f"certificate {fingerprint.upper()} was rejected"},
+    }
+
+    result = _redact_diagnostics(data, set())
+
+    section = result["entry"]
+    assert isinstance(section, dict)
+    entry = section["data"]
+    assert entry["certificate_fingerprint"] == REDACTED
+    assert entry["generation"] == "webui2026"
+    assert entry["port"] == 443
+    assert fingerprint not in json.dumps(result).casefold()

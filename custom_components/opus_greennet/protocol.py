@@ -24,7 +24,9 @@ from .const import (
     KEY_LOCKING_MODE,
     KEY_MAX_HOLDING_TIME,
     KEY_POSITION,
+    KEY_REPEATER_STATE,
     KEY_ROTATION_TIME,
+    KEY_ROUTING_TIME,
     KEY_STOP,
     KEY_SWITCH,
     KEY_TEMPERATURE_SETPOINT,
@@ -32,6 +34,7 @@ from .const import (
     KEY_VERTICAL_MOVEMENT_TIME,
     KNOWN_STATE_KEYS,
     LOCKING_MODES,
+    REPEATER_EEPS,
     RWM_EEP,
 )
 from .enocean_device import DeviceProfile, EnOceanDevice, LinkedDevice, LinkTables
@@ -199,6 +202,11 @@ def configuration_state_functions(data: WireMapping) -> list[WireFunction]:
             continue
         if parameter.get("key") == KEY_CHANNEL:
             channel = parameter.get("value")
+        elif parameter.get("key") == KEY_ROUTING_TIME and "value" in parameter:
+            if (routing := routing_state(parameter["value"])) is not None:
+                functions.append(
+                    {"channel": channel, "key": KEY_ROUTING_TIME, "value": routing}
+                )
         elif parameter.get("key") in CONFIGURATION_STATE_KEYS and "value" in parameter:
             functions.append({"channel": channel, **parameter})
     return functions
@@ -253,6 +261,39 @@ def configuration_parameter(document: WireMapping, key: str) -> float | None:
             value = EnOceanDevice._parse_number(parameter.get("value"), minimum=0)
             return None if value is None else float(value)
     return None
+
+
+def supports_repeater_state(device: EnOceanDevice) -> bool:
+    """Return whether the device is known to have the repeater mode resource."""
+    return any(eep in REPEATER_EEPS for eep in device.eep_names)
+
+
+def routing_state(value: object) -> str | None:
+    """Return a reported routing time as ``off`` or ``on``, None if unusable.
+
+    The gateway reports "off" or a time in seconds; any positive time is "on".
+    """
+    return EnOceanDevice.routing_reading(value)
+
+
+def configuration_routing(document: WireMapping) -> str | None:
+    """Return the routing of a ``configuration`` document as off/on, or None."""
+    configuration = as_object(document.get("configuration"))
+    parameters = None if configuration is None else configuration.get("parameters")
+    if not isinstance(parameters, list):
+        return None
+    for parameter in parameters:
+        if isinstance(parameter, dict) and parameter.get("key") == KEY_ROUTING_TIME:
+            return routing_state(parameter.get("value"))
+    return None
+
+
+def repeater_state_function(document: WireMapping) -> WireFunction | None:
+    """Read the answer of ``GET /devices/{id}/repeaterState`` as a state function."""
+    value = document.get("repeaterState")
+    if not isinstance(value, str) or not value:
+        return None
+    return {"channel": 0, "key": KEY_REPEATER_STATE, "value": value}
 
 
 def configuration_option(document: WireMapping, key: str) -> str | None:
@@ -396,6 +437,9 @@ def device_state_functions(data: WireMapping) -> list[WireFunction]:
             and function.get("key") in ("alarm", "smokeAlarm", "batteryLow")
             and "value" in function
         )
+    # The repeater mode is a device field of the device list (cache, no radio).
+    if (repeater := repeater_state_function(data)) is not None:
+        state_functions.append(repeater)
     if "batteryLevel" in data:
         state_functions.append({"key": "batteryLevel", "value": data["batteryLevel"]})
     # The answer the gateway stores for a sleeping device's next request

@@ -50,6 +50,7 @@ from .const import (
     KEY_POWER_STATE,
     KEY_REPOSITIONING,
     KEY_ROTATION_TIME,
+    KEY_ROUTING_TIME,
     KEY_SUMMER_MODE,
     KEY_SWITCH,
     KEY_TEMPERATURE,
@@ -66,6 +67,8 @@ from .const import (
     REPOSITIONING_EEPS,
     ROCKER_2_BUTTON_KEYS,
     ROCKER_EEP_PREFIXES,
+    ROUTING_OFF,
+    ROUTING_ON,
     STATE_ON,
     UNLOCK_ALLOWED,
     UNLOCK_NOT_ALLOWED,
@@ -146,11 +149,18 @@ class EnOceanChannel:
     switch_off_warning: float | None = None
     switch_off_warning_signal: float | None = None
     illumination_threshold: float | None = None
+    # A5-07-03 presence detector settings (DEVICE_SETTINGS): alive cycle in
+    # minutes, PIR off time and ReCom readiness cycle in seconds.
+    alive_cycle: float | None = None
+    pir_off_time: float | None = None
+    recom_ready_time: float | None = None
     # D2-01 switch settings with fixed values, as reported (DEVICE_OPTIONS).
     operation_mode: str | None = None
     led_color: str | None = None
     led_channel: str | None = None
     function_external_input: str | None = None
+    routing: str | None = None  # off or on (any routing time)
+    repeater: str | None = None  # off, level_1 or level_2
     movement: str | None = None  # Estimated opening/closing, never physical feedback
     local_control: bool | None = None
     locking_mode: str | None = None  # block, unblock or alarm (D2-05)
@@ -242,6 +252,10 @@ class EnOceanDevice:
     eeps: list[JsonObject] = field(default_factory=list)
     manufacturer: str = ""
     physical_device: str = ""
+    # Gateway device list: product number and software version of the device.
+    product_id: str = ""
+    software_revision: str = ""
+    hardware_revision: str = ""
     first_seen: str = ""
     last_seen: str = ""
     last_update_source: str = ""
@@ -267,6 +281,9 @@ class EnOceanDevice:
         "eeps",
         "manufacturer",
         "physical_device",
+        "product_id",
+        "software_revision",
+        "hardware_revision",
         "first_seen",
         "last_seen",
         "dbm",
@@ -291,6 +308,10 @@ class EnOceanDevice:
         self.eeps = listed.eeps
         self.manufacturer = listed.manufacturer
         self.physical_device = listed.physical_device
+        # A list that omits them keeps the known values.
+        self.product_id = listed.product_id or self.product_id
+        self.software_revision = listed.software_revision or self.software_revision
+        self.hardware_revision = listed.hardware_revision or self.hardware_revision
         self.first_seen = listed.first_seen
         if listed.last_seen and not keep_signal:
             self.last_seen = listed.last_seen
@@ -299,6 +320,32 @@ class EnOceanDevice:
         # A list without a table says nothing; it never clears a known one.
         if listed.link_tables is not None:
             self.link_tables = listed.link_tables
+
+    def setting_reading(self, key: str) -> float | str | None:
+        """Return the stored value of a device setting, None while unknown.
+
+        Settings belong to the device and live on the default channel, where the
+        number and select entities read them.
+        """
+        channel = self.channels.get(DEFAULT_CHANNEL)
+        if channel is None:
+            return None
+        if key == KEY_VERTICAL_MOVEMENT_TIME:
+            attribute = "vertical_movement_time"
+        elif key == KEY_MAX_HOLDING_TIME:
+            attribute = "max_holding_time"
+        elif key == KEY_ROTATION_TIME:
+            attribute = "rotation_time"
+        elif key in DEVICE_OPTIONS:
+            attribute = DEVICE_OPTIONS[key]
+        elif key in DEVICE_SETTINGS:
+            attribute = DEVICE_SETTINGS[key][0]
+        else:
+            return None
+        value = getattr(channel, attribute, None)
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            return None
+        return value
 
     @property
     def primary_eep(self) -> str | None:
@@ -703,6 +750,16 @@ class EnOceanDevice:
         number = cls._parse_float(value, minimum=minimum, maximum=maximum)
         return current if number is None else number
 
+    @classmethod
+    def routing_reading(cls, value: object) -> str | None:
+        """Return a reported routing time as ``off`` or ``on``, None if unusable."""
+        if value in (ROUTING_OFF, ROUTING_ON):
+            return str(value)
+        number = cls._parse_number(value, minimum=0)
+        if number is None or number <= 0:
+            return None
+        return ROUTING_ON
+
     @staticmethod
     def _option_reading(value: object) -> str | None:
         """Return a reported setting value as text, or None if there is none."""
@@ -864,7 +921,11 @@ class EnOceanDevice:
             elif key in DEVICE_OPTIONS:
                 # The reported value is kept as it is, also when the catalog
                 # does not list it; a missing or malformed one keeps the known.
-                option = self._option_reading(value)
+                option = (
+                    self.routing_reading(value)
+                    if key == KEY_ROUTING_TIME
+                    else self._option_reading(value)
+                )
                 if option is not None:
                     setattr(channel, DEVICE_OPTIONS[key], option)
 
@@ -1099,6 +1160,9 @@ class EnOceanDevice:
             eeps=object_items(device.get("eeps", [])),
             manufacturer=text("manufacturer"),
             physical_device=text("physicalDevice"),
+            product_id=text("productId"),
+            software_revision=text("softwareRevision"),
+            hardware_revision=text("hardwareRevision"),
             first_seen=text("firstSeen"),
             last_seen=text("lastSeen"),
             dbm=dbm,

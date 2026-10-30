@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,6 +27,36 @@ class _PlainResolver(aiohttp.ThreadedResolver):
 
     async def real_close(self) -> None:
         await self.close()
+
+
+@pytest.fixture(autouse=True)
+def _no_dns_in_diagnostics() -> Iterator[None]:
+    """Keep the diagnostics download from asking a real resolver."""
+    with patch(
+        "custom_components.opus_greennet.diagnostics.async_gateway_address",
+        AsyncMock(return_value=(None, None, None)),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _no_webui_2026_detection() -> Iterator[None]:
+    """Keep the tests from probing real addresses for the newer generation.
+
+    A gateway that does not answer would otherwise be asked for HTTPS on port
+    443. Tests of that path replace this patch with their own endpoint.
+    """
+    with (
+        patch(
+            "custom_components.opus_greennet.config_flow.async_detect_webui_2026",
+            AsyncMock(return_value=None),
+        ),
+        patch(
+            "custom_components.opus_greennet.async_detect_webui_2026",
+            AsyncMock(return_value=None),
+        ),
+    ):
+        yield
 
 
 @pytest.fixture

@@ -14,6 +14,15 @@ CONF_EAG_ID: Final = "eag_id"
 DEFAULT_PORT: Final = 8080
 DEFAULT_USERNAME: Final = "admin"
 
+# Gateway generations. Gateways with firmware before WebUI 2026 serve the REST
+# API over plain HTTP (port 8080) with basic authentication; the entry data
+# carries no generation for them, and a missing key always means this one.
+# Gateways with WebUI 2026 serve the same paths only over HTTPS (port 443) with
+# a user login and a token, and a self-signed certificate that is remembered.
+CONF_GENERATION: Final = "generation"
+CONF_CERTIFICATE_FINGERPRINT: Final = "certificate_fingerprint"
+WEBUI_2026_PORT: Final = 443
+
 # EEP (EnOcean Equipment Profile) to entity type mappings
 # Format: EEP -> (entity_type, description)
 #
@@ -196,6 +205,11 @@ KEY_TIMER_LONG: Final = "timerLong"
 KEY_SWITCH_OFF_WARNING: Final = "switchOffWarning"
 KEY_SWITCH_OFF_WARNING_SIGNAL: Final = "switchOffWarningSignal"
 KEY_ILLUMINATION_THRESHOLD: Final = "illuminationThreshold"
+# A5-07-03 presence detector settings: alive telegram cycle (minutes), time
+# until the PIR reports "off" and cycle of the ReCom readiness (seconds).
+KEY_ALIVE_CYCLE: Final = "aliveCycle"
+KEY_PIR_OFF_TIME: Final = "pirOffTime"
+KEY_RECOM_READY_TIME: Final = "recomReadyTime"
 # Device settings and the channel field they fill, with the range of the
 # gateway's parameter catalog (a reported value outside it keeps the known one).
 # Like the holding time they are no state keys: a command of another controller
@@ -209,6 +223,9 @@ DEVICE_SETTINGS: Final = {
     KEY_SWITCH_OFF_WARNING: ("switch_off_warning", 0, 45),
     KEY_SWITCH_OFF_WARNING_SIGNAL: ("switch_off_warning_signal", 0.2, 2),
     KEY_ILLUMINATION_THRESHOLD: ("illumination_threshold", 0, 1500),
+    KEY_ALIVE_CYCLE: ("alive_cycle", 0, 1440),
+    KEY_PIR_OFF_TIME: ("pir_off_time", 0, 3600),
+    KEY_RECOM_READY_TIME: ("recom_ready_time", 0, 655350),
 }
 # Device settings with a fixed set of values (select entities): key -> channel
 # field. The field holds the value the gateway reported, listed or not; the
@@ -217,13 +234,39 @@ KEY_OPERATION_MODE: Final = "operationMode"
 KEY_LED_COLOR: Final = "ledColor"
 KEY_LED_CHANNEL: Final = "ledChannel"
 KEY_FUNCTION_EXTERNAL_INPUT: Final = "functionExternalInput"
+# Routing (configuration parameter) is "off" or a time in seconds; only "off"
+# was seen on devices. It is shown as off/on: any time is "on". "on" is written
+# as the smallest time of the catalog (0.3 s), an assumption until a device
+# that routes was read. The repeater mode is no ReCom parameter but the device
+# resource /repeaterState (off, level_1, level_2).
+KEY_ROUTING_TIME: Final = "routingTime"
+KEY_REPEATER_STATE: Final = "repeaterState"
+ROUTING_ON_SECONDS: Final = 0.3
+# D2-01 switches (catalog read from a D2-01-01 and a D2-01-11).
+# Radio link quality by signal strength (dBm): above GOOD is good, down to
+# POOR (inclusive) sufficient, below it poor (a repeater is recommended).
+SIGNAL_GOOD_DBM: Final = -75
+SIGNAL_POOR_DBM: Final = -85
+SWITCH_EEPS: Final = ("D2-01-01", "D2-01-11")
+# Devices that report the repeater mode (D2-01-03 read from a dimmer, not written).
+REPEATER_EEPS: Final = (*SWITCH_EEPS, "D2-01-03")
+ROUTING_OFF: Final = "off"
+ROUTING_ON: Final = "on"
 DEVICE_OPTIONS: Final = {
     KEY_OPERATION_MODE: "operation_mode",
     KEY_LED_COLOR: "led_color",
     KEY_LED_CHANNEL: "led_channel",
     KEY_FUNCTION_EXTERNAL_INPUT: "function_external_input",
+    KEY_ROUTING_TIME: "routing",
+    KEY_REPEATER_STATE: "repeater",
 }
 DEVICE_SETTING_KEYS: Final = frozenset(DEVICE_SETTINGS) | frozenset(DEVICE_OPTIONS)
+# How long a confirmed setting is protected against the gateway's cached copy of
+# the configuration. The device list carries that cache; the gateway reads the
+# configuration itself only now and then (nightly in the E0 catalog), so a list
+# can repeat the value from before a confirmed write. A list that shows the
+# written value or a third value ends the protection earlier.
+SETTING_CACHE_GUARD_SECONDS: Final = 26 * 3600.0
 COVER_MOVEMENT_GRACE_SECONDS: Final = 5.0
 # A run into an end stop is reported about 1.4 s later than a partial run
 # (measured on one installation of D2-05-02 blinds), so its estimate waits longer.

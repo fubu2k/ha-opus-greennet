@@ -314,7 +314,11 @@ class OpusGreenNetEntity(Entity):
             name=self._device.friendly_id or self._device.device_id,
             manufacturer=self._device.manufacturer or "OPUS / EnOcean",
             model=self._device.primary_eep or "Unknown",
+            # Shown as serial number in the device information, as before.
             serial_number=self._device.device_id,
+            model_id=self._device.product_id or None,
+            sw_version=self._device.software_revision or None,
+            hw_version=self._device.hardware_revision or None,
             via_device_id=self._gateway_device_id,
         )
 

@@ -488,7 +488,7 @@ def test_keeps_single_channel_registry_entity() -> None:
         (async_setup_switches, "D2-01-11", 2),
         (async_setup_covers, "D2-05-00", 1),
         (async_setup_climate, "D1-4B-06", 1),
-        (async_setup_sensors, "D1-4B-07", 4),
+        (async_setup_sensors, "D1-4B-07", 6),
         (async_setup_binary_sensors, "D1-4B-05", 5),
         (async_setup_binary_sensors, "F6-05-01", 1),
         (async_setup_events, "F6-02-01", 1),
@@ -531,16 +531,36 @@ async def test_sensor_setup_deduplicates_discovery_entities() -> None:
     discovery_callback = connect.call_args.args[2]
     discovery_callback(device)
 
-    # The gateway's own sensor comes first, then the device entities once.
+    # The gateway's own sensors come first, then the device entities once.
     assert async_add_entities.call_count == 2
     gateway_entities = async_add_entities.call_args_list[0].args[0]
     assert [entity.unique_id for entity in gateway_entities] == [
-        f"{EAG_ID}_gateway_uptime"
+        f"{EAG_ID}_gateway_uptime",
+        f"{EAG_ID}_gateway_eurid",
+        f"{EAG_ID}_gateway_firmware_version",
+        f"{EAG_ID}_gateway_app_version",
+        f"{EAG_ID}_gateway_api_version",
+        f"{EAG_ID}_gateway_hostname",
+        f"{EAG_ID}_gateway_ipv4_address",
+        f"{EAG_ID}_gateway_ipv6_address",
     ]
     initial_entities = async_add_entities.call_args_list[1].args[0]
     assert [entity.unique_id for entity in initial_entities] == [
         f"{EAG_ID}_DEV1_signal_strength",
+        f"{EAG_ID}_DEV1_signal_quality",
         f"{EAG_ID}_DEV1_last_seen",
+        f"{EAG_ID}_DEV1_device_id",
+        # The settings stored on the switch, read only.
+        f"{EAG_ID}_DEV1_timer_setting",
+        f"{EAG_ID}_DEV1_timer_long_setting",
+        f"{EAG_ID}_DEV1_switch_off_warning_setting",
+        f"{EAG_ID}_DEV1_switch_off_warning_signal_setting",
+        f"{EAG_ID}_DEV1_illumination_threshold_setting",
+        f"{EAG_ID}_DEV1_operation_mode_setting",
+        f"{EAG_ID}_DEV1_led_color_setting",
+        f"{EAG_ID}_DEV1_function_external_input_setting",
+        f"{EAG_ID}_DEV1_routing_setting",
+        f"{EAG_ID}_DEV1_repeater_setting",
     ]
 
 

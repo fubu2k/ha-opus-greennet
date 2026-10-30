@@ -751,13 +751,21 @@ async def test_switch_platform_adds_blockage_only_for_locking_blinds() -> None:
 
 async def test_reference_run_buttons() -> None:
     device = _device("D2-05-02")
-    added = await _platform_entities(async_setup_buttons, device)
+    added = [
+        entity
+        for entity in await _platform_entities(async_setup_buttons, device)
+        if "reference_run" in entity.unique_id
+    ]
     assert [entity.unique_id for entity in added] == [
         f"{EAG_ID}_DEV1_reference_run_up",
         f"{EAG_ID}_DEV1_reference_run_down",
     ]
     assert all(e.entity_category is EntityCategory.DIAGNOSTIC for e in added)
-    assert await _platform_entities(async_setup_buttons, _device("D2-05-01")) == []
+    assert not [
+        entity
+        for entity in await _platform_entities(async_setup_buttons, _device("D2-05-01"))
+        if "reference_run" in entity.unique_id
+    ]
 
     coordinator = MagicMock(available=True)
     coordinator.async_set_cover_position = AsyncMock()

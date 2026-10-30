@@ -13,7 +13,11 @@ Lifecycle:
   then delivers every telegram the moment the gateway handles it.
 * A health probe reads the uptime every minute. It detects an unreachable
   gateway even while the stream is silent, and a gateway restart (falling
-  uptime) whose old stream connection could otherwise stay half open.
+  uptime) whose old stream connection could otherwise stay half open. A
+  gateway of the earlier generation that fails several probes in a row is
+  also asked, at most every ten minutes and without credentials, whether a
+  WebUI 2026 gateway answers at its address now (it was updated); the user is
+  then asked for a login.
 * Commands are HTTP PUTs. The gateway acknowledges them synchronously; one
   radio request is in flight at a time, user commands first.
 """
@@ -24,14 +28,16 @@ import asyncio
 import logging
 import math
 import random
-from collections.abc import Callable, Coroutine, Sequence
+import re
+from collections import deque
+from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from time import monotonic, time
-from typing import Any, Final
+from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -67,8 +73,10 @@ from .const import (
     KEY_POSITION,
     KEY_QUERY,
     KEY_RAMPING_MODE,
+    KEY_REPEATER_STATE,
     KEY_REPOSITIONING,
     KEY_ROTATION_TIME,
+    KEY_ROUTING_TIME,
     KEY_STOP,
     KEY_UNLOCK,
     KEY_VERTICAL_MOVEMENT_TIME,
@@ -76,10 +84,15 @@ from .const import (
     RAMPING_MODE_SWITCH,
     REPOSITIONING_FIRST_DOWN,
     REPOSITIONING_FIRST_UP,
+    ROUTING_OFF,
+    ROUTING_ON,
+    ROUTING_ON_SECONDS,
+    SETTING_CACHE_GUARD_SECONDS,
     UNLOCK_ALLOWED,
     UNLOCK_NOT_ALLOWED,
     VALUE_UNKNOWN,
 )
+from .discovery import async_gateway_address
 from .enocean_device import DeviceProfile, EnOceanDevice
 from .wire import (
     JsonObject,
@@ -116,8 +129,15 @@ class CommandDelivery(StrEnum):
 SIGNAL_DEVICE_STATE_UPDATE = f"{DOMAIN}_device_state_update"
 SIGNAL_AVAILABILITY_UPDATE = f"{DOMAIN}_availability_update"
 SIGNAL_GATEWAY_UPTIME_UPDATE = f"{DOMAIN}_gateway_uptime_update"
+SIGNAL_GATEWAY_INFO_UPDATE = f"{DOMAIN}_gateway_info_update"
 
 GATEWAY_HEALTH_INTERVAL = timedelta(seconds=60)
+# A gateway of the earlier generation that fails this many health probes in a
+# row is asked whether a WebUI 2026 gateway answers at its address now (it was
+# updated). The question is repeated at most this often; it sends no
+# credentials and no radio request.
+GENERATION_CHECK_AFTER_FAILURES = 3
+GENERATION_CHECK_INTERVAL = 600.0
 # The stream reports live changes; the periodic device list additionally
 # refreshes slowly changing metadata (battery level, signal, movement times)
 # and picks up newly paired devices.
@@ -155,6 +175,40 @@ OUTBOUND_STATE_RECONCILIATION_DELAYS = (5.0, 20.0)
 OWN_COMMAND_ECHO_SECONDS = 2.0
 # Internal reason for a background status check dropped before sending.
 SUPERSEDED = "superseded"
+# Radio requests (and the feedback that confirmed a command) kept for the
+# diagnostics download, oldest dropped first. Memory only, never persisted.
+RADIO_JOURNAL_SIZE = 300
+# Longest gateway text and string value kept in one journal entry.
+JOURNAL_TEXT_LENGTH = 200
+JOURNAL_VALUE_LENGTH = 64
+JOURNAL_VALUE_COUNT = 20
+_PRIORITY_NAMES = {
+    PRIORITY_COMMAND: "command",
+    PRIORITY_QUERY: "query",
+    PRIORITY_BACKGROUND: "background",
+}
+
+
+def _journal_values(items: object) -> dict[str, object]:
+    """Return ``{key: value}`` of ``[{"key": ..., "value": ...}]`` for the journal.
+
+    Only what the integration sends itself is of interest, so scalars are kept
+    (strings shortened) and any other value is replaced by its type name. A
+    value of a malformed list is skipped.
+    """
+    values: dict[str, object] = {}
+    for item in object_items(items)[:JOURNAL_VALUE_COUNT]:
+        key = item.get("key")
+        if not isinstance(key, str):
+            continue
+        value = item.get("value")
+        if isinstance(value, str):
+            values[key] = value[:JOURNAL_VALUE_LENGTH]
+        elif isinstance(value, bool | int | float) or value is None:
+            values[key] = value
+        else:
+            values[key] = f"<{type(value).__name__}>"
+    return values
 
 
 def stream_retry_delay(failures: int, random_share: float | None = None) -> float:
@@ -198,11 +252,6 @@ def request_error(key: str, device_id: str, reason: str = "") -> HomeAssistantEr
     )
 
 
-# How long a setting confirmed by a read-back wins over a device list that
-# still shows the previous value (the gateway reads devices again at night).
-SETTING_HOLD_SECONDS: Final = 26 * 3600
-
-
 def snap_to_step(value: float, step: float, minimum: float = 0) -> float | int:
     """Return ``value`` on the parameter's grid, as the device stores it.
 
@@ -222,14 +271,48 @@ def snap_to_step(value: float, step: float, minimum: float = 0) -> float | int:
     return snapped
 
 
-def _same_setting(listed: object, confirmed: object) -> bool:
-    """Return whether a listed setting equals the confirmed one."""
-    if isinstance(confirmed, str):
-        return listed == confirmed
-    try:
-        return abs(float(listed) - float(confirmed)) < 1e-6  # type: ignore[arg-type]
-    except TypeError, ValueError:
-        return False
+def _step_reason(key: str, err: HomeAssistantError) -> str:
+    """Return the setting and the gateway's reason of a rejected request."""
+    reason = (err.translation_placeholders or {}).get("reason")
+    return f"{key}: {reason}" if reason else key
+
+
+# Older values a confirmed setting keeps for the protection, at most.
+_SETTING_GUARD_STALE_VALUES = 4
+
+
+@dataclass(slots=True)
+class SettingGuard:
+    """A confirmed setting and the older values the gateway's cache may repeat.
+
+    The device list carries the gateway's cached copy of the configuration. It
+    is not necessarily refreshed by a write, so a list that arrives after a
+    confirmed write can show the value from before it.
+    """
+
+    stale: tuple[float | str, ...]
+    written: float | str
+    at: float
+
+
+def _setting_number(value: object) -> float | None:
+    """Return a reported setting as a number; ``noRotation`` is zero."""
+    if isinstance(value, str) and value.strip() == "noRotation":
+        return 0.0
+    number = EnOceanDevice._parse_number(value)
+    return None if number is None else float(number)
+
+
+def _same_setting(left: object, right: object) -> bool:
+    """Return whether two reports of a setting mean the same value."""
+    left_number, right_number = _setting_number(left), _setting_number(right)
+    if left_number is not None and right_number is not None:
+        return abs(left_number - right_number) <= 1e-6
+    return (
+        isinstance(left, str)
+        and isinstance(right, str)
+        and left.strip() == right.strip()
+    )
 
 
 class GatewayMismatchError(OpusApiError):
@@ -312,15 +395,31 @@ class OpusGreenNetCoordinator:
         eag_id: str,
         *,
         on_auth_failed: Callable[[], None] | None = None,
+        generation_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> None:
-        """Initialize the coordinator."""
+        """Initialize the coordinator.
+
+        ``generation_check`` is given for a gateway of the earlier generation
+        only: it tells whether a gateway of the newer generation answers at
+        the address now.
+        """
         self.hass = hass
         self.client = client
         self.eag_id = eag_id
         self.devices: dict[str, EnOceanDevice] = {}
         self.gateway_info: JsonObject = {}
         self.gateway_uptime: str | None = None
+        # ``(hostname, ipv4, ipv6)`` of the configured gateway host, as far as
+        # it resolves (shown by the gateway's diagnostic sensors).
+        self.gateway_address: tuple[str | None, str | None, str | None] = (
+            None,
+            None,
+            None,
+        )
         self._on_auth_failed = on_auth_failed
+        self._generation_check = generation_check
+        self._probe_failures = 0
+        self._generation_checked_at: float | None = None
         self._auth_failed = False
         self._unloaded = False
         self._gateway_available = False
@@ -346,22 +445,32 @@ class OpusGreenNetCoordinator:
         self._telegram_metadata_at: dict[str, float] = {}
         # One settings write (with its read-back) per device at a time.
         self._setting_locks: dict[str, asyncio.Lock] = {}
-        # Settings confirmed by a read-back: (device, key) -> (value, monotonic
-        # time). A device list that still lists another value is ignored for
-        # the key until it shows the confirmed one or SETTING_HOLD_SECONDS
-        # passed: the gateway may only read the device again at night.
-        self._confirmed_settings: dict[tuple[str, str], tuple[object, float]] = {}
         self._probe_task: asyncio.Task[None] | None = None
         self._refresh_task: asyncio.Task[None] | None = None
+        # When ``gateway_info`` was last read from the gateway (ISO, UTC).
+        self.gateway_info_read_at: str | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         self._timers: list[Callable[[], None]] = []
         # One radio request in flight at a time, dispatched by priority.
         self._radio_queue = PriorityLock()
+        # What was sent over the radio and how the gateway answered, for the
+        # diagnostics download only. Never read to decide anything.
+        self._radio_journal: deque[dict[str, object]] = deque(maxlen=RADIO_JOURNAL_SIZE)
+        self._radio_journal_seq = 0
         self._device_generations: dict[str, int] = {}
         # Incremented whenever the gateway becomes unavailable: requests queued
         # before an outage are never sent after the gateway returns.
         self._outage_generation = 0
         self._unknown_devices: dict[str, float] = {}
+        # Confirmed settings per device, protected against the gateway's cached
+        # copy of the configuration in a device list (see ``SettingGuard``).
+        self._setting_guards: dict[str, dict[str, SettingGuard]] = {}
+        # Counts the configuration writes of a device (one before and one after
+        # each), so a settings read that overlapped a write is recognised and
+        # dropped instead of replacing the newer value.
+        self._setting_writes: dict[str, int] = {}
+        # Devices whose settings are being read on request right now.
+        self._settings_reading: set[str] = set()
         self._command_waiters: dict[str, int] = {}
         self._sent_commands: dict[str, list[tuple[float, frozenset[object]]]] = {}
         self._cover_movements: dict[tuple[str, int], CoverMovement] = {}
@@ -436,6 +545,8 @@ class OpusGreenNetCoordinator:
         # Entities are created after setup returns, so their type and channel
         # count can follow the gateway profiles read here.
         await self._async_load_profiles()
+        # Name resolution can take seconds on a slow network: not part of setup.
+        self._create_task(self._async_refresh_gateway_address(), "address lookup")
         _LOGGER.debug(
             "OPUS gateway %s sent its first device list after %.3f s",
             self.eag_id,
@@ -486,6 +597,20 @@ class OpusGreenNetCoordinator:
                 f"The gateway at {self.client.host} reports EURID {eurid}"
             )
         self.gateway_info = info
+        self.gateway_info_read_at = dt_util.utcnow().isoformat()
+        self._log_gateway_versions()
+
+    def _gateway_versions(self) -> tuple[object, object, object]:
+        """Return firmware, app and API version as the gateway reported them."""
+        info = self.gateway_info
+        return info.get("version"), info.get("appVersion"), info.get("apiVersion")
+
+    def _log_gateway_versions(self) -> None:
+        """Name the gateway versions in the log (support reports include it)."""
+        firmware, app, api = self._gateway_versions()
+        _LOGGER.info(
+            "OPUS gateway versions: firmware=%s app=%s api=%s", firmware, app, api
+        )
 
     def _create_task(
         self, coroutine: Coroutine[object, object, None], name: str
@@ -709,7 +834,9 @@ class OpusGreenNetCoordinator:
                 self._set_gateway_available(False)
                 # The open stream may be half open towards a rebooting gateway.
                 self._restart_stream()
+            await self._async_check_generation()
             return
+        self._probe_failures = 0
         previous = self.gateway_uptime
         self.gateway_uptime = uptime
         async_dispatcher_send(
@@ -723,12 +850,95 @@ class OpusGreenNetCoordinator:
         elif self._stream_connected and not self._gateway_available:
             self._set_gateway_available(True)
 
+    async def _async_check_generation(self) -> None:
+        """Ask whether the unreachable gateway was updated to WebUI 2026.
+
+        Only after several failed probes in a row and not more often than
+        ``GENERATION_CHECK_INTERVAL``, so a gateway that is merely restarting
+        is left alone. The answer needs a user login, which the
+        reauthentication asks for; nothing is changed before that.
+        """
+        self._probe_failures += 1
+        if (
+            self._generation_check is None
+            or self._auth_failed
+            or self._probe_failures < GENERATION_CHECK_AFTER_FAILURES
+        ):
+            return
+        now = monotonic()
+        if (
+            self._generation_checked_at is not None
+            and now - self._generation_checked_at < GENERATION_CHECK_INTERVAL
+        ):
+            return
+        self._generation_checked_at = now
+        if not await self._generation_check():
+            return
+        _LOGGER.warning(
+            "OPUS gateway %s no longer answers as before, but a gateway with "
+            "WebUI 2026 does; a user login is needed",
+            self.eag_id,
+        )
+        self._handle_auth_failure()
+
     @callback
     def _async_refresh_tick(self, _now: datetime) -> None:
         if self._refresh_task is None or self._refresh_task.done():
             self._refresh_task = self._create_task(
-                self._async_refresh_device_list(), "device list refresh"
+                self._async_periodic_refresh(), "device list refresh"
             )
+
+    async def _async_periodic_refresh(self) -> None:
+        """Run the 30 min reads: gateway information, then the device list."""
+        await self._async_refresh_system_info()
+        await self._async_refresh_gateway_address()
+        await self._async_refresh_device_list()
+
+    async def _async_refresh_gateway_address(self) -> None:
+        """Resolve host name and addresses of the gateway for display.
+
+        A local name lookup, no gateway request. Whatever does not resolve is
+        None; the sensors are told only when the result changed.
+        """
+        address = await async_gateway_address(self.hass, self.client.host)
+        if self._unloaded or address == self.gateway_address:
+            return
+        self.gateway_address = address
+        async_dispatcher_send(self.hass, f"{SIGNAL_GATEWAY_INFO_UPDATE}_{self.eag_id}")
+
+    async def _async_refresh_system_info(self) -> None:
+        """Read ``/system/info`` again for versions and receive statistics.
+
+        A plain gateway read without radio traffic, once per refresh interval
+        and never with the health probe. Fields the gateway leaves out keep
+        their last value; a reply for another gateway is ignored.
+        """
+        if not self.available:
+            return
+        try:
+            document = await self.client.async_get("/system/info")
+        except OpusAuthError:
+            self._handle_auth_failure()
+            return
+        except OpusApiError as err:
+            _LOGGER.debug("Could not refresh the OPUS gateway information: %s", err)
+            return
+        info = as_object(document.get("systemInfo")) or {}
+        if not info:
+            return
+        eurid = info.get("eurid")
+        if isinstance(eurid, str) and eurid.upper() != self.eag_id:
+            _LOGGER.warning(
+                "Ignoring the gateway information of %s: it reports another EURID",
+                self.client.host,
+            )
+            return
+        versions = self._gateway_versions()
+        self.gateway_info = {**self.gateway_info, **info}
+        self.gateway_info_read_at = dt_util.utcnow().isoformat()
+        if self._gateway_versions() != versions:
+            self._log_gateway_versions()
+        async_dispatcher_send(self.hass, f"{SIGNAL_GATEWAY_INFO_UPDATE}_{self.eag_id}")
 
     async def _async_load_profiles(self) -> None:
         """Read one gateway profile per announced EEP combination.
@@ -832,6 +1042,9 @@ class OpusGreenNetCoordinator:
             eeps=object_items(data.get("eeps")),
             manufacturer=protocol.metadata_text(data.get("manufacturer")),
             physical_device=protocol.metadata_text(data.get("physicalDevice")),
+            product_id=protocol.metadata_text(data.get("productId")),
+            software_revision=protocol.metadata_text(data.get("softwareRevision")),
+            hardware_revision=protocol.metadata_text(data.get("hardwareRevision")),
             first_seen=protocol.metadata_text(data.get("firstSeen")),
             last_seen=protocol.metadata_text(data.get("lastSeen")),
             dbm=EnOceanDevice._parse_integer(data.get("dbm")),
@@ -960,6 +1173,9 @@ class OpusGreenNetCoordinator:
                 del runs[run_key]
         self._telegram_metadata_at.pop(device_id, None)
         self.last_vertical_movement_times.pop(device_id, None)
+        self._setting_guards.pop(device_id, None)
+        self._setting_writes.pop(device_id, None)
+        self._settings_reading.discard(device_id)
         for origin_key in [k for k in self._position_origins if k[0] == device_id]:
             del self._position_origins[origin_key]
         self._cancel_reconciliation_queries(device_id)
@@ -1321,6 +1537,22 @@ class OpusGreenNetCoordinator:
             pending_key = (device_id, channel_id)
             expected = self._pending_reconciliation_fields.get(pending_key)
             if expected is not None:
+                if awaited := sorted(expected & fields):
+                    # The device reported what a command of ours was waiting
+                    # for: the only evidence beyond the gateway's acknowledgement.
+                    self._journal(
+                        device_id,
+                        "feedback",
+                        channel=channel_id,
+                        outcome="confirmed",
+                        fields=awaited,
+                    )
+                    _LOGGER.debug(
+                        "OPUS device %s channel %s reported %s",
+                        device_id,
+                        channel_id,
+                        awaited,
+                    )
                 expected.difference_update(fields)
             if not expected:
                 self._cancel_reconciliation_queries(device_id, channel_id)
@@ -1561,15 +1793,135 @@ class OpusGreenNetCoordinator:
         """Identify the device and connection state a request was queued for."""
         return (self._outage_generation, self._device_generations.get(device_id, 0))
 
+    def radio_journal(self) -> list[dict[str, object]]:
+        """Return the recorded radio requests, oldest first (diagnostics).
+
+        A copy of memory: reading it sends nothing.
+        """
+        return [dict(entry) for entry in self._radio_journal]
+
+    def _journal(
+        self, device_id: str, kind: str, **fields: object
+    ) -> dict[str, object]:
+        self._radio_journal_seq += 1
+        entry: dict[str, object] = {
+            "seq": self._radio_journal_seq,
+            "at": dt_util.utcnow().isoformat(),
+            "device_id": device_id,
+            "request": kind,
+            **fields,
+        }
+        self._radio_journal.append(entry)
+        return entry
+
+    def _mask_gateway_identifiers(self, text: str) -> str:
+        """Hide the gateway's EURID and serial number in a text.
+
+        Gateway texts reach the journal and the debug log verbatim; neither
+        identifier belongs in a log or report that is shared for support.
+        """
+        for identifier in (self.eag_id, self.gateway_info.get("serialNumber")):
+            if isinstance(identifier, str) and identifier:
+                text = re.sub(
+                    re.escape(identifier), "<gateway-id>", text, flags=re.IGNORECASE
+                )
+        return text
+
+    def _journal_radio_request(
+        self,
+        device_id: str,
+        kind: str,
+        priority: int,
+        values: Mapping[str, object] | None,
+        *,
+        waited: float,
+        started: float,
+        result: JsonObject | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        """Record how one request that reached the radio slot ended.
+
+        The gateway's answer is not the device's state: ``ok`` only says that
+        the gateway accepted the request, ``deferred`` that it stored it for a
+        sleeping device. Gateway texts are untrusted data and kept short.
+        """
+        http_status: int | None = None
+        gateway_status: int | None = None
+        message: str | None = None
+        if error is None:
+            outcome = "ok"
+            try:
+                gateway_status = response_status(result) if result else None
+            except ValueError:
+                gateway_status = None
+            if gateway_status in (SOFT_SMART_ACK_STATUS, TARGET_STATE_STATUS):
+                outcome = "deferred"
+        elif isinstance(error, asyncio.CancelledError):
+            outcome = "cancelled"
+        elif isinstance(error, OpusAuthError):
+            outcome = "auth_rejected"
+        elif isinstance(error, OpusTimeoutError):
+            outcome = "timeout"
+        elif isinstance(error, OpusConnectionError):
+            outcome = "connection_error"
+        elif isinstance(error, OpusResponseError):
+            outcome = "rejected"
+            http_status = error.http_status
+            gateway_status = error.gateway_status
+            message = self._mask_gateway_identifiers(error.reason)[:JOURNAL_TEXT_LENGTH]
+        else:
+            outcome = "error"
+        if message is None and error is not None:
+            message = (
+                self._mask_gateway_identifiers(str(error))[:JOURNAL_TEXT_LENGTH] or None
+            )
+        duration_ms = round((monotonic() - started) * 1000, 1)
+        waited_ms = round(waited * 1000, 1)
+        priority_name = _PRIORITY_NAMES.get(priority, str(priority))
+        entry = self._journal(
+            device_id,
+            kind,
+            priority=priority_name,
+            outcome=outcome,
+            http_status=http_status,
+            gateway_status=gateway_status,
+            message=message,
+            duration_ms=duration_ms,
+            waited_ms=waited_ms,
+        )
+        if values:
+            entry["values"] = dict(values)
+        _LOGGER.debug(
+            "OPUS radio request: device=%s request=%s priority=%s outcome=%s "
+            "http_status=%s gateway_status=%s duration_ms=%s waited_ms=%s "
+            "values=%s message=%r",
+            device_id,
+            kind,
+            priority_name,
+            outcome,
+            http_status,
+            gateway_status,
+            duration_ms,
+            waited_ms,
+            dict(values) if values else None,
+            message,
+        )
+
     async def _async_radio_request(
         self,
         device_id: str,
         request: Callable[[], Coroutine[object, object, JsonObject]],
         *,
         priority: int,
+        kind: str,
+        values: Mapping[str, object] | None = None,
         before_send: Callable[[], None] | None = None,
     ) -> JsonObject:
-        """Run one radio request while owning the single in-flight slot."""
+        """Run one radio request while owning the single in-flight slot.
+
+        ``kind`` and ``values`` (what is sent, key and value) are only recorded
+        in the diagnostics journal and the debug log.
+        """
         generation = self._request_generation(device_id)
         self._check_request_valid(device_id, generation)
         queued_at = monotonic()
@@ -1588,10 +1940,41 @@ class OpusGreenNetCoordinator:
             self._check_request_valid(device_id, generation)
             if before_send is not None:
                 before_send()
+            started = monotonic()
             try:
                 result = await request()
             except OpusApiError as err:
+                self._journal_radio_request(
+                    device_id,
+                    kind,
+                    priority,
+                    values,
+                    waited=waited,
+                    started=started,
+                    error=err,
+                )
                 raise self._request_error(err, device_id) from err
+            except asyncio.CancelledError as err:
+                # The request may have reached the gateway: recorded, not undone.
+                self._journal_radio_request(
+                    device_id,
+                    kind,
+                    priority,
+                    values,
+                    waited=waited,
+                    started=started,
+                    error=err,
+                )
+                raise
+            self._journal_radio_request(
+                device_id,
+                kind,
+                priority,
+                values,
+                waited=waited,
+                started=started,
+                result=result,
+            )
             # The gateway answered: only unload or a removed device make the
             # result meaningless. An outage declared meanwhile does not undo
             # an accepted request.
@@ -1672,6 +2055,8 @@ class OpusGreenNetCoordinator:
                         OpusGatewayClient.device_path(device_id, "state"), body
                     ),
                     priority=priority,
+                    kind="status_query" if is_query else "command",
+                    values=_journal_values(functions),
                     before_send=snapshot_feedback,
                 )
             except HomeAssistantError as err:
@@ -1946,6 +2331,7 @@ class OpusGreenNetCoordinator:
             device_id,
             lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
             priority=PRIORITY_QUERY,
+            kind="configuration_read",
         )
 
     async def async_set_device_configuration(
@@ -1959,11 +2345,152 @@ class OpusGreenNetCoordinator:
                 translation_placeholders={"device_id": device_id, "reason": problem},
             )
         path = OpusGatewayClient.device_path(device_id, "configuration")
-        await self._async_radio_request(
-            device_id,
-            lambda: self.client.async_put(path, config, timeout=RECOM_TIMEOUT),
-            priority=PRIORITY_QUERY,
+        configuration = as_object(config.get("configuration")) or {}
+        self._note_setting_write(device_id)
+        try:
+            await self._async_radio_request(
+                device_id,
+                lambda: self.client.async_put(path, config, timeout=RECOM_TIMEOUT),
+                priority=PRIORITY_QUERY,
+                kind="configuration_write",
+                values=_journal_values(configuration.get("parameters")),
+            )
+        finally:
+            self._note_setting_write(device_id)
+
+    def _note_setting_write(self, device_id: str) -> None:
+        """Count a configuration write step of a device (see ``_setting_writes``)."""
+        self._setting_writes[device_id] = self._setting_writes.get(device_id, 0) + 1
+
+    async def async_reread_device_settings(self, device_id: str) -> None:
+        """Read the settings stored on a device and show them (on request only).
+
+        One ReCom read over the radio, never repeated and never started by the
+        integration itself. The values the device reports replace what Home
+        Assistant shows, also a value that a device list or an earlier write
+        left behind, and end the protection of a confirmed write for these
+        settings. A setting the device does not report keeps its known value.
+        A press while the same device is being read is ignored. An answer that
+        arrives after a write to the device started or finished meanwhile is
+        dropped: the write is newer.
+        """
+        device = self.get_device(device_id)
+        if device is None:
+            raise request_error("device_not_found", device_id)
+        if device_id in self._settings_reading:
+            return
+        self._settings_reading.add(device_id)
+        started = self._setting_writes.get(device_id, 0)
+        repeater: JsonObject | None = None
+        try:
+            document = await self.async_get_device_configuration(device_id)
+            if protocol.supports_repeater_state(device):
+                # A second, separate read; a failure only leaves the mode as known.
+                try:
+                    repeater = await self.async_get_repeater_state(device_id)
+                except HomeAssistantError as err:
+                    _LOGGER.debug(
+                        "Repeater mode of device %s not read: %s", device_id, err
+                    )
+        finally:
+            self._settings_reading.discard(device_id)
+        if self._setting_writes.get(device_id, 0) != started:
+            _LOGGER.debug(
+                "Dropped the settings read of device %s: a write overlapped it",
+                device_id,
+            )
+            return
+        if self.devices.get(device_id) is not device:
+            return
+        functions = protocol.configuration_state_functions(document)
+        if repeater is not None and (
+            function := protocol.repeater_state_function(repeater)
+        ):
+            functions.append(function)
+        if not functions:
+            return
+        device.update_from_telegram({"functions": functions})
+        if guards := self._setting_guards.get(device_id):
+            for function in functions:
+                if isinstance(key := function.get("key"), str):
+                    guards.pop(key, None)
+            if not guards:
+                self._setting_guards.pop(device_id, None)
+        self._dispatch_state(device)
+
+    def _guard_confirmed_setting(
+        self,
+        device_id: str,
+        key: str,
+        previous: float | str | None,
+        written: float | str,
+    ) -> None:
+        """Remember what a device list must not bring back after a confirmed write.
+
+        ``previous`` is the value Home Assistant showed before. Earlier values
+        of a guard that still runs stay protected, so several changes in a row
+        do not let the oldest cached value return.
+        """
+        guards = self._setting_guards.setdefault(device_id, {})
+        older = guards.get(key)
+        candidates: list[float | str] = [] if previous is None else [previous]
+        if older is not None:
+            candidates.extend(older.stale)
+        stale: list[float | str] = []
+        for value in candidates:
+            if not _same_setting(value, written) and not any(
+                _same_setting(value, known) for known in stale
+            ):
+                stale.append(value)
+        if not stale:
+            guards.pop(key, None)
+            if not guards:
+                self._setting_guards.pop(device_id, None)
+            return
+        guards[key] = SettingGuard(
+            tuple(stale[:_SETTING_GUARD_STALE_VALUES]), written, monotonic()
         )
+
+    def _without_stale_settings(
+        self, device_id: str, functions: list[WireFunction]
+    ) -> list[WireFunction]:
+        """Drop settings of a device list that repeat the value from before a write.
+
+        A value that differs from the older ones, or equals the written one, is
+        the gateway's current copy or a change made elsewhere: it is applied and
+        ends the protection of that setting. Everything else is kept unchanged.
+        """
+        guards = self._setting_guards.get(device_id)
+        if not guards:
+            return functions
+        now = monotonic()
+        kept: list[WireFunction] = []
+        for function in functions:
+            key = function.get("key")
+            if not isinstance(key, str):
+                kept.append(function)
+                continue
+            guard = guards.get(key)
+            if guard is None:
+                kept.append(function)
+                continue
+            value = function.get("value")
+            if now - guard.at <= SETTING_CACHE_GUARD_SECONDS and (
+                not _same_setting(value, guard.written)
+                and any(_same_setting(value, old) for old in guard.stale)
+            ):
+                _LOGGER.debug(
+                    "Ignored %s of device %s in a device list: it repeats the "
+                    "value from before a confirmed write",
+                    key,
+                    device_id,
+                )
+                continue
+            del guards[key]
+            kept.append(function)
+        if not guards:
+            self._setting_guards.pop(device_id, None)
+        return kept
 
     async def async_set_device_parameter(
         self,
@@ -1999,6 +2526,16 @@ class OpusGreenNetCoordinator:
 
         Same contract as ``async_set_device_parameter``.
         """
+        if key in (KEY_REPEATER_STATE, KEY_ROUTING_TIME):
+            device = self.get_device(device_id)
+            if device is None:
+                raise request_error("device_not_found", device_id)
+            async with self._setting_locks.setdefault(device_id, asyncio.Lock()):
+                if key == KEY_REPEATER_STATE:
+                    await self._async_set_repeater_state(device, option)
+                else:
+                    await self._async_set_routing(device, option)
+            return
         await self._async_write_setting(
             device_id,
             key,
@@ -2019,49 +2556,145 @@ class OpusGreenNetCoordinator:
         device = self.get_device(device_id)
         if device is None:
             raise request_error("device_not_found", device_id)
-        lock = self._setting_locks.setdefault(device_id, asyncio.Lock())
-        async with lock:
-            await self.async_set_device_configuration(
-                device_id,
-                {"configuration": {"parameters": [{"key": key, "value": value}]}},
-            )
-            try:
-                stored = read(await self.async_get_device_configuration(device_id), key)
-            except HomeAssistantError as err:
-                # Written, but the outcome could not be read back.
-                raise request_error("parameter_not_confirmed", device_id, key) from err
+        async with self._setting_locks.setdefault(device_id, asyncio.Lock()):
+            document = await self._async_write_and_read_back(device_id, key, value)
+            stored = read(document, key)
             if stored is None:
                 raise request_error("parameter_not_confirmed", device_id, key)
+            previous = device.setting_reading(key)
             device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
-            self._confirmed_settings[(device_id, key)] = (stored, monotonic())
+            self._guard_confirmed_setting(device_id, key, previous, stored)
             self._dispatch_state(device)
             if not same(stored):
                 raise request_error("parameter_differs", device_id, key)
 
-    def _without_stale_settings(
-        self, device_id: str, functions: list[WireFunction]
-    ) -> list[WireFunction]:
-        """Drop listed settings that are older than a confirmed write."""
-        if not self._confirmed_settings:
-            return functions
-        kept: list[WireFunction] = []
-        for function in functions:
-            key = function.get("key")
-            if not isinstance(key, str):
-                kept.append(function)
-                continue
-            confirmed = self._confirmed_settings.get((device_id, key))
-            if confirmed is not None:
-                value, confirmed_at = confirmed
-                if _same_setting(function.get("value"), value) or (
-                    monotonic() - confirmed_at > SETTING_HOLD_SECONDS
-                ):
-                    # The gateway caught up, or the hold expired.
-                    del self._confirmed_settings[(device_id, key)]
-                else:
-                    continue
-            kept.append(function)
-        return kept
+    async def _async_write_and_read_back(
+        self, device_id: str, key: str, value: float | str
+    ) -> JsonObject:
+        """Write one setting, read the configuration back and return it.
+
+        A rejection by the gateway says different things for the two steps: a
+        rejected write means the device probably did not get the value
+        (``parameter_write_failed``), a rejected read-back means the write was
+        accepted and the value may be stored (``parameter_read_back_failed``).
+        A read-back that fails otherwise is ``parameter_not_confirmed``; a
+        failed write keeps its own message. Neither step is repeated. The
+        caller holds the device's setting lock.
+        """
+        try:
+            try:
+                await self.async_set_device_configuration(
+                    device_id,
+                    {"configuration": {"parameters": [{"key": key, "value": value}]}},
+                )
+            except HomeAssistantError as err:
+                # A rejected write: the device probably did not get the value.
+                if err.translation_key != "request_rejected":
+                    raise
+                raise request_error(
+                    "parameter_write_failed", device_id, _step_reason(key, err)
+                ) from err
+            try:
+                return await self.async_get_device_configuration(device_id)
+            except HomeAssistantError as err:
+                # Written, but the outcome could not be read back. A rejected
+                # read-back means the write was accepted and may be stored.
+                if err.translation_key == "request_rejected":
+                    raise request_error(
+                        "parameter_read_back_failed",
+                        device_id,
+                        _step_reason(key, err),
+                    ) from err
+                raise request_error("parameter_not_confirmed", device_id, key) from err
+        finally:
+            # The read-back ends the write: a settings read that overlapped it
+            # is dropped (see ``_setting_writes``).
+            self._note_setting_write(device_id)
+
+    async def _async_set_routing(self, device: EnOceanDevice, option: str) -> None:
+        """Switch the routing of a device off or on (read back like any setting).
+
+        "off" is written as the text the catalog lists, "on" as the smallest
+        routing time. Nothing is written when the device already shows the
+        wanted state; the read-back accepts "off" or any positive time.
+        """
+        device_id = device.device_id
+        if device.setting_reading(KEY_ROUTING_TIME) == option:
+            return
+        value: float | str = ROUTING_ON_SECONDS if option == ROUTING_ON else ROUTING_OFF
+        stored = protocol.configuration_routing(
+            await self._async_write_and_read_back(device_id, KEY_ROUTING_TIME, value)
+        )
+        if stored != option:
+            raise request_error("parameter_not_confirmed", device_id, KEY_ROUTING_TIME)
+        previous = device.setting_reading(KEY_ROUTING_TIME)
+        device.update_from_telegram(
+            {"functions": [{"key": KEY_ROUTING_TIME, "value": stored}]}
+        )
+        self._guard_confirmed_setting(device_id, KEY_ROUTING_TIME, previous, stored)
+        self._dispatch_state(device)
+
+    async def async_get_repeater_state(self, device_id: str) -> JsonObject:
+        """Read the repeater mode of a device (``GET .../repeaterState``)."""
+        path = OpusGatewayClient.device_path(device_id, "repeaterState")
+        return await self._async_radio_request(
+            device_id,
+            lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
+            priority=PRIORITY_QUERY,
+            kind="repeater_state_read",
+        )
+
+    async def _async_set_repeater_state(
+        self, device: EnOceanDevice, option: str
+    ) -> None:
+        """Write the repeater mode and adopt it only when the read-back equals it.
+
+        Same contract as the ReCom settings: the acknowledgement means the
+        gateway accepted the request, neither step is repeated, and a rejected
+        step is reported with its own message.
+        """
+        device_id = device.device_id
+        path = OpusGatewayClient.device_path(device_id, "repeaterState")
+        body = {KEY_REPEATER_STATE: option}
+        self._note_setting_write(device_id)
+        try:
+            try:
+                await self._async_radio_request(
+                    device_id,
+                    lambda: self.client.async_put(path, body, timeout=RECOM_TIMEOUT),
+                    priority=PRIORITY_QUERY,
+                    kind="repeater_state_write",
+                    values={KEY_REPEATER_STATE: option},
+                )
+            except HomeAssistantError as err:
+                if err.translation_key != "request_rejected":
+                    raise
+                raise request_error(
+                    "parameter_write_failed",
+                    device_id,
+                    _step_reason(KEY_REPEATER_STATE, err),
+                ) from err
+            try:
+                document = await self.async_get_repeater_state(device_id)
+            except HomeAssistantError as err:
+                if err.translation_key != "request_rejected":
+                    raise
+                raise request_error(
+                    "parameter_read_back_failed",
+                    device_id,
+                    _step_reason(KEY_REPEATER_STATE, err),
+                ) from err
+        finally:
+            self._note_setting_write(device_id)
+        function = protocol.repeater_state_function(document)
+        if function is None or function["value"] != option:
+            raise request_error(
+                "parameter_not_confirmed", device_id, KEY_REPEATER_STATE
+            )
+        previous = device.setting_reading(KEY_REPEATER_STATE)
+        device.update_from_telegram({"functions": [function]})
+        self._guard_confirmed_setting(device_id, KEY_REPEATER_STATE, previous, option)
+        self._dispatch_state(device)
 
     async def async_get_device_parameters(self, device_id: str) -> JsonObject:
         """Read the configurable parameters a device supports."""
@@ -2070,6 +2703,7 @@ class OpusGreenNetCoordinator:
             device_id,
             lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
             priority=PRIORITY_QUERY,
+            kind="parameters_read",
         )
 
     async def async_get_device_link_tables(self, device_id: str) -> JsonObject:
@@ -2084,6 +2718,7 @@ class OpusGreenNetCoordinator:
             device_id,
             lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
             priority=PRIORITY_QUERY,
+            kind="link_tables_read",
         )
         masked = protocol.mask_gateway_id(document, self.eag_id)
         # mask_gateway_id keeps the type of a JSON object.

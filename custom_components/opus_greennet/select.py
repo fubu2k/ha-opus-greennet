@@ -20,6 +20,12 @@ from .const import (
     KEY_LED_CHANNEL,
     KEY_LED_COLOR,
     KEY_OPERATION_MODE,
+    KEY_REPEATER_STATE,
+    KEY_ROUTING_TIME,
+    REPEATER_EEPS,
+    ROUTING_OFF,
+    ROUTING_ON,
+    SWITCH_EEPS,
 )
 from .coordinator import SIGNAL_DEVICE_DISCOVERED, OpusGreenNetCoordinator
 from .enocean_device import EnOceanDevice
@@ -33,7 +39,8 @@ PARALLEL_UPDATES = 0
 OPERATION_MODES = ("bottomOn", "timer", "toggle", "topOn")
 LED_COLORS = ("all", "green", "off", "red")
 LED_CHANNELS = ("channel1", "channel2")
-SWITCH_EEPS = ("D2-01-01", "D2-01-11")
+REPEATER_STATES = ("off", "level_1", "level_2")
+ROUTING_STATES = (ROUTING_OFF, ROUTING_ON)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -54,7 +61,8 @@ class DeviceSelect:
         return None
 
 
-DEVICE_SELECTS: tuple[DeviceSelect, ...] = (
+# Catalog parameters: values as the gateway lists them in GET .../parameters.
+CATALOG_SELECTS: tuple[DeviceSelect, ...] = (
     DeviceSelect(
         "operation_mode",
         KEY_OPERATION_MODE,
@@ -77,6 +85,24 @@ DEVICE_SELECTS: tuple[DeviceSelect, ...] = (
         },
     ),
 )
+# Not in the catalog as such. Routing: "on" stands for any routing time the
+# device reports and is written as the smallest one.
+EXTRA_SELECTS: tuple[DeviceSelect, ...] = (
+    DeviceSelect(
+        "routing",
+        KEY_ROUTING_TIME,
+        "routing",
+        dict.fromkeys(SWITCH_EEPS, ROUTING_STATES),
+    ),
+    # Device resource /repeaterState, written and read back there.
+    DeviceSelect(
+        "repeater",
+        KEY_REPEATER_STATE,
+        "repeater",
+        dict.fromkeys(REPEATER_EEPS, REPEATER_STATES),
+    ),
+)
+DEVICE_SELECTS = CATALOG_SELECTS + EXTRA_SELECTS
 
 
 def option_slug(value: str) -> str:
@@ -96,8 +122,6 @@ async def async_setup_entry(
 
     @callback
     def async_add_selects(device: EnOceanDevice) -> None:
-        if device.entity_type != "switch":
-            return
         async_add_entities(
             [
                 OpusGreenNetDeviceSelect(

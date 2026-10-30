@@ -31,11 +31,43 @@
           "requested": "mdi:lock-clock"
         }
       },
+      "device_id": {
+        "default": "mdi:identifier"
+      },
+      "signal_quality": {
+        "default": "mdi:wifi-strength-off-outline",
+        "state": {
+          "good": "mdi:wifi-strength-4",
+          "sufficient": "mdi:wifi-strength-2",
+          "poor": "mdi:wifi-strength-alert-outline"
+        }
+      },
       "gateway_uptime": {
         "default": "mdi:timer-outline"
       },
       "wall_switch_links": {
         "default": "mdi:link-variant"
+      },
+      "gateway_eurid": {
+        "default": "mdi:identifier"
+      },
+      "gateway_firmware_version": {
+        "default": "mdi:chip"
+      },
+      "gateway_app_version": {
+        "default": "mdi:application-outline"
+      },
+      "gateway_api_version": {
+        "default": "mdi:api"
+      },
+      "gateway_hostname": {
+        "default": "mdi:dns-outline"
+      },
+      "gateway_ipv4_address": {
+        "default": "mdi:ip-network-outline"
+      },
+      "gateway_ipv6_address": {
+        "default": "mdi:ip-network-outline"
       }
     },
     "button": {
@@ -44,6 +76,9 @@
       },
       "reference_run_down": {
         "default": "mdi:arrow-collapse-down"
+      },
+      "read_settings": {
+        "default": "mdi:refresh"
       }
     }
   },
