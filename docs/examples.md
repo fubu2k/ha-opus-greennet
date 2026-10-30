@@ -103,10 +103,13 @@ automation:
 
 ### Show the last run time of a blind
 
-*Last run time* is a sensor in seconds with the attributes `direction`,
-`full_travel` (true when the run covered the full height) and the start and end
-position. For a full run, compare the sensor value with the configured
-*Vertical movement time* to see whether the estimated travel matches the blind:
+*Last run time* is a sensor with the attributes `direction`, `full_travel` (true when the run
+covered the whole height) and the start and end position. Its value is the time from the
+command to the blind's end report, not the mechanical travel time, and can be longer than the
+configured `verticalMovementTime`. On the blinds measured so far it follows the blind's own
+timer, which is set by the stored `verticalMovementTime`, so it does not reveal a stored time
+that is wrong. Compare runs of the same kind (`full_travel: true`) with each other, for example
+to notice a blind whose reports change:
 
 ```yaml
 type: entities

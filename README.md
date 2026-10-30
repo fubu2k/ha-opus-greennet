@@ -207,7 +207,7 @@ written by the integration on hardware so far**: try a single device first.
 
 | Setting | Entity | Written on hardware |
 |---------|--------|---------------------|
-| Blind: vertical movement time | Number | ✅ one blind |
+| Blind: vertical movement time | Number | ✅ 24 blinds in one installation (effect confirmed by run durations) |
 | Blind: maximum holding time | Number | ✅ one blind |
 | Blind: rotation time | Number | not tested |
 | Dimmer D2-01-03: ramping, short-press and long-press time | Number | not tested |
