@@ -162,20 +162,19 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
             errors[CONF_HOST] = "host_not_local"
             return None
         port = user_input[CONF_PORT]
-        # A gateway of the earlier generation is tried first, at the entered
-        # port. The HTTPS port, and the port of a configured WebUI 2026 gateway,
-        # are never asked over plain HTTP: the credentials would travel
-        # unencrypted.
+        # The HTTPS port, and the port of a configured WebUI 2026 gateway, are
+        # never asked over plain HTTP: the credentials would travel
+        # unencrypted. Every other port, the default one included, is first
+        # asked without credentials whether a WebUI 2026 gateway answers there
+        # (the default port stands for the HTTPS port), so that a gateway that
+        # was updated never receives a new password as Basic authentication.
         webui_port = port == WEBUI_2026_PORT or (
             known is not None
             and known.get(CONF_GENERATION) == GENERATION_WEBUI_2026
             and known.get(CONF_PORT) == port
         )
         endpoint: GatewayEndpoint | None = None
-        if not webui_port and port != DEFAULT_PORT:
-            # Another port than the two known ones may serve either generation.
-            # Ask it without credentials first, so that a TLS service there never
-            # receives them in clear text.
+        if not webui_port:
             endpoint = await async_detect_webui_2026(self.hass, host, port)
             webui_port = endpoint is not None
         if not webui_port:
@@ -185,7 +184,9 @@ class OpusGreenNetConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
                 return None
             except OpusConnectionError:
-                pass  # Nothing answered there: maybe a WebUI 2026 gateway.
+                # Neither a WebUI 2026 gateway (asked above) nor an earlier one.
+                errors["base"] = "cannot_connect"
+                return None
             except OpusResponseError:
                 errors["base"] = "unsupported_gateway"
                 return None

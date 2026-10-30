@@ -129,7 +129,7 @@ async def _reauth(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
 
 
 async def test_a_new_generation_gateway_is_found_when_the_old_port_is_closed(hass):
-    with _detect(ENDPOINT), _read(OpusConnectionError("refused"), EAG_ID) as read:
+    with _detect(ENDPOINT), _read(EAG_ID) as read:
         result = await _user(hass, USER_INPUT)
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -142,15 +142,13 @@ async def test_a_new_generation_gateway_is_found_when_the_old_port_is_closed(has
         "generation": "webui2026",
         "certificate_fingerprint": FINGERPRINT,
     }
-    # The earlier generation was tried first, at the entered port; the second
-    # read already uses HTTPS and the remembered certificate.
-    first, second = (call.args[1] for call in read.await_args_list)
-    assert first["port"] == 8080
-    assert "generation" not in first
+    # The entered port was asked without credentials first; the only read
+    # already uses HTTPS and the remembered certificate.
+    (call,) = read.await_args_list
     assert (
-        second["port"],
-        second["generation"],
-        second["certificate_fingerprint"],
+        call.args[1]["port"],
+        call.args[1]["generation"],
+        call.args[1]["certificate_fingerprint"],
     ) == (
         443,
         "webui2026",
@@ -159,7 +157,7 @@ async def test_a_new_generation_gateway_is_found_when_the_old_port_is_closed(has
 
 
 async def test_an_earlier_generation_gateway_keeps_its_entry_data(hass):
-    with _detect(ENDPOINT), _read(EAG_ID) as read:
+    with _detect(None), _read(EAG_ID) as read:
         result = await _user(hass, USER_INPUT)
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -217,11 +215,24 @@ async def test_nothing_found_at_either_port_cannot_connect(hass):
     assert result["errors"] == {"base": "cannot_connect"}
 
 
+async def test_nothing_answering_on_the_https_port_cannot_connect(hass):
+    with _detect(None), _read(EAG_ID) as read:
+        result = await _user(hass, {**USER_INPUT, "port": 443})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cannot_connect"}
+    # The HTTPS port is never asked over plain HTTP.
+    read.assert_not_awaited()
+
+
 async def test_a_wrong_password_on_a_new_generation_gateway(hass):
-    with _detect(ENDPOINT), _read(OpusConnectionError("refused"), OpusAuthError("x")):
+    with _detect(ENDPOINT), _read(OpusAuthError("x")) as read:
         result = await _user(hass, USER_INPUT)
 
     assert result["errors"] == {"base": "invalid_auth"}
+    # The only read went over HTTPS: nothing was sent to port 8080.
+    (call,) = read.await_args_list
+    assert call.args[1]["generation"] == "webui2026"
 
 
 @pytest.mark.parametrize(
@@ -234,15 +245,37 @@ async def test_a_wrong_password_on_a_new_generation_gateway(hass):
     ],
 )
 async def test_other_failures_of_a_new_generation_gateway(hass, error, key):
-    with _detect(ENDPOINT), _read(OpusConnectionError("refused"), error):
+    with _detect(ENDPOINT), _read(error):
         result = await _user(hass, USER_INPUT)
 
     assert result["errors"] == {"base": key}
 
 
+async def test_the_default_port_is_asked_without_credentials_before_basic_auth(hass):
+    """A gateway that was updated must never get its new password over HTTP."""
+    order: list[str] = []
+
+    async def detect(*args: Any) -> GatewayEndpoint | None:
+        order.append("detect")
+        return None
+
+    async def read(*args: Any) -> str:
+        order.append("read")
+        return EAG_ID
+
+    with (
+        patch(f"{CONFIG_FLOW}.async_detect_webui_2026", detect),
+        patch(f"{CONFIG_FLOW}.async_read_gateway_id", read),
+    ):
+        result = await _user(hass, USER_INPUT)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert order == ["detect", "read"]
+
+
 async def test_a_wrong_password_on_the_old_port_is_not_looked_up_again(hass):
-    """A gateway that answered but refused the login is not searched elsewhere."""
-    detect = AsyncMock(return_value=ENDPOINT)
+    """A gateway that answered but refused the login is not searched again."""
+    detect = AsyncMock(return_value=None)
     with (
         patch(f"{CONFIG_FLOW}.async_detect_webui_2026", detect),
         _read(OpusAuthError("x")),
@@ -250,7 +283,7 @@ async def test_a_wrong_password_on_the_old_port_is_not_looked_up_again(hass):
         result = await _user(hass, USER_INPUT)
 
     assert result["errors"] == {"base": "invalid_auth"}
-    detect.assert_not_awaited()
+    detect.assert_awaited_once()
 
 
 # ── reauthentication and reconfiguration ───────────────────────────────────
@@ -306,10 +339,14 @@ async def test_an_updated_gateway_asks_for_its_new_login_and_keeps_its_data(hass
     entry = await _add(hass, dict(LEGACY_DATA))
     flow = await _reauth(hass, entry)
 
-    with _detect(ENDPOINT), _read(OpusConnectionError("refused"), EAG_ID):
+    # The earlier entry asks for 8080: the new password goes only to HTTPS.
+    with _detect(ENDPOINT), _read(EAG_ID) as read:
         result = await hass.config_entries.flow.async_configure(
             flow["flow_id"], {**USER_INPUT, "password": "new-password"}
         )
+
+    (call,) = read.await_args_list
+    assert call.args[1]["generation"] == "webui2026"
 
     assert result["type"] is FlowResultType.ABORT
     assert dict(entry.data) == {
@@ -349,7 +386,7 @@ async def test_reconfiguring_to_an_earlier_generation_gateway_drops_the_certific
         },
     )
 
-    with _detect(ENDPOINT), _read(EAG_ID):
+    with _detect(None), _read(EAG_ID):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             {**USER_INPUT, "port": 8080, "username": "admin", "password": EAG_ID},

@@ -140,9 +140,9 @@ on port 443, with the user and password of the gateway's web interface (role
 
 - **Set the user up in the gateway's web interface first.** Home Assistant never
   creates users on the gateway.
-- Add the gateway as before. If nothing answers on the old port, Home Assistant
-  looks for a WebUI 2026 gateway on port 443 (`/auth/setup-status`, no login).
-  Enter the web interface user and password.
+- Add the gateway as before. Before anything is sent to the old port, Home
+  Assistant looks for a WebUI 2026 gateway on port 443 (`/auth/setup-status`,
+  no login). Enter the web interface user and password.
 - The gateway's self-signed certificate is remembered at the first connection
   and checked on every later one. If it changes (factory reset, replaced
   device), the entry asks you to confirm the new certificate; nothing is sent to
