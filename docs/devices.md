@@ -130,14 +130,11 @@ one per channel. They behave like the dimmer times above (configuration
 entities, **disabled by default**, values from the device configuration, a new
 value is adopted only after it was read back, nothing is repeated
 automatically). The warning signal is rounded to three decimals, all other
-values written by the integration to two. Writing these settings was **verified on
-hardware** on one switch (written, read back and restored): *Timer duration* 300 →
-310 → 300 s, *Timer duration (long press)* 3600 → 3610 → 3600 s, *Switch-off
-warning* 30 → 31 → 30 s, *Switch-off warning signal* 0.5 → 0.6 → 0.5 s and
-*Illumination threshold* 80 → 20 lx (left at 20 lx on purpose). A wall switch
-press still switched the light normally afterwards. The ranges are those of the
-parameter catalog read from one D2-01-01 and one D2-01-11; other switch types
-get no such entities.
+values written by the integration to two. On one switch all these values were
+**written on hardware and read back**, but through the gateway's REST API, not
+through these entities, so try a single switch first. The ranges are those of
+the parameter catalog read from one D2-01-01 and one D2-01-11; other switch
+types get no such entities.
 
 **Device information.** The device page shows the product ID (*model ID*), the
 software version, the hardware version from the gateway's device list. The
@@ -175,10 +172,9 @@ adopted only after it was read back, nothing is repeated automatically. A value
 the gateway reports that is not in the list shows as *unknown* and is never
 changed by the integration. Writing a text setting is **verified on hardware
 for the LED colour of one D2-01-01 switch** (changed, read back and restored
-with gateway firmware 1.21.30) and for the *Operation mode* of one switch
-(toggle → timer → toggle, written and read back; the change to *timer* was made
-with the OPUS configuration tool); the other selects
-were **not tested on hardware**, so try a single switch first.
+with gateway firmware 1.21.30). The *Operation mode* of one switch was written
+and read back through the gateway's REST API, not through this entity; the other
+selects were **not tested on hardware**, so try a single switch first.
 The function of the rocker buttons A and B is not offered: a switch reports a
 value there that its own catalog does not list, and a wrong choice would change
 which button switches which channel.
