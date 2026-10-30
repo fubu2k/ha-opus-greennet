@@ -55,7 +55,7 @@ async def test_full_travel_keeps_reported_position_until_fallback(motion, timers
     assert channel.position == 100
     assert entity.is_opening is True
     assert entity.state == "opening"
-    assert [delay for delay, _, _ in timers] == [30, 40, 50]
+    assert [delay for delay, _, _ in timers] == [32, 42, 52]
     timers[0][1](None)
     assert entity.is_opening is False
     assert entity.state == "open"
@@ -75,14 +75,14 @@ async def test_repeated_target_keeps_reported_position_and_original_deadline(mot
     assert channel.position == 100
     assert entity.state == "opening"
     assert coord._cover_movements["DEV1", 0] is original
-    assert original.ends_at == 130
+    assert original.ends_at == 132
 
 
 @pytest.mark.parametrize(
     "start,target,direction,delays",
     [
-        (None, 0, "opening", [30, 40, 50]),
-        (None, 100, "closing", [30, 40, 50]),
+        (None, 0, "opening", [32, 42, 52]),
+        (None, 100, "closing", [32, 42, 52]),
         (80, 20, "opening", [20, 30, 40]),
         (20, 80, "closing", [20, 30, 40]),
     ],
@@ -98,6 +98,22 @@ async def test_partial_and_unknown_start_travel(
     assert [delay for delay, _, _ in timers] == delays
 
 
+@pytest.mark.parametrize(
+    "target,grace",
+    [(0, 7), (100, 7), (50, 5), (20, 5), (80, 5)],
+)
+async def test_end_stop_runs_wait_longer_than_partial_runs(
+    motion, timers, target, grace
+):
+    coord, channel, _ = motion
+    channel.position = 60
+    await coord.async_set_cover_position("DEV1", target)
+    travel = abs(60 - target) / 100 * 25
+    movement = coord._cover_movements["DEV1", 0]
+    assert movement.ends_at == pytest.approx(100 + travel + grace)
+    assert timers[0][0] == pytest.approx(travel + grace)
+
+
 async def test_retarget_uses_elapsed_estimate_and_cancels_old_timer(motion, timers):
     coord, channel, clock = motion
     await coord.async_set_cover_position("DEV1", 0)
@@ -106,7 +122,7 @@ async def test_retarget_uses_elapsed_estimate_and_cancels_old_timer(motion, time
     await coord.async_set_cover_position("DEV1", 100)
     assert channel.movement == "closing"
     assert all(cancel.called for _, _, cancel in old)
-    assert [delay for delay, _, _ in timers[3:]] == [17.5, 27.5, 37.5]
+    assert [delay for delay, _, _ in timers[3:]] == [19.5, 29.5, 39.5]
     replacement = coord._cover_movements["DEV1", 0]
     old[0][1](None)
     assert coord._cover_movements["DEV1", 0] is replacement
@@ -121,8 +137,8 @@ async def test_late_outbound_echo_does_not_finish_or_extend_movement(motion, tim
     command_echo(coord, [{"key": "position", "value": 0}])
     assert channel.position == 100
     assert coord._cover_movements["DEV1", 0] is movement
-    assert movement.ends_at == 130
-    assert [delay for delay, _, _ in timers[-2:]] == [37, 47]
+    assert movement.ends_at == 132
+    assert [delay for delay, _, _ in timers[-2:]] == [39, 49]
 
 
 async def test_numeric_feedback_ends_estimate_and_reconciliation(motion, timers):
@@ -286,7 +302,7 @@ async def test_retarget_cancels_old_queries_before_ack(motion, radio, timers):
     assert all(cancel.called for _, _, cancel in old)
     radio.respond()
     await task
-    assert [delay for delay, _, _ in timers[-2:]] == [25, 35]
+    assert [delay for delay, _, _ in timers[-2:]] == [27, 37]
 
 
 async def test_queued_target_starts_only_when_sent(motion, radio, timers):
@@ -339,7 +355,7 @@ async def test_feedback_and_native_commands_are_channel_scoped(motion, timers):
     )
     assert other.movement == "opening"
     assert other.position == 100
-    assert [delay for delay, _, _ in timers[-3:]] == [45, 55, 65]
+    assert [delay for delay, _, _ in timers[-3:]] == [47, 57, 67]
     receive_feedback(
         coord,
         [
@@ -400,8 +416,8 @@ async def test_short_travel_waits_for_ack_before_assuming_target(
     radio.auto_respond = False
     task = asyncio.create_task(coord.async_set_cover_position("DEV1", 0))
     await radio.wait_sent(1)
-    assert timers[0][0] == 5.25
-    clock[0] += 6
+    assert timers[0][0] == 7.25
+    clock[0] += 8
     timers[0][1](None)
     assert channel.position == 1
     assert channel.movement == "opening"

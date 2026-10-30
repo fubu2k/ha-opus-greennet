@@ -225,6 +225,9 @@ DEVICE_OPTIONS: Final = {
 }
 DEVICE_SETTING_KEYS: Final = frozenset(DEVICE_SETTINGS) | frozenset(DEVICE_OPTIONS)
 COVER_MOVEMENT_GRACE_SECONDS: Final = 5.0
+# A run into an end stop is reported about 1.4 s later than a partial run
+# (measured on one installation of D2-05-02 blinds), so its estimate waits longer.
+COVER_END_STOP_GRACE_SECONDS: Final = 7.0
 COVER_RECONCILIATION_DELAYS: Final = (10.0, 20.0)
 KEY_CHANNEL: Final = "channel"
 KEY_LOCAL_CONTROL: Final = "localControl"
