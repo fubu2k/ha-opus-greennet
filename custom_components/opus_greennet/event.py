@@ -124,32 +124,39 @@ class OpusGreenNetEvent(OpusGreenNetEntity, EventEntity):
 
     @callback
     def _handle_state_update(self, device: EnOceanDevice) -> None:
-        """Handle state update from coordinator - fire event."""
+        """Handle state update from coordinator - fire event.
+
+        A telegram's button occurrence sits on the channel the gateway names
+        (channel 0 for rockers). Every channel with an occurrence fires its own
+        event, lowest channel first; only events of another channel than 0 carry
+        a ``channel`` entry, so the data of existing events stays as it was.
+        """
         self._device = device
 
-        channel = device.channels.get(0)
-        if not channel:
-            return
+        for channel_id in sorted(device.channels):
+            channel = device.channels[channel_id]
+            button = channel.last_button
+            action = channel.last_button_action
+            if not button or not action:
+                continue
 
-        button = channel.last_button
-        action = channel.last_button_action
-        if not button or not action:
-            return
+            event_type = f"{button}_{action}"
+            if event_type not in self._attr_event_types:
+                _LOGGER.debug(
+                    "Ignoring unknown rocker event %s for device %s",
+                    event_type,
+                    self._device.device_id,
+                )
+                continue
 
-        event_type = f"{button}_{action}"
-        if event_type not in self._attr_event_types:
-            _LOGGER.debug(
-                "Ignoring unknown rocker event %s for device %s",
-                event_type,
-                self._device.device_id,
+            data: dict[str, str | int] = {"button": button, "action": action}
+            if channel_id != 0:
+                data["channel"] = channel_id
+            self._trigger_event(event_type, data)
+            log_entity_state_write(
+                _LOGGER,
+                self.entity_id or self._attr_unique_id,
+                self._device,
+                channel_id,
             )
-            return
-
-        self._trigger_event(event_type, {"button": button, "action": action})
-        log_entity_state_write(
-            _LOGGER,
-            self.entity_id or self._attr_unique_id,
-            self._device,
-            0,
-        )
-        self.async_write_ha_state()
+            self.async_write_ha_state()
