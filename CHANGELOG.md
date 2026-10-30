@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.1] - 2026-10-30
+
+Bug fixes from @fubu2k, based on the v1.1.0 beta reports.
+
+### Fixed
+- **Rocker buttons on other channels:** a button that the gateway reports on a channel other than 0 now fires its event. Such events carry an additional `channel` attribute; events of channel 0 are unchanged. Before, these buttons were dropped (#114).
+- **Host name kept:** a host name you entered stays in the entry when the gateway announces itself at the address that name already leads to. Before, it was replaced by the IP address. A name that leads elsewhere or nowhere is still replaced after the EURID check (#113).
+- **Blinds running into an end stop:** the estimated opening/closing state now waits 7 s instead of 5 s after the travel time, because a run to fully open or closed is reported about 1.4 s later than a partial run (#116).
+
+### Changed
+- **Docs:** *Last run time* is described as the time from the command to the blind's end report. The blind reports by its own timer, so the sensor follows the stored vertical movement time and cannot show whether that time is right (#117). Measured by @haxx-voyager on 24 blinds.
+
+### Unchanged
+- Entities, entity IDs and settings. No radio traffic is added.
+
 ## [1.1.0] - 2026-10-29
 
 Stable release of v1.1.0b0: **device settings as entities**, read-only wall switch links and a few new diagnostics, built on @fubu2k's work (#89). No code changes since the beta.
