@@ -537,6 +537,34 @@ class OpusGreenNetCoordinator:
         # sent.
         await self._async_refresh_device_list()
 
+    def async_start_settings_read(self) -> None:
+        """Read the stored settings of the repeater-capable devices once.
+
+        The gateway's cached copy of a device (device list, ``configuration``
+        block) can be hours old: it is only refreshed when the device is read.
+        After startup the switches and dimmers are therefore read once, one
+        after the other, with the lowest request priority so that commands and
+        queries always go first. Each device gets one read; a failure is only
+        logged and not repeated (the "Read settings" button reads again).
+        """
+        self._create_task(self._async_read_settings_at_startup(), "settings read")
+
+    async def _async_read_settings_at_startup(self) -> None:
+        """Read the devices one by one (see ``async_start_settings_read``)."""
+        for device_id in [
+            device.device_id
+            for device in self.devices.values()
+            if protocol.supports_repeater_state(device)
+        ]:
+            if not self.available:
+                return
+            try:
+                await self.async_reread_device_settings(
+                    device_id, priority=PRIORITY_BACKGROUND
+                )
+            except HomeAssistantError as err:
+                _LOGGER.debug("Settings of device %s not read: %s", device_id, err)
+
     async def async_unload(self) -> None:
         """Stop all background work and mark the gateway unavailable."""
         _LOGGER.debug("Unloading Opus GreenNet coordinator for EAG %s", self.eag_id)
@@ -2290,13 +2318,15 @@ class OpusGreenNetCoordinator:
     # ReCom service requests
     # ──────────────────────────────────────────────────────────────────────
 
-    async def async_get_device_configuration(self, device_id: str) -> JsonObject:
+    async def async_get_device_configuration(
+        self, device_id: str, *, priority: int = PRIORITY_QUERY
+    ) -> JsonObject:
         """Read the configuration stored on a device."""
         path = OpusGatewayClient.device_path(device_id, "configuration")
         return await self._async_radio_request(
             device_id,
             lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
-            priority=PRIORITY_QUERY,
+            priority=priority,
             kind="configuration_read",
         )
 
@@ -2322,11 +2352,14 @@ class OpusGreenNetCoordinator:
         """Count a configuration write step of a device (see ``_setting_writes``)."""
         self._setting_writes[device_id] = self._setting_writes.get(device_id, 0) + 1
 
-    async def async_reread_device_settings(self, device_id: str) -> None:
-        """Read the settings stored on a device and show them (on request only).
+    async def async_reread_device_settings(
+        self, device_id: str, *, priority: int = PRIORITY_QUERY
+    ) -> None:
+        """Read the settings stored on a device and show them.
 
-        One ReCom read over the radio, never repeated and never started by the
-        integration itself. The values the device reports replace what Home
+        One ReCom read over the radio, never repeated. It starts on request
+        ("Read settings") and once per repeater-capable device after startup
+        (``async_start_settings_read``). The values the device reports replace what Home
         Assistant shows, also a value that a device list or an earlier write
         left behind, and end the protection of a confirmed write for these
         settings. A setting the device does not report keeps its known value.
@@ -2343,11 +2376,15 @@ class OpusGreenNetCoordinator:
         started = self._setting_writes.get(device_id, 0)
         repeater: JsonObject | None = None
         try:
-            document = await self.async_get_device_configuration(device_id)
+            document = await self.async_get_device_configuration(
+                device_id, priority=priority
+            )
             if protocol.supports_repeater_state(device):
                 # A second, separate read; a failure only leaves the mode as known.
                 try:
-                    repeater = await self.async_get_repeater_state(device_id)
+                    repeater = await self.async_get_repeater_state(
+                        device_id, priority=priority
+                    )
                 except HomeAssistantError as err:
                     _LOGGER.debug(
                         "Repeater mode of device %s not read: %s", device_id, err
@@ -2565,13 +2602,15 @@ class OpusGreenNetCoordinator:
         self._guard_confirmed_setting(device_id, KEY_ROUTING_TIME, previous, stored)
         self._dispatch_state(device)
 
-    async def async_get_repeater_state(self, device_id: str) -> JsonObject:
+    async def async_get_repeater_state(
+        self, device_id: str, *, priority: int = PRIORITY_QUERY
+    ) -> JsonObject:
         """Read the repeater mode of a device (``GET .../repeaterState``)."""
         path = OpusGatewayClient.device_path(device_id, "repeaterState")
         return await self._async_radio_request(
             device_id,
             lambda: self.client.async_get(path, timeout=RECOM_TIMEOUT),
-            priority=PRIORITY_QUERY,
+            priority=priority,
             kind="repeater_state_read",
         )
 

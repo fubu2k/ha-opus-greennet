@@ -364,6 +364,10 @@ async def async_setup_entry(
         await coordinator.async_unload()
         raise
 
+    # The gateway's cached settings can be outdated: read them once, in the
+    # background, after the entities exist.
+    coordinator.async_start_settings_read()
+
     _LOGGER.info("Opus GreenNet Bridge setup complete: %s", eag_id)
     return True
 

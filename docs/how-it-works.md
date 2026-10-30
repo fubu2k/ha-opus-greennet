@@ -40,6 +40,13 @@ to the gateway open (`GET /devices/stream`):
   within 30 seconds, Home Assistant retries the setup later. The streamed list
   has no cover movement times, so the device list is read once more right
   after startup for these settings; it never changes live state.
+- **Stored settings after startup.** The gateway's cached copy of a device can
+  be hours old. After startup the switches and dimmers (D2-01-01, D2-01-03,
+  D2-01-11) are therefore read once from the device, one after the other and
+  with the lowest request priority (repeater mode and stored settings such as
+  the ViNET router). A failure is only logged and not repeated; the
+  **Read settings** button reads again. Covers and other devices are not read
+  at startup.
 - **Reconnects.** If the stream ends, it is reopened after a pause that starts
   at 1 second, doubles up to 60 seconds and gets up to 25 % random jitter. A
   stream that closes within 10 seconds counts as a failed attempt, so a
