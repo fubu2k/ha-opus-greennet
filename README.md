@@ -251,9 +251,10 @@ written by the integration on hardware so far**: try a single device first.
 | Blind: maximum holding time | Number | ✅ one blind |
 | Blind: rotation time | Number | not tested |
 | Dimmer D2-01-03: ramping, short-press and long-press time | Number | not tested |
-| Switch D2-01-01/-11: timers, switch-off warning and signal, illumination threshold | Number | not tested |
+| Switch D2-01-01/-11: timers, switch-off warning and signal, illumination threshold | Number | ✅ one switch (changed, read back and restored; the illumination threshold was left at 20 lx on purpose) |
 | Switch: LED colour | Select | ✅ one D2-01-01 (text value) |
-| Switch: operation mode, LED channel, external input function | Select | not tested |
+| Switch: operation mode | Select | ✅ one switch (toggle → timer → toggle) |
+| Switch: LED channel, external input function | Select | not tested |
 | Link tables (wall switch links) | Action, sensor, diagnostics | read only, read on hardware |
 
 
