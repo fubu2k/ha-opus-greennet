@@ -103,13 +103,15 @@ automation:
 
 ### Show the last run time of a blind
 
-*Last run time* is a sensor with the attributes `direction`, `full_travel` (true when the run
-covered the whole height) and the start and end position. Its value is the time from the
-command to the blind's end report, not the mechanical travel time, and can be longer than the
-configured `verticalMovementTime`. On the blinds measured so far it follows the blind's own
-timer, which is set by the stored `verticalMovementTime`, so it does not reveal a stored time
-that is wrong. Compare runs of the same kind (`full_travel: true`) with each other, for example
-to notice a blind whose reports change:
+*Last run time* is a sensor with the attributes `direction`, `full_travel`
+(true when the run covered the whole height) and the start and end position.
+Its value is the time from the command to the blind's end report, not the
+mechanical travel time, and can be longer than the configured
+`verticalMovementTime`. On the blinds measured so far it follows the blind's
+own timer, which is set by the stored `verticalMovementTime`, so it does not
+reveal a stored time that is wrong. Compare runs of the same kind
+(`full_travel: true`) with each other, for example to notice a blind whose
+reports change:
 
 ```yaml
 type: entities
@@ -118,6 +120,72 @@ entities:
   - type: attribute
     entity: sensor.bedroom_blind_last_run_time
     attribute: full_travel
+```
+
+### Measure the real travel time of a blind
+
+The stored *Vertical movement time* should equal the time the blind really
+needs (see the calibration tip in [Troubleshooting](troubleshooting.md)). The
+sensors cannot show it, so measure it by hand: the script starts a full run,
+you press a stop button as soon as the blind has physically stopped, and the
+elapsed time goes to the logbook. After 90 s without a press the blind
+is stopped. Your reaction time is part of the result, so measure each direction
+twice and enter the typical value in *Vertical movement time*. Thanks to the
+user who calibrated 24 blinds this way.
+
+Create an `input_button.blind_measure_stop` helper first, then:
+
+```yaml
+script:
+  blind_measure_travel_time:
+    alias: Measure blind travel time
+    mode: restart
+    fields:
+      cover:
+        selector:
+          entity:
+            domain: cover
+      direction:
+        selector:
+          select:
+            options: [open, close]
+    sequence:
+      - action: "cover.{{ direction }}_cover"
+        target:
+          entity_id: "{{ cover }}"
+      - variables:
+          started: "{{ now().timestamp() }}"
+      - wait_for_trigger:
+          - trigger: state
+            entity_id: input_button.blind_measure_stop
+        timeout: 90
+      - if: "{{ not wait.trigger }}"
+        then:
+          - action: cover.stop_cover
+            target:
+              entity_id: "{{ cover }}"
+          - stop: No stop pressed within 90 s
+      - action: logbook.log
+        data:
+          name: Blind measurement
+          entity_id: "{{ cover }}"
+          message: >-
+            {{ direction }}: {{ (now().timestamp() - started) | round(1) }} s
+```
+
+Start the blind at the opposite end, then run the script from a dashboard
+tile, and put a tile for `input_button.blind_measure_stop` next to it:
+
+```yaml
+type: tile
+entity: cover.bedroom_blind
+name: Measure closing
+tap_action:
+  action: perform-action
+  perform_action: script.blind_measure_travel_time
+  data:
+    cover: cover.bedroom_blind
+    direction: close
 ```
 
 ### Read the configuration stored on a device
