@@ -142,16 +142,39 @@ device ID is shown as the *serial number* and, in addition, as the diagnostic
 sensor **Device ID** of every device (disabled by default).
 
 **Routing and repeater mode.** The gateway stores the routing as *off* or a time
-in seconds (0.3 to 2.55); only *off* has been seen. The integration shows it
-as *off* or *on* (any time counts as on). Writing *on* sends the smallest time,
-0.3 s, which is an **assumption** until a device that routes was read; writing
-the state a device already shows sends nothing. The repeater mode is not a
+in seconds (0.3 to 2.55). *Off* is the text `off`; a device that routes reports
+a number. A D2-01-01 switch with ViNET set to *on* in the OPUS config tool
+reported `routingTime` = 0.3 in the gateway's device list (2026-10-31, gateway
+firmware 1.21.30, one device), and the integration shows it as *on*. The
+integration shows *off* or *on* (any time counts as on). Writing *on* sends
+0.3 s, the value seen on that device. The config tool offers only *on* and
+*off* (reported by the user), so it is not known whether other times are valid;
+writing *on* through the integration is untested. Writing the state a device
+already shows sends nothing. The repeater mode is not a
 ReCom parameter but the device resource `/devices/{id}/repeaterState` (`off`,
 `level_1`, `level_2`); it is written and read back there. *Read settings*
-reads both. The device list carries the repeater mode too, so it is shown after a restart without a radio request. Dimmers (D2-01-03) report it as well and get the same entities (the dimmer catalog has no routing); writing it on a dimmer is untested. Each has a diagnostic sensor (*ViNET Router (stored)*, *Repeater mode
-(stored)*) and a select in the configuration category (disabled by default).
+reads both. The device list carries the repeater mode too, so it is shown after a restart without a radio request. Switches have a diagnostic sensor (*ViNET Router (stored)*, *Repeater mode
+(stored)*) and a select in the configuration category (disabled by default)
+for each. Dimmers (D2-01-03) report the repeater mode as well and get the
+*Repeater mode* sensor and select only; writing it on a dimmer is untested.
 Writing the repeater mode was tested on one D2-01-01 switch (level 1 and back
 to off) through the gateway interface, not through these entities.
+
+**ViNET on dimmers is not available through the REST API.** The OPUS config
+tool (v2, reported by the user) can set and read ViNET on a D2-01-03 dimmer, and
+the gateway reports the repeater mode of that dimmer (`level_1`). The REST API
+shows no routing time for it. On 2026-10-31 (gateway firmware 1.21.30) the
+device list of one such dimmer, a configuration read with radio permitted
+(the answer carries no read time, so it is not known whether the dimmer was
+queried), the dimmer's profile and the parameter catalog in
+`tests/fixtures/parameters_d2_01_03.json` listed only ramping time,
+short-press time and long-press time; the profile has no settings at all.
+**Hypothesis, not verified:** the gateway's EEP profile for D2-01-03 has no
+routing parameter, so the value cannot be read or changed through the REST API.
+The config tool does not use the gateway: it talks to the dimmer directly by
+radio through a USB stick (reported by the user). The integration therefore
+shows no *ViNET Router* entities for dimmers. This can change with a gateway
+firmware that offers the parameter.
 
 **Display.** The stored switch values (timer durations, switch-off warning,
 illumination threshold) are shown without decimals, the warning signal with
