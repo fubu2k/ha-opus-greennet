@@ -88,6 +88,7 @@ from .const import (
     ROUTING_ON,
     ROUTING_ON_SECONDS,
     SETTING_CACHE_GUARD_SECONDS,
+    SETTING_CONSTRAINT_TEXTS,
     UNLOCK_ALLOWED,
     UNLOCK_NOT_ALLOWED,
     VALUE_UNKNOWN,
@@ -2565,6 +2566,14 @@ class OpusGreenNetCoordinator:
             device.update_from_telegram({"functions": [{"key": key, "value": stored}]})
             self._guard_confirmed_setting(device_id, key, previous, stored)
             self._dispatch_state(device)
+            for conflict in device.setting_conflicts(key):
+                _LOGGER.warning(
+                    "Device %s: after writing %s %s (the OPUS config tool warns "
+                    "about this); the value was kept",
+                    device_id,
+                    key,
+                    SETTING_CONSTRAINT_TEXTS[conflict],
+                )
             if not same(stored):
                 raise request_error("parameter_differs", device_id, key)
 

@@ -71,6 +71,17 @@ newer. The button is offered for blinds, D2-01-03 dimmers, D2-01-01/-11
 switches and A5-07-03 presence detectors, the devices that have settings; reading is verified on hardware as the
 read-back after a write, not yet as a button press.
 
+**Warnings for contradicting settings.** The OPUS config tool warns about
+settings that contradict each other. After a write the device confirmed, the
+integration logs the same warnings (a warning in the Home Assistant log, nothing
+else): a blind's maximum holding time shorter than its vertical movement time
+(the blind would stop before it is fully open), a vertical movement time shorter
+than the rotation time, a switch's timer duration (long press) shorter than its
+timer duration, and a switch-off warning longer than the timer duration. The
+value is kept and nothing is blocked or written again, because the gateway
+accepts these values. Only the setting that was just written is checked, and a
+value that is not known yet is never compared.
+
 Every actuator whose device list contains a link table also has the diagnostic
 sensor *Wall switch links* (see [Sensor values](#sensor-values)). The
 functions of rocker A and B are left out until a text

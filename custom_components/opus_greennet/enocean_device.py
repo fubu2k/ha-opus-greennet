@@ -69,6 +69,7 @@ from .const import (
     ROCKER_EEP_PREFIXES,
     ROUTING_OFF,
     ROUTING_ON,
+    SETTING_CONSTRAINTS,
     STATE_ON,
     UNLOCK_ALLOWED,
     UNLOCK_NOT_ALLOWED,
@@ -346,6 +347,25 @@ class EnOceanDevice:
         if isinstance(value, bool) or not isinstance(value, (int, float, str)):
             return None
         return value
+
+    def setting_conflicts(self, key: str | None = None) -> list[str]:
+        """Return the settings combinations the OPUS config tool warns about.
+
+        Only numbers that are both known are compared; ``key`` limits the result
+        to the combinations that setting belongs to.
+        """
+        conflicts: list[str] = []
+        for name, larger, smaller in SETTING_CONSTRAINTS:
+            if key is not None and key not in (larger, smaller):
+                continue
+            high, low = self.setting_reading(larger), self.setting_reading(smaller)
+            if (
+                isinstance(high, (int, float))
+                and isinstance(low, (int, float))
+                and high < low
+            ):
+                conflicts.append(name)
+        return conflicts
 
     @property
     def primary_eep(self) -> str | None:
