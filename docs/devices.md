@@ -71,6 +71,41 @@ newer. The button is offered for blinds, D2-01-03 dimmers, D2-01-01/-11
 switches and A5-07-03 presence detectors, the devices that have settings; reading is verified on hardware as the
 read-back after a write, not yet as a button press.
 
+**Names in the OPUS config tool.** The OPUS config tool (JD Config Tool, which
+talks to the devices directly by radio through a USB stick) names some settings
+differently. The values were compared on 2026-10-31 for 23 switches and 10
+blinds of one installation (project read by the config tool on 2026-10-30,
+gateway firmware 1.21.30): the units and scaling below match.
+
+| Home Assistant (gateway key) | OPUS config tool | Notes |
+|------------------------------|------------------|-------|
+| Timer duration (`timer`) | Run-on time | seconds |
+| Timer duration, long press (`timerLong`) | **Cleaning time** | seconds; the same setting under another name |
+| Switch-off warning (`switchOffWarning`) | Switch-off warning time | seconds |
+| Switch-off warning signal (`switchOffWarningSignal`) | Switch-off warning duration | milliseconds in the tool, seconds here |
+| Illumination threshold (`illuminationThreshold`) | Brightness threshold | lux |
+| Operation mode (`operationMode`) | Operating mode | stored as a number in the tool (0 = toggle, 3 = timer) |
+| LED colour (`ledColor`) | LED colour | stored as a number in the tool (0 = off, 1 = green, 2 = red) |
+| Vertical movement time (`verticalMovementTime`) | Travel time for 100 % | the tool stores units of 10 ms |
+| Maximum holding time (`maxHoldingTime`) | Maximum holding time | seconds |
+| ViNET Router (`routingTime`) | ViNET | on or off in the tool; *on* is stored as 300 ms |
+
+**Settings only the config tool has.** The gateway's REST API does not offer the
+following settings, so the integration can neither show nor change them; use the
+config tool. This list comes from a config tool project, not from the gateway.
+- Dimmers (D2-01-03): the dimming table (four brightness steps), the dim mode,
+  the lower and upper dim limit, three ramp times and a switching ramp, and
+  ViNET. The gateway lists *Ramping time*, *Short-press time* and *Long-press
+  time* for a dimmer, and how they relate to the config tool's ramp times is not
+  established, so a value changed there may not be the ramp the dimmer uses.
+- Switches (D2-01-01/-11): the status delay (minimum and maximum), the ViNET
+  filter and delay, an "SMS lock time" (milliseconds, meaning not established)
+  and which light sensor is linked.
+- Presence detectors (A5-07-03): about 45 parameters, among them the PIR
+  repetitions and sensitivity, the temperature, humidity and light reporting and
+  the wind values. The integration shows three of them.
+- Window contacts: the alive cycle and the debounce times.
+
 Every actuator whose device list contains a link table also has the diagnostic
 sensor *Wall switch links* (see [Sensor values](#sensor-values)). The
 functions of rocker A and B are left out until a text
