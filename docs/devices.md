@@ -356,6 +356,18 @@ battery percentage is invented when the gateway publishes none.
   *Poor* below -85 dBm (a repeater, usually level 1 halfway, is recommended).
   The icon follows the rating; colours are not offered by the integration
   (a dashboard card can colour the value by these limits).
+  The signal strength is the direct radio link to the gateway, without
+  repeaters (information from an OPUS technician, reported by the user). A
+  device rated *Poor* can still be reached reliably through a repeater, so check
+  whether one already serves it before adding another. The OPUS app shows the
+  same values as Home Assistant. The OPUS config tool with a USB stick often
+  shows better values, probably because it evaluates the repeater telegrams
+  (not verified). The gateway reports no radio path: on 2026-10-31 (firmware
+  1.21.30) the device list and the event stream snapshot carried no field for a
+  repeater or a hop count. Which telegrams were repeated by which device cannot
+  be read from the gateway interface, so the integration cannot draw a network
+  plan from it. This path information seems to exist only where the repeater
+  telegrams are evaluated, in the config tool (not verified).
 - Every device also has a diagnostic **Last seen** sensor (enabled by
   default for new installations; an entity that was disabled before stays
   disabled until you enable it): the time of its newest report, from the telegram timestamp or the
