@@ -148,8 +148,11 @@ reported `routingTime` = 0.3 in the gateway's device list (2026-10-31, gateway
 firmware 1.21.30, one device), and the integration shows it as *on*. The
 integration shows *off* or *on* (any time counts as on). Writing *on* sends
 0.3 s, the value seen on that device. The config tool offers only *on* and
-*off* (reported by the user), so it is not known whether other times are valid;
-writing *on* through the integration is untested. Writing the state a device
+*off* (reported by the user), so it is not known whether other times are valid.
+The project the config tool read from the installation (JD Config Tool 2.1.0.0,
+read 2026-10-30) stores the same value as the field `iViNET` = 300 (milliseconds)
+for that switch, so 0.3 s is confirmed as the value the config tool writes for
+*on*. Writing *on* through the integration is untested. Writing the state a device
 already shows sends nothing. The repeater mode is not a
 ReCom parameter but the device resource `/devices/{id}/repeaterState` (`off`,
 `level_1`, `level_2`); it is written and read back there. *Read settings*
@@ -172,7 +175,11 @@ short-press time and long-press time; the profile has no settings at all.
 **Hypothesis, not verified:** the gateway's EEP profile for D2-01-03 has no
 routing parameter, so the value cannot be read or changed through the REST API.
 The config tool does not use the gateway: it talks to the dimmer directly by
-radio through a USB stick (reported by the user). The integration therefore
+radio through a USB stick (reported by the user). That config tool project
+confirms it: one D2-01-03 dimmer has ViNET on (`iViNET` = 300, repeater mode 1),
+exactly like the D2-01-01 switch above, although the gateway lists no routing
+for it. Of 39 devices with an `iViNET` field (25 switches, 10 blinds, 4 dimmers)
+only that switch and that dimmer have ViNET on. The integration therefore
 shows no *ViNET Router* entities for dimmers. This can change with a gateway
 firmware that offers the parameter.
 
