@@ -148,3 +148,24 @@ async def test_sensor_and_diagnostics_in_home_assistant(
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
     last = diagnostics["gateway"]["daily_settings_read"]["last_run"]
     assert (last["read"], last["failed"], last["stopped"]) == (0, 0, None)
+
+
+async def test_the_sensor_without_a_saved_state_restores_only_the_time() -> None:
+    finished = datetime(2026, 11, 3, 4, 1, tzinfo=UTC)
+    sensor = OpusGreenNetDailySettingsRunSensor(
+        MagicMock(daily_settings_last_run=None), "AABB0011"
+    )
+    with (
+        patch.object(
+            sensor,
+            "async_get_last_sensor_data",
+            AsyncMock(return_value=MagicMock(native_value=finished)),
+        ),
+        patch.object(sensor, "async_get_last_state", AsyncMock(return_value=None)),
+        patch("custom_components.opus_greennet.sensor.async_dispatcher_connect"),
+        patch.object(sensor, "async_on_remove"),
+    ):
+        await sensor.async_added_to_hass()
+
+    assert sensor.native_value == finished
+    assert sensor.extra_state_attributes is None

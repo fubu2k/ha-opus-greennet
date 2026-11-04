@@ -342,3 +342,21 @@ def test_the_gateway_entities_name_themselves_and_never_poll() -> None:
         entity = cls(MagicMock(), "AABB0011")
         assert entity.has_entity_name is True
         assert entity.should_poll is False
+
+
+async def test_an_unload_during_the_run_ends_it_without_a_result(
+    radio, connected_coordinator
+) -> None:
+    """A coordinator unloaded mid-run reads no further device and records nothing."""
+    coord = connected_coordinator
+    radio.response = DOCUMENT
+    for device_id in ("A", "B"):
+        _add(coord, device_id, "D2-05-02")
+    reread = AsyncMock(side_effect=lambda *_a, **_k: setattr(coord, "_unloaded", True))
+
+    with patch.object(coord, "async_reread_device_settings", reread):
+        read = await coord.async_refresh_all_settings(lambda _d: True)
+
+    assert read == 1
+    reread.assert_awaited_once()
+    assert coord.daily_settings_last_run is None
