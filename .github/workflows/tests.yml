@@ -19,15 +19,15 @@ concurrency:
 env:
   # Fixed reference: change only in a reviewed phase, together with
   # requirements_test_reference.txt.
-  REFERENCE_HA_VERSION: "2026.10.4"
-  # home-assistant/core tag 2026.10.4; hassfest rules and validators are built
+  REFERENCE_HA_VERSION: "2026.11.0"
+  # home-assistant/core tag 2026.11.0; hassfest rules and validators are built
   # from this immutable commit instead of the moving hassfest image.
-  REFERENCE_HA_CORE_SHA: "357cae5c598dfcd7a0ea7dc5b1facccd4ec6037b"
+  REFERENCE_HA_CORE_SHA: "74cf5a49c63ed8d4d87717844bf14f79c28c9cea"
 
 jobs:
   reference:
     runs-on: ubuntu-24.04
-    name: Home Assistant 2026.10.4 (fixed reference)
+    name: Home Assistant 2026.11.0 (fixed reference)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -153,7 +153,7 @@ jobs:
 
   validate-reference:
     runs-on: ubuntu-24.04
-    name: Hassfest at Home Assistant 2026.10.4 (fixed reference)
+    name: Hassfest at Home Assistant 2026.11.0 (fixed reference)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -169,7 +169,8 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             homeassistant
-            pylint/plugins/pylint_home_assistant/generated
+            packages/hassfest
+            packages/pylint-home-assistant/pylint_home_assistant/generated
             script
 
       - name: Build hassfest from the reference commit
@@ -192,7 +193,7 @@ jobs:
         run: |
           set -o pipefail
           python3 integration/script/check_icons.py \
-            core/pylint/plugins/pylint_home_assistant/generated/mdi_icons.py \
+            core/packages/pylint-home-assistant/pylint_home_assistant/generated/mdi_icons.py \
             integration/custom_components/opus_greennet/icons.json \
             | tee icon-check.txt
           {
